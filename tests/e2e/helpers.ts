@@ -1,7 +1,30 @@
 // Shared steps: open Console with the bridge, connect, disconnect, read the Live View's state, step screenshots.
-import { expect, type Page, type TestInfo } from "@playwright/test";
+// Specs take `test` from here: on the simulator each worker starts its own simulator and bridge (a worker fixture).
+import { test as base, expect, type Page, type TestInfo } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { startBridge } from "./procs";
+
+export { expect };
+
+/** The worker's bridge: the run's (the radio's, or FERRITE_E2E_BRIDGE), else its own simulator's. */
+export const test = base.extend<{}, { bridge: string }>({
+  bridge: [
+    async ({}, use) => {
+      const given = process.env.FERRITE_E2E_BRIDGE;
+      if (given) return use(given);
+      const b = await startBridge();
+      process.env.FERRITE_E2E_BRIDGE = b.url; // openConsole reads it, in this worker only
+      try {
+        await use(b.url);
+      } finally {
+        b.stop();
+        delete process.env.FERRITE_E2E_BRIDGE;
+      }
+    },
+    { scope: "worker", auto: true },
+  ],
+});
 
 /** "sim" (the default) or "radio" (FERRITE_E2E_SERIAL). */
 export const target = (): "sim" | "radio" => (process.env.FERRITE_E2E_TARGET === "radio" ? "radio" : "sim");
@@ -20,7 +43,7 @@ export async function shot(page: Page, info: TestInfo, name: string) {
 /** Console at `page` (live, channels), with the Bridge button pointed at the run's bridge. */
 export async function openConsole(page: Page, section = "live") {
   const url = process.env.FERRITE_E2E_BRIDGE;
-  if (!url) throw new Error("FERRITE_E2E_BRIDGE is not set (global-setup starts the bridge)");
+  if (!url) throw new Error("FERRITE_E2E_BRIDGE is not set (the bridge fixture starts the bridge)");
   await page.goto(`/?bridge=${encodeURIComponent(url)}#/${section}`);
 }
 

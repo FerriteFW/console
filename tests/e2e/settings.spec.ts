@@ -1,10 +1,10 @@
 // Radio Settings through the bridge: read the settings record, change Key beep (a choice) and Beep volume (a level),
 // write them (a backup and the diff first), read back, then restore the backup file (the restore path) and check
 // both are back. On the radio both are put back even when a test fails.
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { connect, disconnect, onRadio, openConsole, shot, shotsDir, state } from "./helpers";
+import { connect, disconnect, expect, onRadio, openConsole, shot, shotsDir, state, test } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 

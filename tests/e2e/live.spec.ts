@@ -1,6 +1,5 @@
 // Connect through the bridge, the Live View, remote keys, and Disconnect putting the cable back at 115200.
-import { expect, test } from "@playwright/test";
-import { connect, disconnect, expectScreen, openConsole, screenId, shot, state } from "./helpers";
+import { connect, disconnect, expect, expectScreen, openConsole, screenId, shot, state, test } from "./helpers";
 
 test.afterEach(async ({ page }) => disconnect(page));
 
