@@ -44,8 +44,9 @@ npm run e2e:run     # the same without the build
 - On the radio: `FERRITE_E2E_SERIAL=/dev/cu.usbserial-114220 FERRITE_E2E_CHANNEL=999 npm run e2e`.
   The write tests rename that channel and put it back. Keep the backups from `test-results/shots/`.
 - The library's write test is skipped on a radio (it adds 22 channels).
-- On the Xeon, from `rt950pro/`: `rsync -az --delete --exclude target/ --exclude node_modules/ --exclude test-results/ ferrite-console ferrite infamy@192.168.7.162:code/rt950pro/`.
-  Then there: `cd ~/code/rt950pro/ferrite-console && PATH=$HOME/.cargo/bin:$PATH npm run e2e` (~45 s).
+- On the simulator the tests run in parallel: each worker has its own simulator and bridge. The radio runs one at a time.
+- On the Xeon: `npm run e2e:xeon` copies this checkout there, builds and runs it (~16 s of tests). Sync `ferrite/` first.
+  `npm run e2e:xeon -- --dir code/rt950pro/other-dir` uses another checkout there (next to `ferrite/`).
 - Screenshots land in `test-results/shots/`. `FERRITE_E2E_VERBOSE=1` shows the simulator and bridge.
 - The manual radio checklist: [docs/TESTING.md](docs/TESTING.md).
 

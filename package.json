@@ -12,6 +12,7 @@
     "test": "cargo test -p ferrite-console-core",
     "e2e": "npm run build && playwright test",
     "e2e:run": "playwright test",
+    "e2e:xeon": "tools/e2e-xeon.sh",
     "tauri": "tauri"
   },
   "devDependencies": {

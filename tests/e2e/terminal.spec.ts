@@ -1,7 +1,7 @@
 // Tools > Terminal: the radio's command line over the link (CMD, LINK-34). Commands and answers are the radio's own;
 // refusals show the radio's reason; commands that transmit are refused by Console; history and Ctrl-L.
-import { expect, test, type Page } from "@playwright/test";
-import { connect, disconnect, expectScreen, openConsole, screenId, shot } from "./helpers";
+import { type Page } from "@playwright/test";
+import { connect, disconnect, expect, expectScreen, openConsole, screenId, shot, test } from "./helpers";
 
 test.afterEach(async ({ page }) => disconnect(page));
 
