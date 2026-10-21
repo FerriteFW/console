@@ -1,0 +1,3 @@
+[net]
+# ferrite-core pulls udigimodes (private) by git: let git and its credential helper fetch it, as ferrite does.
+git-fetch-with-cli = true

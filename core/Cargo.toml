@@ -1,0 +1,11 @@
+[package]
+name = "ferrite-console-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Ferrite Console's protocol core: link sessions, answers, the UI readback, keys; the same code on the web (wasm) and in the apps"
+
+[dependencies]
+ferrite-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
