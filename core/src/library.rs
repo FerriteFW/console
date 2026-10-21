@@ -62,8 +62,14 @@ pub fn ten_hz(mhz: f64) -> u32 {
     (mhz * 100_000.0).round().max(0.0) as u32
 }
 
-/// A name the radio can hold: printable ASCII, 16 characters, no trailing spaces.
+/// A channel name the radio can hold: the name set (CHAN-31, others become '-'), 16 characters, no trailing spaces.
 pub fn clean_name(s: &str) -> String {
+    let n: String = crate::channels::map_name(s).chars().take(16).collect();
+    n.trim_end().to_string()
+}
+
+/// A zone name the radio can hold: printable ASCII, 16 characters, no trailing spaces.
+pub fn clean_zone_name(s: &str) -> String {
     let n: String = s.chars().map(|c| if (' '..='~').contains(&c) { c } else { '?' }).take(16).collect();
     n.trim_end().to_string()
 }
@@ -106,7 +112,7 @@ pub fn add(items: &[Item], table: &Set) -> Added {
         let zone = if it.zone.trim().is_empty() {
             None
         } else {
-            let zn = clean_name(&it.zone);
+            let zn = clean_zone_name(&it.zone);
             match zone_names.iter().position(|z| z.eq_ignore_ascii_case(&zn)) {
                 Some(i) => Some(i as u8),
                 None if zone_names.len() < MAX_ZONES => {
@@ -597,7 +603,10 @@ mod tests {
     #[test]
     fn names() {
         assert_eq!(clean_name("A very long channel name"), "A very long chan");
-        assert_eq!(clean_name("Café"), "Caf?");
+        // CHAN-31: a channel name maps to the name set; a zone name keeps printable ASCII
+        assert_eq!(clean_name("Café"), "Caf-");
+        assert_eq!(clean_name("Club @ 5*"), "Club - 5-");
+        assert_eq!(clean_zone_name("Club @ 5*"), "Club @ 5*");
         assert_eq!(airport_name("CYVR", "TOWER", 119_550, false), "CYVR TWR");
         assert_eq!(airport_name("CYVR", "TOWER", 119_550, true), "CYVR TWR 119.55");
         assert_eq!(airport_name("KSEA", &airport_type("I", 118_000), 118_000, false), "KSEA ATIS");

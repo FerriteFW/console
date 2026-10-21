@@ -18,6 +18,19 @@ use serde::{Deserialize, Serialize};
 
 /// A channel record's length over the link (Appendix G).
 pub const CHANNEL_LEN: usize = 40;
+/// The symbols a channel name may hold besides letters, digits and space (CHAN-31, decision 221): the same set as
+/// ferrite's `ferrite_core::name`, which the radio maps every name to.
+pub const NAME_SYMBOLS: &str = "-./_#+&()'!";
+
+/// A character a channel name may hold (CHAN-31): A-Z, a-z, 0-9, space and [`NAME_SYMBOLS`].
+pub fn name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == ' ' || NAME_SYMBOLS.contains(c)
+}
+
+/// A name for a channel, as the radio would keep it (CHAN-31): each character outside the set becomes '-'.
+pub fn map_name(s: &str) -> String {
+    s.chars().map(|c| if name_char(c) { c } else { '-' }).collect()
+}
 /// A zone record's length over the link.
 pub const ZONE_LEN: usize = 26;
 /// CTCSS tones a channel may hold (TONE-15): 60.0 to 260.0 Hz, in 0.1 Hz.
@@ -293,8 +306,8 @@ impl ChanView {
             return Err(format!("number: 1 to {MAX_CHANNELS}"));
         }
         let name = self.name.trim_end();
-        if name.len() > 16 || !name.bytes().all(|b| (0x20..0x7F).contains(&b)) {
-            return Err("name: up to 16 printable ASCII characters".into());
+        if name.len() > 16 || !name.chars().all(name_char) {
+            return Err("name: up to 16 letters, digits, spaces and - . / _ # + & ( ) ' !".into());
         }
         let rx = parse_mhz(&self.rx).ok_or("rx: a frequency in MHz, e.g. 146.52")?;
         let mut g = DEFAULT_CFG;
@@ -499,6 +512,17 @@ mod tests {
         let (s, why) = write(&mut r, what::CHANNEL, c.num, &channel_record(&v.channel().unwrap()));
         assert_eq!(s, Status::Invalid as u8);
         assert!(String::from_utf8_lossy(&why).contains("756-1300 MHz"));
+    }
+
+    /// CHAN-31: the editor takes only the name set and says which; imports map with [`map_name`].
+    #[test]
+    fn channel_names_in_the_name_set() {
+        let mut v = ChanView::of(&sample());
+        v.name = "Rpt (N)/2 #1".into();
+        assert!(v.channel().is_ok());
+        v.name = "Club@1".into();
+        assert!(v.channel().unwrap_err().contains("letters, digits"));
+        assert_eq!(map_name("Café @1"), "Caf- -1");
     }
 
     /// The zone record round-trips through ferrite's link: written (the next index creates), read back the same.

@@ -278,13 +278,13 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
         };
         let mut v = ChanView::new(number as u16, rx);
         v.mode = m.to_string();
-        // Name: printable ASCII, 16 characters.
+        // Name: 16 characters of the name set (CHAN-31), others mapped to '-' as the radio would.
         let raw = get(r, "Name");
-        let name: String = raw.chars().map(|c| if (' '..='~').contains(&c) { c } else { '?' }).collect();
+        let name = crate::channels::map_name(&raw);
         if name.len() > 16 {
             note(format!("name {raw:?} cut to 16 characters"));
         } else if name != raw {
-            note(format!("name {raw:?}: characters outside ASCII became ?"));
+            note(format!("name {raw:?}: characters a channel name can't hold became -"));
         }
         v.name = name.chars().take(16).collect::<String>().trim_end().to_string();
         // Duplex and offset.
@@ -411,8 +411,10 @@ mod tests {
         let d = by(4);
         assert_eq!(
             (d.name.as_str(), d.tx_tone.as_str(), d.rx_tone.as_str(), d.priority, d.power.as_str()),
-            ("DCS, inverted", "D023I", "D023N", true, "Mid")
+            ("DCS- inverted", "D023I", "D023N", true, "Mid")
         );
+        // CHAN-31: the comma isn't a name character: mapped to '-', with a note
+        assert!(i.notes.iter().any(|n| n.contains("DCS, inverted") && n.contains("became -")), "{:?}", i.notes);
         let x = by(5);
         assert_eq!((x.tx_tone.as_str(), x.rx_tone.as_str(), x.power.as_str()), ("110.9", "D754I", "Low"));
         let s = by(6);
@@ -430,7 +432,7 @@ mod tests {
         let first = import(FILE, &z).unwrap().channels;
         let csv = export(&first, &z);
         assert!(csv.starts_with("Location,Name,Frequency,Duplex"));
-        assert!(csv.contains("\"DCS, inverted\""));
+        assert!(csv.contains(",DCS- inverted,"));
         let again = import(&csv, &z).unwrap();
         assert!(again.notes.is_empty(), "{:?}", again.notes);
         assert_eq!(again.channels, first);
