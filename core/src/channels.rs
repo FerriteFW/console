@@ -441,7 +441,7 @@ pub fn choices() -> serde_json::Value {
 mod tests {
     use super::*;
     use crate::radioside::RadioSide;
-    use ferrite_core::link::{msg, what, Status};
+    use ferrite_core::link::{what, Status};
 
     fn read(r: &mut RadioSide, w: u8, idx: u16) -> Result<Vec<u8>, u8> {
         r.read_one(w, idx)
