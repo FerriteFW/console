@@ -7,6 +7,7 @@
   import About from "./lib/pages/About.svelte";
   import Channels from "./lib/pages/Channels.svelte";
   import { channels } from "./lib/channels.svelte";
+  import { library } from "./lib/library.svelte";
   import Soon from "./lib/pages/Soon.svelte";
   import { loadCore } from "./lib/core";
   import { radio } from "./lib/radio.svelte";
@@ -60,7 +61,7 @@
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library };
   if (params.has("demo")) {
     void radio.connect("demo").then(async () => {
       for (const k of (params.get("press") ?? "").split(",").filter(Boolean)) {

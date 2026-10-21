@@ -173,3 +173,37 @@ export const restoreFile = (text: string): { set: ChannelSet; saved: string; rad
 export const chirpExport = (set: ChannelSet) => wasm.chirp_export(js(set));
 export const chirpImport = (text: string, zones: Zone[]): ChirpImport => JSON.parse(wasm.chirp_import(text, js(zones)));
 export const recordReader = (what: number, index: number) => new wasm.RecordReader(what, index);
+
+// The channel library ("Add channels": core/src/library.rs): entries to channels and zones through ferrite's checks,
+// places, distances, airport names, TAFL groups.
+
+export type LibraryItem = {
+  name: string;
+  rx: number;
+  tx?: number | null;
+  mode: "FM" | "NFM" | "AM";
+  power?: string | null;
+  rx_only?: boolean;
+  zone: string;
+  tone?: string | null;
+};
+export type LibraryAdded = { channels: Channel[]; zones: Zone[]; notes: string[]; skipped: number; made_rx_only: number };
+export type Place = { lat: number; lon: number; grid: string };
+
+export const libraryAdd = (items: LibraryItem[], table: ChannelSet): LibraryAdded => JSON.parse(wasm.library_add(js(items), js(table)));
+export const libraryFixedItems = (set: unknown, picks: number[], zone: string): LibraryItem[] =>
+  JSON.parse(wasm.library_fixed_items(js(set), js(picks), zone));
+export const parsePlace = (text: string): Place | null => {
+  const p = wasm.parse_place(text);
+  return p ? JSON.parse(p) : null;
+};
+/** Indices of `coords` (lat, lon back to back) within `radiusKm`, nearest first, with their distances. */
+export const near = (p: { lat: number; lon: number }, radiusKm: number, coords: Float64Array, limit: number): { i: number; km: number }[] => {
+  const flat = wasm.near(p.lat, p.lon, radiusKm, coords, limit);
+  const out: { i: number; km: number }[] = [];
+  for (let k = 0; k < flat.length; k += 2) out.push({ i: flat[k], km: flat[k + 1] });
+  return out;
+};
+export const airportType = (code: string, khz: number): string => wasm.airport_type(code, khz);
+export const airportName = (icao: string, type: string, khz: number, repeat: boolean): string => wasm.airport_name(icao, type, khz, repeat);
+export const taflGroups = (names: string[]): string[] => JSON.parse(wasm.tafl_groups(js(names)));

@@ -5,6 +5,8 @@
   import ChannelRow from "../components/ChannelRow.svelte";
   import WriteDialog from "../components/WriteDialog.svelte";
   import ImportDialog from "../components/ImportDialog.svelte";
+  import LibraryDialog from "../components/library/LibraryDialog.svelte";
+  import { library } from "../library.svelte";
   import { channels } from "../channels.svelte";
   import { radio } from "../radio.svelte";
   import { channelChoices, loadCore, normalizeZone, type Choices, type Zone } from "../core";
@@ -95,6 +97,9 @@
       <button class="btn quiet" disabled={!dirty.any || !channels.base || busy} onclick={() => channels.revert()} title="Back to what was read">Undo edits</button>
     </div>
     <div class="grp">
+      <button class="btn" disabled={busy || t.channels.length >= 1000} onclick={() => library.show()} title="Fixed sets, airports and Canadian licensed sites near a place">Add channels…</button>
+    </div>
+    <div class="grp">
       <span class="label">CHIRP CSV</span>
       <button class="btn" disabled={busy} onclick={() => chirpInput.click()}>Import…</button>
       <button class="btn" disabled={busy || !t.channels.length} onclick={() => channels.exportChirp()}>Export</button>
@@ -122,7 +127,7 @@
         >
       {/if}
     {:else if connected}
-      <span>Read from radio to fill the table, or import a CHIRP file or load a backup.</span>
+      <span>Read from radio to fill the table, or add channels, import a CHIRP file or load a backup.</span>
     {:else}
       <span>Connect (cable, Bluetooth or the demo radio), then read. Files work without a radio.</span>
     {/if}
@@ -229,6 +234,7 @@
 
 <WriteDialog />
 <ImportDialog />
+<LibraryDialog />
 
 <style>
   .page {

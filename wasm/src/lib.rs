@@ -1,6 +1,6 @@
 //! The core for the browser. Structures cross as JSON strings (the UI parses them); bytes as `Uint8Array`.
 
-use ferrite_console_core::{answers, channels, chirp, demo, keys, plan, records, session, timing, ui, uid};
+use ferrite_console_core::{answers, channels, chirp, demo, keys, library, plan, records, session, timing, ui, uid};
 use wasm_bindgen::prelude::*;
 
 fn json<T: serde::Serialize>(v: &T) -> String {
@@ -294,4 +294,60 @@ impl RecordReader {
     pub fn record(&self) -> Vec<u8> {
         self.0.record.clone()
     }
+}
+
+// The channel library (`ferrite_console_core::library`): fixed sets, airports and TAFL sites as channels.
+
+/// Library entries (JSON `[Item]`) as channels and zones for the table (JSON `Set`): `{channels, zones, notes,
+/// skipped, made_rx_only}`.
+#[wasm_bindgen]
+pub fn library_add(items: &str, table: &str) -> Result<String, JsError> {
+    let i: Vec<library::Item> = from_json(items, "items")?;
+    let t: plan::Set = from_json(table, "table")?;
+    Ok(json(&library::add(&i, &t)))
+}
+
+/// A fixed set's picked channels (indices, JSON) as library entries (JSON), into the zone named `zone`.
+#[wasm_bindgen]
+pub fn library_fixed_items(set: &str, picks: &str, zone: &str) -> Result<String, JsError> {
+    let s: library::FixedSet = from_json(set, "set")?;
+    let p: Vec<usize> = from_json(picks, "picks")?;
+    Ok(json(&library::fixed_items(&s, &p, zone)))
+}
+
+/// A place from typed text (lat,lon; a grid square; a GGA sentence; the terminal's answers): `{lat, lon, grid}`,
+/// or undefined.
+#[wasm_bindgen]
+pub fn parse_place(text: &str) -> Option<String> {
+    library::parse_place(text)
+        .map(|p| serde_json::json!({ "lat": p.lat, "lon": p.lon, "grid": library::grid_of(p) }).to_string())
+}
+
+/// Of `coords` (lat, lon back to back), those within `radius_km` of (lat, lon), nearest first, at most `limit`:
+/// indices and distances (km) back to back.
+#[wasm_bindgen]
+pub fn near(lat: f64, lon: f64, radius_km: f64, coords: &[f64], limit: usize) -> Vec<f64> {
+    library::near(library::Place { lat, lon }, radius_km, coords, limit)
+        .into_iter()
+        .flat_map(|(i, d)| [i as f64, d])
+        .collect()
+}
+
+/// An airport frequency's type name from its code (or its frequency when there's none).
+#[wasm_bindgen]
+pub fn airport_type(code: &str, khz: u32) -> String {
+    library::airport_type(code, khz)
+}
+
+/// A channel name for an airport frequency, 16 characters.
+#[wasm_bindgen]
+pub fn airport_name(icao: &str, type_name: &str, khz: u32, repeat: bool) -> String {
+    library::airport_name(icao, type_name, khz, repeat)
+}
+
+/// TAFL's name groups (JSON names in, JSON group names out, one per name).
+#[wasm_bindgen]
+pub fn tafl_groups(names: &str) -> Result<String, JsError> {
+    let n: Vec<String> = from_json(names, "names")?;
+    Ok(json(&library::tafl_groups(&n, 2)))
 }

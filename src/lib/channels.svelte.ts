@@ -15,6 +15,7 @@ import {
   type Channel,
   type ChannelSet,
   type ChirpImport,
+  type LibraryAdded,
   type Plan,
   type Zone,
 } from "./core";
@@ -269,6 +270,17 @@ class Channels {
     this.source = `${imp.channels.length} channels imported from ${imp.file}${replace ? " (replacing all)" : ""}`;
     this.notes = imp.notes;
     this.imported = null;
+  }
+
+  /** The library's channels and new zones into the table (the core numbered and checked them). */
+  addLibrary(a: LibraryAdded, what: string) {
+    this.error = "";
+    this.table.zones = [...this.table.zones, ...a.zones];
+    this.table.channels = [...this.table.channels, ...a.channels].sort((x, y) => x.number - y.number);
+    const z = a.zones.length ? `, ${a.zones.length} new ${a.zones.length === 1 ? "zone" : "zones"}` : "";
+    const sk = a.skipped ? `, ${a.skipped} skipped` : "";
+    this.source = `${a.channels.length} channels added from ${what}${z}${sk}`;
+    this.notes = a.notes;
   }
 
   exportChirp() {
