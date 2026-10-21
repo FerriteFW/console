@@ -19,8 +19,12 @@
 //! - [`timing`]: the reference client's time-outs and pacing, in one place.
 
 pub mod answers;
+pub mod channels;
+pub mod chirp;
 pub mod demo;
 pub mod keys;
+pub mod plan;
+pub mod radioside;
 pub mod records;
 pub mod session;
 pub mod timing;

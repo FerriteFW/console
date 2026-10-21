@@ -7,5 +7,7 @@ description = "Ferrite Console's protocol core: link sessions, answers, the UI r
 
 [dependencies]
 ferrite-core.workspace = true
+ferrite-app.workspace = true
+ferrite-ui.workspace = true
 serde.workspace = true
 serde_json.workspace = true

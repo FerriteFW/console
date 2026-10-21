@@ -2,14 +2,23 @@
 //! Radio side of the codec is ferrite's own (`link::parse`, `link::build`). It knows `HELLO`, `INFO`, `UI` (with
 //! `MORE` pages), `KEY` (keypad, knob; remote PTT is refused), `CMD` (a line of text) and `BAUD`; the rest answers
 //! `unknown type`. Its screens are a home with three cards and a small quick menu: a look-alike, not the firmware.
+//!
+//! Records are the firmware's own: `READ`, `WRITE`, `DELETE`, `BEGIN` and `END` go to ferrite's link session
+//! over an in-memory store ([`crate::radioside`]), seeded with [`demo_set`], so channel programming against the demo
+//! meets every check the radio makes. `INFO` counts that store's channels and zones.
 
+use crate::channels::{ChanView, ZoneView};
+use crate::plan::Set;
+use crate::radioside::RadioSide;
+use ferrite_app::chan::ChannelStore;
 use ferrite_core::link::{self, key, msg, Status, ANSWER, MAX_PAYLOAD, MAX_WIRE};
 
 /// The UI text a `UI` answer carries at most (as the radio's pages: under the 240-byte payload).
 const PAGE: usize = 200;
 
-#[derive(Clone, Debug)]
 pub struct DemoRadio {
+    /// Ferrite's radio side, for the records.
+    side: RadioSide,
     rx: Vec<u8>,
     /// Home (None) or the quick menu (Some(selected row)).
     menu: Option<usize>,
@@ -27,7 +36,11 @@ const MENU: [(&str, &str); 6] =
 
 impl Default for DemoRadio {
     fn default() -> Self {
+        let mut side = RadioSide::new();
+        let (zones, chans) = demo_set().parts().unwrap_or_default();
+        side.seed(&zones, &chans);
         DemoRadio {
+            side,
             rx: Vec::new(),
             menu: None,
             active: 0,
@@ -66,8 +79,14 @@ impl DemoRadio {
             match link::parse(&mut raw) {
                 Ok(f) => {
                     let (ty, seq, p) = (f.ty, f.seq, f.payload.to_vec());
-                    let (status, rest) = self.answer(ty, &p);
-                    let mut pay = vec![status as u8];
+                    let (status, rest) = match ty {
+                        msg::READ | msg::WRITE | msg::DELETE | msg::BEGIN | msg::END => self.side.ask(ty, &p),
+                        _ => {
+                            let (s, r) = self.answer(ty, &p);
+                            (s as u8, r)
+                        }
+                    };
+                    let mut pay = vec![status];
                     pay.extend(rest);
                     pay.truncate(MAX_PAYLOAD);
                     let mut w = [0u8; MAX_WIRE];
@@ -97,8 +116,8 @@ impl DemoRadio {
             msg::INFO => {
                 let mut r = Vec::new();
                 push_text(&mut r, "demo");
-                r.extend(1000u16.to_le_bytes());
-                r.extend([32, 8]);
+                r.extend(self.side.store.count().to_le_bytes());
+                r.extend([self.side.store.zones(), 0]);
                 r.extend(400u16.to_le_bytes());
                 r.push(0);
                 push_text(&mut r, "N0CALL");
@@ -238,6 +257,63 @@ impl DemoRadio {
     }
 }
 
+/// The demo radio's channels and zones: a radio's worth around Ottawa, on the bands Ferrite covers.
+pub fn demo_set() -> Set {
+    let zone = |n: u8, name: &str, scan: bool| ZoneView { scan_all: scan, ..ZoneView::new(n, name) };
+    #[allow(clippy::type_complexity)]
+    let rows: [(u16, &str, &str, &str, &str, &str, &str, &str, Option<u8>); 22] = [
+        // number, name, rx MHz, duplex, offset, mode, tx tone, power, zone
+        (1, "Calling 2 m", "146.52", "", "", "FM", "off", "Mid", Some(0)),
+        (2, "Calling 70 cm", "446.0", "", "", "FM", "off", "Mid", Some(0)),
+        (3, "Simplex B", "147.555", "", "", "NFM", "off", "Low", Some(0)),
+        (4, "Bench 2 m", "145.495", "", "", "NFM", "off", "Low", Some(0)),
+        (5, "Bench 70 cm", "446.475", "", "", "NFM", "off", "Low", Some(0)),
+        (10, "North hill", "146.94", "-", "0.6", "FM", "100.0", "High", Some(1)),
+        (11, "Club repeater", "443.475", "+", "5.0", "NFM", "100.0", "High", Some(1)),
+        (12, "Downtown DCS", "444.2", "+", "5.0", "NFM", "D023N", "Mid", Some(1)),
+        (13, "Camp Fortune", "147.15", "+", "0.6", "FM", "100.0", "High", Some(1)),
+        (14, "Far east", "145.29", "-", "0.6", "FM", "110.9", "High", Some(1)),
+        (30, "Guard", "121.5", "", "", "AM", "off", "Low", Some(2)),
+        (31, "Tower", "119.1", "", "", "AM", "off", "Low", Some(2)),
+        (32, "ATIS", "132.95", "", "", "AM", "off", "Low", Some(2)),
+        (40, "Marine 16", "156.8", "", "", "FM", "off", "High", Some(3)),
+        (41, "Marine 68", "156.425", "", "", "FM", "off", "Mid", Some(3)),
+        (42, "Marine 72", "156.625", "", "", "FM", "off", "Mid", Some(3)),
+        (50, "WX1", "162.55", "", "", "FM", "off", "Low", Some(4)),
+        (51, "WX2", "162.4", "", "", "FM", "off", "Low", Some(4)),
+        (52, "WX3", "162.475", "", "", "FM", "off", "Low", Some(4)),
+        (60, "ISS downlink", "145.8", "", "", "FM", "off", "Low", None),
+        (61, "Hotspot", "438.8", "", "", "NFM", "off", "Low", None),
+        (62, "Satellite split", "145.8", "split", "437.8", "FM", "67.0", "Low", None),
+    ];
+    let channels = rows
+        .iter()
+        .map(|&(n, name, rx, duplex, offset, mode, tone, power, zone)| {
+            let mut v = ChanView::new(n, crate::channels::parse_mhz(rx).unwrap_or(14_652_000));
+            v.name = name.into();
+            v.duplex = duplex.into();
+            v.offset = offset.into();
+            v.mode = mode.into();
+            v.tx_tone = tone.into();
+            v.power = power.into();
+            v.zone = zone;
+            v.rx_only = zone == Some(2) || zone == Some(4);
+            v.skip = n == 32;
+            v.channel().map(|c| ChanView::of(&c)).unwrap_or(v)
+        })
+        .collect();
+    Set {
+        zones: vec![
+            zone(1, "Local", true),
+            zone(2, "Repeaters", true),
+            zone(3, "Air", false),
+            zone(4, "Marine", false),
+            zone(5, "Weather", false),
+        ],
+        channels,
+    }
+}
+
 fn push_text(r: &mut Vec<u8>, s: &str) {
     r.push(s.len() as u8);
     r.extend_from_slice(s.as_bytes());
@@ -292,5 +368,38 @@ mod tests {
         let (st, _) = ask(&mut r, &mut s, msg::KEY, &[key::PTT, key::ON, key::ACTIVE]);
         assert_eq!(st, Status::Invalid as u8, "the demo never transmits");
         assert_eq!(ask(&mut r, &mut s, 0x55, &[]).0, Status::UnknownType as u8);
+    }
+
+    /// The demo's records are ferrite's: its set reads back through the link as built, and INFO counts it.
+    #[test]
+    fn demo_records() {
+        let (mut r, mut s) = (DemoRadio::new(), Session::new());
+        r.feed(&s.take_cable(0.0));
+        let set = demo_set();
+        assert!(set.parts().is_ok());
+        assert!(crate::plan::plan(&set, &set).problems.is_empty());
+        let i = Info::parse(&ask(&mut r, &mut s, msg::INFO, &[]).1).unwrap();
+        assert_eq!((i.channels as usize, i.zones as usize), (set.channels.len(), set.zones.len()));
+        let mut zones = Vec::new();
+        for z in 0..i.zones {
+            let mut rd = crate::records::Reader::new(link::what::ZONE, z as u16);
+            while !rd.done() {
+                let (st, rest) = ask(&mut r, &mut s, msg::READ, &rd.next_payload());
+                assert_eq!(st, 0);
+                rd.take(&rest);
+            }
+            zones.push(rd.record);
+        }
+        let mut chans = Vec::new();
+        for n in 0..1000u16 {
+            let (st, rest) =
+                ask(&mut r, &mut s, msg::READ, &crate::records::read_payload(link::what::CHANNEL, n, 0, 200));
+            if st == 0 {
+                chans.push(rest[2..].to_vec());
+            }
+        }
+        let (back, bad) = Set::from_records(&zones, &chans);
+        assert!(bad.is_empty());
+        assert_eq!(back, set);
     }
 }
