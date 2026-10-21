@@ -350,6 +350,8 @@ pub fn airport_name(icao: &str, type_name: &str, khz: u32, repeat: bool) -> Stri
 pub fn tafl_groups(names: &str) -> Result<String, JsError> {
     let n: Vec<String> = from_json(names, "names")?;
     Ok(json(&library::tafl_groups(&n, 2)))
+}
+
 // Radio Settings: the settings record (bytes) as the radio's menu shows it, changed and checked by ferrite's own
 // App and link session (`ferrite_console_core::settings`).
 

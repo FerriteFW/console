@@ -207,6 +207,7 @@ export const near = (p: { lat: number; lon: number }, radiusKm: number, coords: 
 export const airportType = (code: string, khz: number): string => wasm.airport_type(code, khz);
 export const airportName = (icao: string, type: string, khz: number, repeat: boolean): string => wasm.airport_name(icao, type, khz, repeat);
 export const taflGroups = (names: string[]): string[] => JSON.parse(wasm.tafl_groups(js(names)));
+
 // Radio Settings: the settings record as the radio's menu shows it (core/src/settings.rs: ferrite's own App and
 // link session decide the values, choices and checks).
 
