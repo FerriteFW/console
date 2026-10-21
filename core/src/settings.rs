@@ -41,7 +41,7 @@ pub const RADIO_ONLY: &str = "changes only on the radio";
 /// The most values a knob walk collects before the setting counts as typed (a frequency in 6.25 kHz steps).
 const MANY: usize = 64;
 /// What `set` is given to make it list a setting's values (or say why it can't).
-const NOT_A_VALUE: &str = "~~~";
+pub(crate) const NOT_A_VALUE: &str = "~~~";
 
 struct Bytes(Vec<u8>);
 
@@ -267,7 +267,7 @@ pub fn path_text(p: &[u8]) -> String {
 }
 
 /// "0 7 1" back to [7, 1].
-fn parse_path(id: &str) -> Option<Vec<u8>> {
+pub(crate) fn parse_path(id: &str) -> Option<Vec<u8>> {
     let mut w = id.split_whitespace();
     (w.next()? == "0").then_some(())?;
     let p: Vec<u8> = w.map(|x| x.parse().ok()).collect::<Option<_>>()?;
@@ -275,7 +275,7 @@ fn parse_path(id: &str) -> Option<Vec<u8>> {
 }
 
 /// A menu path's name, if it names an item.
-fn path_name(p: &[u8]) -> Option<&'static str> {
+pub(crate) fn path_name(p: &[u8]) -> Option<&'static str> {
     match *p {
         [g, m] if (1..=9).contains(&g) => items(g, 0).get((m as usize).checked_sub(1)?).map(|e| e.name()),
         [g, m, i] if (1..=9).contains(&g) => items(g, m).get((i as usize).checked_sub(1)?).map(|e| e.name()),
@@ -288,7 +288,7 @@ fn items(g: u8, sub: u8) -> &'static [ferrite_app::screens::groups::Entry] {
 }
 
 /// The menu's leaves (settings and pages), in menu order: path, name, help, and the third-level list's name.
-fn leaves() -> Vec<(Vec<u8>, &'static str, &'static str, &'static str)> {
+pub(crate) fn leaves() -> Vec<(Vec<u8>, &'static str, &'static str, &'static str)> {
     let mut out = Vec::new();
     for g in 1..=9u8 {
         for (i, e) in items(g, 0).iter().enumerate() {
@@ -314,23 +314,25 @@ fn group_name(g: u8) -> String {
 }
 
 /// What `get` says for a path.
-struct Got {
-    value: String,
-    changed: bool,
-    page: bool,
+pub(crate) struct Got {
+    pub(crate) value: String,
+    pub(crate) changed: bool,
+    pub(crate) page: bool,
 }
 
 /// A radio in memory to ask: ferrite's App, its link session and a channel store ([`RadioSide`]), driven by the
 /// terminal's commands and the keys and knob as a person would.
-struct Scratch {
+pub(crate) struct Scratch {
     rs: RadioSide,
     dev: Device,
     t: u32,
+    /// The APRS record (LINK-43) each load puts back, through ferrite's link session, for APRS settings.
+    pub(crate) aprs: Option<Vec<u8>>,
 }
 
 impl Scratch {
-    fn new() -> Self {
-        Scratch { rs: RadioSide::new(), dev: Device { tx_built: true, ..Device::default() }, t: 1000 }
+    pub(crate) fn new() -> Self {
+        Scratch { rs: RadioSide::new(), dev: Device { tx_built: true, ..Device::default() }, t: 1000, aprs: None }
     }
 
     fn drain(&mut self) {
@@ -340,23 +342,59 @@ impl Scratch {
         }
     }
 
-    fn load(&mut self, s: &Settings) {
+    pub(crate) fn load(&mut self, s: &Settings) {
         *self.rs.app.settings_mut() = *s;
         self.rs.app.go_home();
         self.drain();
+        if let Some(a) = self.aprs.clone() {
+            let _ = self.write_record(what::APRS, &a);
+        }
+    }
+
+    /// A record written through ferrite's link session (`BEGIN`, the `WRITE` parts, `END`): the refusal, if any.
+    pub(crate) fn write_record(&mut self, w: u8, rec: &[u8]) -> Result<(), String> {
+        let mut err = None;
+        let (s, rest) = self.rs.ask(msg::BEGIN, &begin_payload(1));
+        if s != 0 {
+            err = Some(status_text(s, &rest));
+        }
+        if err.is_none() {
+            for p in write_payloads(w, 0, rec) {
+                let (s, rest) = self.rs.ask(msg::WRITE, &p);
+                if s != 0 {
+                    err = Some(status_text(s, &rest));
+                    break;
+                }
+            }
+        }
+        self.rs.ask(msg::END, &[]);
+        self.drain();
+        err.map_or(Ok(()), Err)
+    }
+
+    /// A record read through ferrite's link session.
+    pub(crate) fn read_record(&mut self, w: u8) -> Result<Vec<u8>, String> {
+        let mut r = Reader::new(w, 0);
+        while !r.done() {
+            let (s, rest) = self.rs.ask(msg::READ, &r.next_payload());
+            if s != 0 || !r.take(&rest) {
+                return Err(format!("the read back: {}", status_text(s, &rest)));
+            }
+        }
+        Ok(r.record)
     }
 
     /// For the menu: channel-only mode (PIN-5) keeps MENU 0 shut, so it is off while the knob walks.
-    fn load_for_menu(&mut self, s: &Settings) {
+    pub(crate) fn load_for_menu(&mut self, s: &Settings) {
         self.load(&Settings { chan_only: false, ..*s });
     }
 
-    fn settings(&self) -> Settings {
+    pub(crate) fn settings(&self) -> Settings {
         *self.rs.app.settings()
     }
 
     /// One terminal line: what it said, or its refusal.
-    fn run(&mut self, line: &str) -> Result<String, String> {
+    pub(crate) fn run(&mut self, line: &str) -> Result<String, String> {
         let r = cmd::run(&mut self.rs.app, &self.rs.store, &self.dev, line.as_bytes(), false);
         self.drain();
         match r {
@@ -366,7 +404,7 @@ impl Scratch {
         }
     }
 
-    fn get(&mut self, p: &[u8], name: &str) -> Got {
+    pub(crate) fn get(&mut self, p: &[u8], name: &str) -> Got {
         let line = self.run(&format!("get {}", path_text(p))).unwrap_or_default();
         let head = format!("{} {}: ", path_text(p), name);
         let mut v = line.strip_prefix(&head).unwrap_or(&line).to_string();
@@ -383,7 +421,7 @@ impl Scratch {
 
     /// The knob on the setting's menu row until it shows `want` (up, then down for a level that stopped): the
     /// settings then, or None if the menu never shows it.
-    fn step_to(&mut self, s: &Settings, p: &[u8], name: &str, want: &str) -> Option<Settings> {
+    pub(crate) fn step_to(&mut self, s: &Settings, p: &[u8], name: &str, want: &str) -> Option<Settings> {
         self.load_for_menu(s);
         if !self.open_row(p) {
             return None;
@@ -406,7 +444,7 @@ impl Scratch {
     }
 
     /// `set`, from home (TERM-17 refuses a setting open on the menu).
-    fn set(&mut self, p: &[u8], value: &str) -> Result<String, String> {
+    pub(crate) fn set(&mut self, p: &[u8], value: &str) -> Result<String, String> {
         self.rs.app.go_home();
         self.run(&format!("set {} {}", path_text(p), value))
     }
@@ -419,14 +457,14 @@ impl Scratch {
         self.drain();
     }
 
-    fn knob(&mut self, d: i8) {
+    pub(crate) fn knob(&mut self, d: i8) {
         self.rs.app.knob(d, self.t, &self.rs.store);
         self.t += 20;
         self.drain();
     }
 
     /// The menu open on this setting's row (MENU 0 g, or MENU 0 g m), as ▼ gets there.
-    fn open_row(&mut self, p: &[u8]) -> bool {
+    pub(crate) fn open_row(&mut self, p: &[u8]) -> bool {
         self.rs.app.go_home();
         let (dest, row) = match *p {
             [g, m] => (Dest::Group(g), m - 1),
@@ -443,7 +481,7 @@ impl Scratch {
 
     /// The values the knob steps through on this row, and whether it stops at its ends (a level). A level comes
     /// lowest first; a round list from where the knob was.
-    fn walk(&mut self, s: &Settings, p: &[u8], name: &str) -> (Vec<String>, bool) {
+    pub(crate) fn walk(&mut self, s: &Settings, p: &[u8], name: &str) -> (Vec<String>, bool) {
         self.load_for_menu(s);
         let start = self.get(p, name).value;
         if !self.open_row(p) {
@@ -550,7 +588,7 @@ fn in_record(sc: &mut Scratch, rec: &[u8], p: &[u8], name: &str) -> bool {
 }
 
 /// A callsign for walks: CW ID (0 8 7 2) won't step without one (VOX-10).
-fn with_call(mut s: Settings) -> Settings {
+pub(crate) fn with_call(mut s: Settings) -> Settings {
     if s.callsign.is_empty() {
         s.set_callsign(b"N0CALL");
     }
@@ -558,7 +596,13 @@ fn with_call(mut s: Settings) -> Settings {
 }
 
 /// How a setting (in the record) is changed here, found with `set` and the knob.
-fn classify(sc: &mut Scratch, s: &Settings, p: &[u8], name: &str, cur: &str) -> (Kind, Vec<String>, String, String) {
+pub(crate) fn classify(
+    sc: &mut Scratch,
+    s: &Settings,
+    p: &[u8],
+    name: &str,
+    cur: &str,
+) -> (Kind, Vec<String>, String, String) {
     sc.load(s);
     let strip = |e: &str| e.strip_prefix(&format!("{name}: ")).unwrap_or(e).to_string();
     match sc.set(p, NOT_A_VALUE) {
@@ -709,7 +753,7 @@ pub fn view(rec: &[u8]) -> View {
             continue;
         }
         groups[g].note = if g == 4 {
-            format!("In the APRS record, which the link doesn't carry yet (change on the radio): {}.", names.join(", "))
+            format!("In the APRS record: Tools › APRS › APRS Settings: {}.", names.join(", "))
         } else {
             format!("Not in the settings record (on the radio only): {}.", names.join(", "))
         };

@@ -1,22 +1,24 @@
 <script lang="ts">
   // A settings write's steps: the backup read (saved as a file), the diff with ferrite's own dry run, the write on
-  // confirm, and the read back.
-  import { settings } from "../settings.svelte";
+  // confirm, and the read back. For Radio Settings, and for APRS settings (`store`, `what`).
+  import { settings, type SettingsWriteStep } from "../settings.svelte";
 
-  const w = $derived(settings.write);
+  type Store = { write: SettingsWriteStep | null; closeWrite(): void; commitWrite(): Promise<void> };
+  let { store = settings as Store, what = "settings" }: { store?: Store; what?: string } = $props();
+  const w = $derived(store.write);
 </script>
 
 {#if w}
   <div class="overlay" role="presentation">
     <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="swrite-title">
-      <h2 id="swrite-title">Write settings to the radio</h2>
+      <h2 id="swrite-title">Write {what} to the radio</h2>
 
       {#if w.step === "backup"}
-        <p>Reading the radio's settings for a backup first…</p>
+        <p>Reading the radio's {what} for a backup first…</p>
       {:else if w.step === "review"}
         <p class="ok">Backup saved: <b>{w.backupName}</b> (your downloads). Load it here to put the radio back.</p>
         {#if w.drifted}
-          <p class="note">The radio's settings changed since they were read: this diff is against the radio as it is now.</p>
+          <p class="note">The radio's {what} changed since they were read: this diff is against the radio as it is now.</p>
         {/if}
         {#if w.plan.problems.length}
           <div class="problems">
@@ -25,7 +27,7 @@
           </div>
         {/if}
         {#if !w.plan.changes.length}
-          <p>Nothing to write: the radio already holds these settings.</p>
+          <p>Nothing to write: the radio already holds these {what}.</p>
         {:else}
           <div class="diff">
             <h3 class="changed">Changed ({w.plan.changes.length})</h3>
@@ -42,8 +44,8 @@
           </div>
         {/if}
         <div class="actions">
-          <button class="btn" onclick={() => settings.closeWrite()}>Cancel</button>
-          <button class="btn primary" disabled={!!w.plan.problems.length || !w.plan.ops.length} onclick={() => settings.commitWrite()}>
+          <button class="btn" onclick={() => store.closeWrite()}>Cancel</button>
+          <button class="btn primary" disabled={!!w.plan.problems.length || !w.plan.ops.length} onclick={() => store.commitWrite()}>
             Write {w.plan.changes.length} {w.plan.changes.length === 1 ? "change" : "changes"}
           </button>
         </div>
@@ -54,11 +56,11 @@
           <p class="err">Not written: {w.error}</p>
           <p class="sub">The editor keeps your edits; Write again shows what is left.</p>
         {:else if w.verified}
-          <p class="ok">Written: {w.plan.changes.length} {w.plan.changes.length === 1 ? "change" : "changes"}. Read back: the radio holds these settings.</p>
+          <p class="ok">Written: {w.plan.changes.length} {w.plan.changes.length === 1 ? "change" : "changes"}. Read back: the radio holds these {what}.</p>
         {:else}
           <p class="note">Written, but the read back differs: the editor now shows what the radio holds.</p>
         {/if}
-        <div class="actions"><button class="btn primary" onclick={() => settings.closeWrite()}>Close</button></div>
+        <div class="actions"><button class="btn primary" onclick={() => store.closeWrite()}>Close</button></div>
       {/if}
     </div>
   </div>

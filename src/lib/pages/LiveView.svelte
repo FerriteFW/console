@@ -130,7 +130,7 @@
     <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
     <label title="Pause reading the screen (keys still work)"><input type="checkbox" bind:checked={radio.live} /> Live</label>
     {#if connected}
-      <span class="meta">{radio.uiMs} ms{#if radio.ui?.screen} · {radio.ui.screen.id}{/if}</span>
+      <span class="meta" title={radio.liveByEvents ? `Live View from the radio's updates (LINK-47): ${radio.liveUpdates} so far, ${radio.liveResyncs} whole-state asks` : "Each readback's time"}>{radio.liveByEvents ? `${radio.liveRate} B/s` : `${radio.uiMs} ms`}{radio.ui?.screen ? ` · ${radio.ui.screen.id}` : ""}</span>
     {/if}
     <span class="spacer"></span>
     <span class="group">

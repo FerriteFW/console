@@ -17,9 +17,19 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 
 1. Connect › Bluetooth. Pick the right "walkie-talkie".
 2. With a PIN lock (MENU 0 9 3 1): a wrong PIN is refused, the right one connects.
-3. The screen updates about once a second. Keys work, a second or so behind.
-4. Out of range or Bluetooth off: the bar says disconnected.
-5. Cable and Bluetooth in two tabs: both run.
+3. Live View's toolbar shows B/s, not ms: the screen comes from the radio's updates. Idle: under ~100 B/s.
+4. Keys and the knob show within about half a second. Open a menu: it draws in about a second.
+5. Out of range or Bluetooth off: the bar says disconnected.
+6. Cable and Bluetooth in two tabs: both run. The newest Live View subscription wins on the radio (LINK-47).
+
+## Activity Log and APRS (cable or Bluetooth)
+
+1. Activity Log: the rows match the radio's log screen. Times look right (local time). Source filter, CSV export.
+2. Heard stations: the list matches the radio's heard list. Distances look right for the radio's GPS fix.
+3. Leave it open while a station is heard: it moves to the top without Refresh.
+4. Map: stations and the radio (green) on OpenStreetMap.
+5. Messages: conversations match the radio. Only with Dry TX on (MENU 0 8 9 2): send one to yourself, check the radio's toast and its state.
+6. APRS Settings: read, change Power, write (backup first). Check MENU 0 5 5 4. Load the backup and write it back.
 
 ## Channels & Zones (cable). Keep every backup until done.
 

@@ -2,7 +2,7 @@
 // the UI readback's parser, key codes, the unique ID's text. Structures arrive as JSON.
 import init, * as wasm from "../core-wasm/core.js";
 
-export type Answer = { ty: number; seq: number; status: number; rest: number[] };
+export type Answer = { ty: number; seq: number; status: number; rest: number[]; event?: boolean };
 
 export type Build = { byte: number; name: string; bench: boolean; dry: boolean };
 export type Hello = { protocol: number; max_payload: number; may_go_on: boolean; firmware: string; build: Build | null };
@@ -58,8 +58,9 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY", number>;
-  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND", number>;
+  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS", number>;
+  event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
   knobMax: number;
   keys: string[];
   timing: Timing;
@@ -153,7 +154,7 @@ export type Choices = {
 export type Field = { field: string; from: string; to: string };
 export type Change = { what: "zone" | "channel"; number: number; kind: "added" | "changed" | "deleted"; name: string; fields: Field[] };
 export type Problem = { what: string; number: number; error: string };
-export type PlanOp = { kind: "write" | "delete"; what: "zone" | "channel" | "settings"; number: number; msg: number; payloads: number[][] };
+export type PlanOp = { kind: "write" | "delete"; what: "zone" | "channel" | "settings" | "aprs"; number: number; msg: number; payloads: number[][] };
 export type Plan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[] };
 export type ChirpImport = { channels: Channel[]; notes: string[]; skipped: number };
 
@@ -261,3 +262,74 @@ export const FirmwareUpdate = wasm.FirmwareUpdate;
 export type FirmwareUpdate = wasm.FirmwareUpdate;
 export const BootReader = wasm.BootReader;
 export type BootReader = wasm.BootReader;
+
+// APRS (core/src/aprs.rs, LINK-44 – LINK-46): the heard list, messages, events.
+
+export type Station = {
+  call: string;
+  symbol: number;
+  symbol_name: string;
+  ago_s: number;
+  times: number;
+  lat: number | null;
+  lon: number | null;
+  course: number | null;
+  speed: number | null;
+  alt_m: number | null;
+  path: string;
+  comment: string;
+};
+export type MsgState = "unread" | "read" | "pending" | "acked" | "retrying" | "failed";
+export type Message = { inbound: boolean; state: MsgState; state_n: number; tries: number; ago_s: number; peer: string; text: string };
+export type AprsEvent =
+  | { kind: "heard"; count: number; station: Station }
+  | { kind: "message" | "message_state"; count: number; message: Message }
+  | { kind: "ui" }
+  | { kind: "unknown"; code: number };
+
+export const parseHeard = (rest: Uint8Array): { count: number; stations: Station[] } | null => JSON.parse(wasm.parse_heard(rest));
+export const parseMsgs = (rest: Uint8Array): { count: number; messages: Message[] } | null => JSON.parse(wasm.parse_msgs(rest));
+export const parseEvent = (payload: Uint8Array): AprsEvent | null => JSON.parse(wasm.parse_event(payload));
+/** MSG_SEND's payload; throws Console's copy of the radio's rules (the radio checks again). */
+export const msgSendPayload = (to: string, text: string): Uint8Array => wasm.msg_send_payload(to, text);
+export const subscribePayload = (mask: number, gap: number, renew: boolean): Uint8Array => wasm.subscribe_payload(mask, gap, renew);
+
+// The event log (core/src/log.rs, LINK-42).
+
+export type LogRecord = {
+  seq: number;
+  ago_s: number;
+  source: string;
+  slot: number;
+  slot_name: string;
+  unread: boolean;
+  freq: number;
+  mhz: string;
+  id: number;
+  x: number;
+  y: number;
+  lat: number | null;
+  lon: number | null;
+  name: string;
+  text: string;
+  detail: string;
+};
+export const logReadPayload = (before: number, max = 0): Uint8Array => wasm.log_read_payload(before, max);
+export const parseLogPage = (rest: Uint8Array): { next: number; held: number; records: LogRecord[] } | null => JSON.parse(wasm.parse_log_page(rest));
+export const logCsv = (records: LogRecord[], times: string[]): string => wasm.log_csv(js(records), js(times));
+
+// Live View from the radio's UI events (core/src/liveview.rs, LINK-47, LINK-48).
+export const LiveClient = wasm.LiveClient;
+export type LiveClient = wasm.LiveClient;
+
+// APRS settings (core/src/aprs_settings.rs, LINK-43): the APRS record as MENU 0 5 shows it, beside the radio's
+// settings record (its region; empty for the defaults).
+
+export type AprsView = { items: SettingItem[]; notes: string[] };
+export const aprsView = (settings: Uint8Array, record: Uint8Array): AprsView => JSON.parse(wasm.aprs_view(settings, record));
+export const aprsSet = (settings: Uint8Array, record: Uint8Array, id: string, value: string): Uint8Array => wasm.aprs_set(settings, record, id, value);
+export const aprsPlan = (settings: Uint8Array, base: Uint8Array, want: Uint8Array): SettingsPlan => JSON.parse(wasm.aprs_plan(settings, base, want));
+export const aprsRecordLen = () => wasm.aprs_record_len();
+export const aprsBackup = (settings: Uint8Array, record: Uint8Array, saved: string, radio: Record<string, string>) =>
+  wasm.aprs_backup(settings, record, saved, js(radio));
+export const aprsRestore = (text: string): { record: number[]; saved: string; radio: Record<string, string> } => JSON.parse(wasm.aprs_restore(text));

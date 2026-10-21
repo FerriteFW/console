@@ -1,7 +1,8 @@
 //! The core for the browser. Structures cross as JSON strings (the UI parses them); bytes as `Uint8Array`.
 
 use ferrite_console_core::{
-    answers, channels, chirp, demo, firmware, keys, library, plan, records, session, settings, timing, ui, uid,
+    answers, aprs, aprs_settings, channels, chirp, demo, firmware, keys, library, liveview, log, plan, records,
+    session, settings, timing, ui, uid,
 };
 use wasm_bindgen::prelude::*;
 
@@ -43,7 +44,8 @@ impl Session {
         self.0.request(ty, payload, now_ms).map(|r| r.wire).map_err(|_| JsError::new("payload too long"))
     }
 
-    /// Bytes read; the answers completed, as JSON `[{ty, seq, status, rest: [..]}]`.
+    /// Bytes read; the answers completed, as JSON `[{ty, seq, status, rest: [..]}]`; events (LINK-46) carry
+    /// `event: true`, `rest` their whole payload.
     pub fn feed(&mut self, bytes: &[u8]) -> String {
         json(&self.0.feed(bytes))
     }
@@ -80,12 +82,15 @@ impl Default for DemoRadio {
 /// The protocol numbers the UI uses, as JSON.
 #[wasm_bindgen]
 pub fn protocol() -> String {
-    use ferrite_console_core::link::{key, msg, what};
+    use ferrite_console_core::link::{event, key, msg, what};
     serde_json::json!({
         "msg": { "HELLO": msg::HELLO, "INFO": msg::INFO, "AUTH": msg::AUTH, "READ": msg::READ, "WRITE": msg::WRITE,
                  "DELETE": msg::DELETE, "BEGIN": msg::BEGIN, "END": msg::END, "SLOT": msg::SLOT, "BAUD": msg::BAUD,
-                 "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY },
-        "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET },
+                 "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY,
+                 "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND },
+        "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS },
+        "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "HEARD": event::HEARD,
+                   "MSG": event::MSG, "MSG_STATE": event::MSG_STATE, "UI": event::UI, "QUIET_MS": event::QUIET_MS, "DICT": liveview::DICT },
         "knobMax": key::KNOB_MAX,
         "keys": keys::NAMES,
         "timing": timing::TIMING,
@@ -459,4 +464,124 @@ impl BootReader {
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<u8> {
         self.0.feed(bytes).into_iter().flat_map(|(c, r)| [c, r]).collect()
     }
+}
+
+// APRS (`ferrite_console_core::aprs`, LINK-44 – LINK-46): the heard list, messages, events.
+
+/// `HEARD`'s answer as JSON `{count, stations}`, or null.
+#[wasm_bindgen]
+pub fn parse_heard(rest: &[u8]) -> String {
+    json(&aprs::parse_heard(rest))
+}
+
+/// `MSGS`'s answer as JSON `{count, messages}`, or null.
+#[wasm_bindgen]
+pub fn parse_msgs(rest: &[u8]) -> String {
+    json(&aprs::parse_msgs(rest))
+}
+
+/// An event's payload as JSON `{kind: "heard" | "message" | "message_state" | "ui" | "unknown", ...}`, or null.
+#[wasm_bindgen]
+pub fn parse_event(payload: &[u8]) -> String {
+    json(&aprs::parse_event(payload))
+}
+
+/// `MSG_SEND`'s payload, or why not (the radio checks again).
+#[wasm_bindgen]
+pub fn msg_send_payload(to: &str, text: &str) -> Result<Vec<u8>, JsError> {
+    aprs::msg_send_payload(to, text).map_err(|e| JsError::new(&e))
+}
+
+#[wasm_bindgen]
+pub fn subscribe_payload(mask: u8, gap: u8, renew: bool) -> Vec<u8> {
+    aprs::subscribe_payload(mask, gap, renew)
+}
+
+// The event log (`ferrite_console_core::log`, LINK-42).
+
+#[wasm_bindgen]
+pub fn log_read_payload(before: u32, max: u8) -> Vec<u8> {
+    log::read_payload(before, max)
+}
+
+/// `LOG_READ`'s answer as JSON `{next, held, records}`, or null.
+#[wasm_bindgen]
+pub fn parse_log_page(rest: &[u8]) -> String {
+    json(&log::parse_page(rest))
+}
+
+/// Records (JSON, as `parse_log_page` gave them) as CSV, each dated by `times` (JSON strings).
+#[wasm_bindgen]
+pub fn log_csv(records: &str, times: &str) -> Result<String, JsError> {
+    let r: Vec<log::Record> = from_json(records, "records")?;
+    let t: Vec<String> = from_json(times, "times")?;
+    Ok(log::csv(&r, &t))
+}
+
+/// Live View from the radio's UI events (LINK-47, LINK-48).
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct LiveClient(liveview::Client);
+
+#[wasm_bindgen]
+impl LiveClient {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> LiveClient {
+        LiveClient(liveview::Client::new())
+    }
+    pub fn reset(&mut self) {
+        self.0.reset()
+    }
+    /// A UI event's payload after its kind byte: 0 shown (whole and checked), 1 partial, 2 ask for the whole state.
+    pub fn apply(&mut self, ev: &[u8]) -> u8 {
+        match self.0.apply(ev) {
+            liveview::Applied::Shown => 0,
+            liveview::Applied::Partial => 1,
+            liveview::Applied::Resync => 2,
+        }
+    }
+    pub fn text(&self) -> String {
+        self.0.text()
+    }
+    pub fn updates(&self) -> u32 {
+        self.0.updates
+    }
+    pub fn resyncs(&self) -> u32 {
+        self.0.resyncs
+    }
+}
+
+// APRS settings (`ferrite_console_core::aprs_settings`, LINK-43): the APRS record as MENU 0 5 shows it. `settings` is
+// the radio's settings record (its region), or empty for the defaults.
+
+#[wasm_bindgen]
+pub fn aprs_view(settings: &[u8], record: &[u8]) -> String {
+    json(&aprs_settings::view(settings, record))
+}
+
+#[wasm_bindgen]
+pub fn aprs_set(settings: &[u8], record: &[u8], id: &str, value: &str) -> Result<Vec<u8>, JsError> {
+    aprs_settings::set(settings, record, id, value).map_err(|e| JsError::new(&e))
+}
+
+#[wasm_bindgen]
+pub fn aprs_plan(settings: &[u8], base: &[u8], want: &[u8]) -> String {
+    json(&aprs_settings::plan(settings, base, want))
+}
+
+#[wasm_bindgen]
+pub fn aprs_record_len() -> u32 {
+    aprs_settings::RECORD_LEN as u32
+}
+
+#[wasm_bindgen]
+pub fn aprs_backup(settings: &[u8], record: &[u8], saved: &str, radio: &str) -> Result<String, JsError> {
+    let r = from_json(radio, "radio")?;
+    Ok(aprs_settings::backup(settings, record, saved, r))
+}
+
+#[wasm_bindgen]
+pub fn aprs_restore(text: &str) -> Result<String, JsError> {
+    let (rec, b) = aprs_settings::restore(text).map_err(|e| JsError::new(&e))?;
+    Ok(serde_json::json!({ "record": rec, "saved": b.saved, "radio": b.radio }).to_string())
 }

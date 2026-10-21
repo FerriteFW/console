@@ -1,6 +1,8 @@
 // The connection and what the Live View shows, as Svelte state: connect (cable, Bluetooth, demo), HELLO, the PIN
-// when the radio asks for it, INFO, the cable's faster rate, then the UI readback polled while connected.
-import { loadCore, parseUi, type Hello, type Info, type Ui } from "./core";
+// when the radio asks for it, INFO, the cable's faster rate, then the screen: the UI readback polled on the cable,
+// and on Bluetooth the radio's own compact updates (LINK-47, LINK-48) through a subscription (LINK-46), which also
+// carries the APRS events the APRS pages ask for.
+import { LiveClient, loadCore, P, parseEvent, parseUi, type AprsEvent, type Hello, type Info, type Ui } from "./core";
 import { Link, RadioError, TimeoutError } from "./link";
 import { provider, type Transport, type TransportKind } from "./transport";
 import { BridgeTransport } from "./transport/bridge";
@@ -13,6 +15,15 @@ export type Phase = "idle" | "connecting" | "pin" | "connected" | "updating";
 const POLL_GAP_MS = { cable: 150, bluetooth: 0, demo: 150 } as const;
 /** Readbacks failing in a row before the bar says the radio isn't answering. */
 const FAILS_SHOWN = 2;
+/** A subscription is renewed this often (the radio drops it after 10 s without a frame: LINK-46). */
+const RENEW_MS = 5000;
+/** Live View by events: no update this long (the radio sends one at least every 5 s) asks for the whole state. */
+const UI_SILENT_MS = 12_000;
+/** `?liveview=events` uses the updates on the cable too; `?liveview=poll` polls on Bluetooth too. */
+const LIVE_MODE = new URLSearchParams(typeof location === "undefined" ? "" : location.search).get("liveview");
+
+/** An APRS event (or `gap`: events were lost: read the lists again). */
+export type EventListener = (ev: AprsEvent | null, gap: boolean) => void;
 
 class Radio {
   phase = $state<Phase>("idle");
@@ -39,15 +50,40 @@ class Radio {
   set live(v: boolean) {
     this.#live = v;
     this.refresh();
+    this.subWake?.();
   }
   pinError = $state("");
   /** A transfer (channels read or written) holds the link: the Live View stops polling meanwhile. */
   busy = $state("");
 
+  /** What is subscribed now (LINK-46: 1 heard, 2 messages, 4 Live View); 0 none. */
+  subMask = $state(0);
+  /** The radio answered SUBSCRIBE `unknown type`: firmware before LINK-46 (polling only, no APRS events). */
+  noEvents = $state(false);
+  /** Live View comes from the radio's updates now (not the polled readback). */
+  get liveByEvents() {
+    return (this.subMask & 4) !== 0;
+  }
+  /** Live View's event bytes a second (the last 10 s), and the updates and whole-state asks so far. */
+  liveRate = $state(0);
+  liveUpdates = $state(0);
+  liveResyncs = $state(0);
+
   private link: Link | null = null;
   private t: Transport | null = null;
   private wake: (() => void) | null = null;
   private generation = 0;
+  /** What each part of Console wants events for (its mask). */
+  private wants = new Map<string, number>();
+  private listeners = new Set<EventListener>();
+  private subWake: (() => void) | null = null;
+  private resync = false;
+  private lastEvSeq: number | null = null;
+  private lastUiAt = 0;
+  private live_: InstanceType<typeof LiveClient> | null = null;
+  private evLog: [number, number][] = [];
+  /** Disconnecting: no more subscriptions. */
+  private leaving = false;
 
   /** The link while connected (channel programming uses it directly). */
   get connectedLink(): Link | null {
@@ -118,6 +154,7 @@ class Radio {
 
   private async connectWith(open: () => Promise<Transport>) {
     if (this.phase !== "idle") return;
+    this.leaving = false;
     this.error = "";
     this.note = "";
     this.phase = "connecting";
@@ -178,12 +215,126 @@ class Radio {
     }
     if (gen !== this.generation) return;
     this.phase = "connected";
+    this.lastEvSeq = null;
+    this.live_?.free();
+    this.live_ = new LiveClient();
+    link.onEvent = (seq, p) => {
+      if (gen === this.generation) this.event(seq, p);
+    };
     void this.poll(gen);
+    void this.subscriptions(gen);
+  }
+
+  /** Live View by the radio's updates: Bluetooth (unless `?liveview=poll`), or anywhere with `?liveview=events`. */
+  private get eventsForLive() {
+    if (this.noEvents || this.kind === "demo") return false;
+    return LIVE_MODE === "events" || (this.kind === "bluetooth" && LIVE_MODE !== "poll");
+  }
+
+  /** The mask wanted now. */
+  private wanted() {
+    let m = 0;
+    for (const w of this.wants.values()) m |= w;
+    if (this.live && !this.busy && this.eventsForLive) m |= 4;
+    return this.noEvents || this.leaving ? 0 : m;
+  }
+
+  /**
+   * Events for `who` (`mask`: 1 heard, 2 messages): subscribed while any part wants them. The returned function
+   * stops wanting them.
+   */
+  want(who: string, mask: number): () => void {
+    this.wants.set(who, mask);
+    this.subWake?.();
+    return () => {
+      this.wants.delete(who);
+      this.subWake?.();
+    };
+  }
+
+  /** APRS events as they come (and `gap` when some were lost). The returned function stops listening. */
+  onEvents(f: EventListener): () => void {
+    this.listeners.add(f);
+    return () => this.listeners.delete(f);
+  }
+
+  private event(seq: number, p: Uint8Array) {
+    const gap = this.lastEvSeq !== null && seq !== ((this.lastEvSeq + 1) & 0xff);
+    this.lastEvSeq = seq;
+    if (p[0] === P.event.UI) {
+      if (!(this.subMask & 4) || !this.live_) return;
+      const now = performance.now();
+      this.evLog.push([now, p.length + 6]);
+      while (this.evLog.length && now - this.evLog[0][0] > 10_000) this.evLog.shift();
+      const r = this.live_.apply(p.subarray(1));
+      this.liveUpdates = this.live_.updates();
+      this.liveResyncs = this.live_.resyncs();
+      if (r === 0) {
+        this.ui = parseUi(this.live_.text());
+        this.lastUiAt = now;
+        this.fails = 0;
+        const span = Math.max(1000, now - this.evLog[0][0]);
+        this.liveRate = Math.round((this.evLog.reduce((n, e) => n + e[1], 0) * 1000) / span);
+      } else if (r === 2) {
+        this.resync = true;
+        this.subWake?.();
+      }
+      return;
+    }
+    const ev = parseEvent(p);
+    for (const f of this.listeners) f(ev, gap);
+  }
+
+  /**
+   * The subscription (LINK-46): SUBSCRIBE when the mask wanted changes or the Live View must start over, renewed
+   * every 5 s; mask 0 ends it.
+   */
+  private async subscriptions(gen: number) {
+    let renewAt = 0;
+    while (gen === this.generation && this.phase === "connected") {
+      const link = this.link;
+      const want = this.wanted();
+      const now = performance.now();
+      if (want & 4 && this.subMask & 4 && now - this.lastUiAt > UI_SILENT_MS) this.resync = true;
+      try {
+        if (link && (want !== this.subMask || this.resync)) {
+          this.resync = false;
+          if (want & 4) {
+            this.live_?.reset();
+            this.lastUiAt = now;
+          }
+          const dict = await link.subscribe(want);
+          if (gen !== this.generation) return;
+          if (want & 4 && dict !== P.event.DICT) {
+            this.noEvents = true; // a dictionary this Console doesn't know: poll instead
+            await link.subscribe(0);
+            this.subMask = 0;
+          } else this.subMask = want;
+          renewAt = performance.now() + RENEW_MS;
+          this.wake?.(); // the poll loop starts or stops reading the screen
+        } else if (link && want && now >= renewAt) {
+          await link.subscribe(want, true);
+          renewAt = performance.now() + RENEW_MS;
+        }
+      } catch (e) {
+        if (gen !== this.generation) return;
+        if (e instanceof RadioError && e.status === 2) {
+          this.noEvents = true; // firmware before LINK-46
+          this.subMask = 0;
+          this.wake?.();
+        }
+      }
+      await new Promise<void>((r) => {
+        this.subWake = r;
+        setTimeout(r, 1000);
+      });
+      this.subWake = null;
+    }
   }
 
   private async poll(gen: number) {
     while (gen === this.generation && this.phase === "connected") {
-      if (this.live && this.link && !this.busy) {
+      if (this.live && this.link && !this.busy && !this.liveByEvents) {
         const t0 = performance.now();
         try {
           const text = await this.link.uiText();
@@ -200,13 +351,20 @@ class Radio {
           }
         }
       }
-      const gap = this.live ? POLL_GAP_MS[this.kind ?? "cable"] : 60_000;
+      const gap = this.live && !this.liveByEvents ? POLL_GAP_MS[this.kind ?? "cable"] : 60_000;
       await new Promise<void>((r) => {
         this.wake = r;
         setTimeout(r, Math.max(gap, 20));
       });
       this.wake = null;
     }
+  }
+
+  /** The development bridge's simulator test hooks (tools/bridge.py): false when not on a bridge. */
+  bridgeControl(msg: object): boolean {
+    if (!(this.t instanceof BridgeTransport)) return false;
+    this.t.sendControl(msg);
+    return true;
   }
 
   /** The page is closing: the cable's rate back to 115200, best effort (no waiting). */
@@ -282,6 +440,13 @@ class Radio {
     this.fails = 0;
     this.pinError = "";
     this.busy = "";
+    this.subMask = 0;
+    this.noEvents = false;
+    this.resync = false;
+    this.live_?.free();
+    this.live_ = null;
+    this.liveRate = 0;
+    this.subWake?.();
     if (t) {
       try {
         await t.close();
@@ -294,6 +459,16 @@ class Radio {
   async disconnect() {
     // LINK-11: the cable back at 115200 first, so tools/flash.py and the terminal find the radio there.
     const link = this.link;
+    this.leaving = true;
+    if (link && this.phase === "connected" && this.subMask) {
+      // LINK-46: events stop now, not 10 s later on a cable the next program may already hold.
+      this.subMask = 0;
+      try {
+        await Promise.race([link.subscribe(0), sleep(1500)]);
+      } catch {
+        /* the session ends anyway */
+      }
+    }
     if (link && this.phase === "connected") {
       this.busy = "Restoring the cable's rate";
       try {

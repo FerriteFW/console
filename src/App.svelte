@@ -13,17 +13,27 @@
   import { settings } from "./lib/settings.svelte";
   import { channels } from "./lib/channels.svelte";
   import { library } from "./lib/library.svelte";
+  import ActivityLog from "./lib/pages/ActivityLog.svelte";
+  import AprsHeard from "./lib/pages/AprsHeard.svelte";
+  import AprsMessages from "./lib/pages/AprsMessages.svelte";
+  import AprsMap from "./lib/pages/AprsMap.svelte";
+  import AprsSettings from "./lib/pages/AprsSettings.svelte";
   import Soon from "./lib/pages/Soon.svelte";
   import { loadCore } from "./lib/core";
   import { radio } from "./lib/radio.svelte";
+  import { aprs } from "./lib/aprs.svelte";
+  import { aprsSettings } from "./lib/aprsSettings.svelte";
+  import { activity } from "./lib/activity.svelte";
+  import { route } from "./lib/route.svelte";
 
-  type Page = { id: string; name: string; soon?: string };
+  // `sub`: a group within the group (Tools › APRS), its pages indented under its name.
+  type Page = { id: string; name: string; soon?: string; sub?: string };
   const groups: { name: string; pages: Page[] }[] = [
     {
       name: "Viewer",
       pages: [
         { id: "live", name: "Live View" },
-        { id: "activity", name: "Activity Log", soon: "What the radio heard and sent, with times, from the radio's own log (LOG_READ)." },
+        { id: "activity", name: "Activity Log" },
       ],
     },
     {
@@ -33,26 +43,19 @@
         { id: "settings", name: "Radio Settings" },
         { id: "terminal", name: "Terminal" },
         { id: "firmware", name: "Firmware Update" },
+        { id: "aprs-messages", name: "Messages", sub: "APRS" },
+        { id: "aprs-heard", name: "Heard stations", sub: "APRS" },
+        { id: "aprs-map", name: "Map", sub: "APRS" },
+        { id: "aprs-settings", name: "APRS Settings", sub: "APRS" },
       ],
     },
     { name: "Console", pages: [{ id: "about", name: "About" }] },
   ];
   const all = groups.flatMap((g) => g.pages);
 
-  let page = $state(pageFromHash());
   let navOpen = $state(false);
   let coreError = $state("");
-
-  function pageFromHash() {
-    const id = location.hash.replace(/^#\/?/, "");
-    return all.find((p) => p.id === id)?.id ?? "live";
-  }
-
-  $effect(() => {
-    const on = () => (page = pageFromHash());
-    window.addEventListener("hashchange", on);
-    return () => window.removeEventListener("hashchange", on);
-  });
+  const page = $derived(all.find((p) => p.id === route.id)?.id ?? "live");
 
   // LINK-11: a page closed while connected puts the cable back at 115200 (best effort).
   $effect(() => {
@@ -66,7 +69,7 @@
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, aprs, aprsSettings, activity };
   if (params.has("demo")) {
     void radio.connect("demo").then(async () => {
       for (const k of (params.get("press") ?? "").split(",").filter(Boolean)) {
@@ -87,8 +90,10 @@
       {#each groups as g (g.name)}
         <div class="group">
           <div class="label">{g.name}</div>
-          {#each g.pages as p (p.id)}
+          {#each g.pages as p, k (p.id)}
+            {#if p.sub && p.sub !== g.pages[k - 1]?.sub}<div class="sublabel">{p.sub}</div>{/if}
             <a
+              class:in-sub={!!p.sub}
               href={`#/${p.id}`}
               class:active={p.id === page}
               aria-current={p.id === page ? "page" : undefined}
@@ -123,6 +128,16 @@
         <Firmware />
       {:else if page === "about"}
         <About />
+      {:else if page === "activity"}
+        <ActivityLog />
+      {:else if page === "aprs-messages"}
+        <AprsMessages />
+      {:else if page === "aprs-heard"}
+        <AprsHeard />
+      {:else if page === "aprs-map"}
+        <AprsMap />
+      {:else if page === "aprs-settings"}
+        <AprsSettings />
       {:else}
         <Soon title={current.name} text={current.soon ?? ""} />
       {/if}
@@ -172,6 +187,14 @@
     border-radius: 7px;
     color: var(--text);
     text-decoration: none;
+  }
+  .sublabel {
+    padding: 10px 8px 4px;
+    font-size: 11px;
+    color: var(--sub);
+  }
+  nav a.in-sub {
+    padding-left: 20px;
   }
   nav a:hover {
     background: var(--raised);

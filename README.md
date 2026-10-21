@@ -9,7 +9,7 @@ Private until the licence is chosen.
 - `wasm/`: the core for the browser, built into `src/core-wasm/` by `npm run wasm`.
 - `src/`: the Svelte 5 UI (Vite).
 - `public/data/`: the channel library's data. See [tools/library/README.md](tools/library/README.md).
-- `tools/bridge.py`: the dev bridge. A local WebSocket to a serial port or the simulator.
+- `tools/bridge.py`: the dev bridge. A local WebSocket to a serial port or the simulator (its cable or its Bluetooth side).
 - `tools/fakeboot.py`: a fake stock bootloader the bridge runs after REBOOT, for testing Firmware Update on the simulator.
 - `tests/e2e/`: Playwright end-to-end tests.
 - `src-tauri/`: the Tauri 2 desktop shell. Native cable and Bluetooth; the protocol stays in the webview.
@@ -59,7 +59,7 @@ npm run e2e:run     # the same without the build
 - PIN prompt when the radio's Bluetooth PIN lock is on.
 - Cable at 460800 or 230400 baud; back to 115200 on disconnect.
 - Radio panel: firmware, build, callsign, unique ID.
-- Live View: the radio's screen from the UI readback, at 1x, 1.5x or 2x.
+- Live View: the radio's screen at 1x, 1.5x or 2x. The cable polls the UI readback; Bluetooth takes the radio's compact updates.
 - Remote keys: the drawn keypad, the knob, the keyboard. Never PTT.
 - Channels & Zones: read, edit in place, write with a backup and a diff first.
 - Every edit is checked by ferrite's own code. Changed rows amber, new rows green.
@@ -69,6 +69,9 @@ npm run e2e:run     # the same without the build
 - Add channels: airports near a place (AM, RX only), place typed or from the radio's GPS or fixed position.
 - Add channels: Canadian licensed sites (TAFL) near a place, grouped by licensee.
 - Radio Settings: every menu setting by its number and name; write with a backup and a diff first.
+- Activity Log: the radio's event log with local times, a source filter, CSV export, positions to the map.
+- APRS (Tools): messages by station with compose, heard stations with distances, a map, APRS settings.
+- Heard stations and messages update live while an APRS page is open.
 - Terminal: the radio's command line, with history; `key`, `txtest` and `xb start` refused.
 - Firmware Update: a Ferrite `.btf` into a radio already on Ferrite, over the cable. First installs stay with `flash.py`.
 - Light and dark themes.
@@ -78,8 +81,6 @@ npm run e2e:run     # the same without the build
 - Repeaters in Add channels. NeonPlug's list is DMR only, with no tones or coordinates (the tab says why).
 - The pixel mirror (SCREEN) and receive audio over the cable.
 - Signed and notarised desktop builds. Windows and Linux builds aren't tried yet.
-- Activity Log.
-- APRS settings in Radio Settings (the link doesn't carry the APRS record yet).
 - Range presets and the settings record in the table.
 - Channel positions, drag to reorder, a virtual table for 1,000 rows.
 

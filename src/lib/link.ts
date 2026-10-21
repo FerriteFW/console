@@ -9,15 +9,24 @@ import {
   helloPayload,
   keyPayload,
   knobPayloads,
+  logReadPayload,
+  msgSendPayload,
+  parseHeard,
   parseHello,
+  parseLogPage,
+  parseMsgs,
   parseInfo,
   parseTextChunk,
   recordReader,
   statusText,
+  subscribePayload,
   type Answer,
   type Hello,
   type Info,
+  type LogRecord,
+  type Message,
   type PlanOp,
+  type Station,
 } from "./core";
 import { sleep, type Transport } from "./transport/types";
 
@@ -45,12 +54,19 @@ export class Link {
   private closed = false;
   /** Answers that matched nothing (late ones after a time-out), for the debug line. */
   stray = 0;
+  /** Events (LINK-46): frames the radio sends unasked, never matched to a request: the frame's seq (the session's
+   * event counter) and the payload (the kind, then its bytes). */
+  onEvent: (seq: number, payload: Uint8Array) => void = () => {};
 
   constructor(readonly t: Transport) {
     t.onData = (bytes) => {
       if (this.closed) return;
       const answers: Answer[] = JSON.parse(this.session.feed(bytes));
       for (const a of answers) {
+        if (a.event) {
+          this.onEvent(a.seq, new Uint8Array(a.rest));
+          continue;
+        }
         const w = this.waiter;
         if (w && a.ty === (w.ty | 0x80) && a.seq === w.seq) {
           this.waiter = null;
@@ -353,6 +369,76 @@ export class Link {
         progress?.(at);
       }
       return out;
+    });
+  }
+
+  /** LINK-46: SUBSCRIBE (mask 0 ends it); `renew` keeps it as it is (a keepalive). The dictionary version. */
+  async subscribe(mask: number, renew = false): Promise<number> {
+    const rest = await this.ok(P.msg.SUBSCRIBE, subscribePayload(mask, 0, renew));
+    return rest[1] ?? 0;
+  }
+
+  /** LINK-44: the whole heard list, newest first, paged by index. */
+  heard(): Promise<{ count: number; stations: Station[] }> {
+    return this.exclusive(async () => {
+      const stations: Station[] = [];
+      let count = 0;
+      for (;;) {
+        const h = parseHeard(await this.okRaw(P.msg.HEARD, new Uint8Array([Math.min(stations.length, 255)])));
+        if (!h) throw new Error("A HEARD answer didn't parse.");
+        count = h.count;
+        stations.push(...h.stations);
+        if (!h.stations.length || stations.length >= count || stations.length >= 255) return { count, stations };
+      }
+    });
+  }
+
+  /** LINK-44: every message in and out, newest first, paged by index. */
+  msgs(): Promise<{ count: number; messages: Message[] }> {
+    return this.exclusive(async () => {
+      const messages: Message[] = [];
+      let count = 0;
+      for (;;) {
+        const p = new Uint8Array([messages.length & 0xff, messages.length >> 8]);
+        const m = parseMsgs(await this.okRaw(P.msg.MSGS, p));
+        if (!m) throw new Error("A MSGS answer didn't parse.");
+        count = m.count;
+        messages.push(...m.messages);
+        if (!m.messages.length || messages.length >= count) return { count, messages };
+      }
+    });
+  }
+
+  /**
+   * LINK-45: an APRS message queued as the radio's compose queues it; it goes by the radio's own TX rules. True
+   * when APRS mode is on (it goes at the next turn), false when it waits for APRS mode.
+   */
+  async msgSend(to: string, text: string): Promise<boolean> {
+    const rest = await this.ok(P.msg.MSG_SEND, msgSendPayload(to, text));
+    return rest[0] === 1;
+  }
+
+  /**
+   * LINK-42: the event log, newest first, every page (below `before`; 0xFFFFFFFF from the newest). `progress` with
+   * the records so far.
+   */
+  log(progress?: (n: number) => void): Promise<{ next: number; held: number; records: LogRecord[] }> {
+    return this.exclusive(async () => {
+      const records: LogRecord[] = [];
+      let before = 0xffffffff;
+      let next = 0;
+      let held = 0;
+      for (let pages = 0; pages < 500; pages++) {
+        const p = parseLogPage(await this.okRaw(P.msg.LOG_READ, logReadPayload(before)));
+        if (!p) throw new Error("A LOG_READ answer didn't parse.");
+        if (pages === 0) [next, held] = [p.next, p.held];
+        if (!p.records.length) break;
+        records.push(...p.records);
+        progress?.(records.length);
+        before = p.records[p.records.length - 1].seq;
+        if (records.length >= p.held || before === 0) break;
+      }
+      return { next, held, records };
     });
   }
 

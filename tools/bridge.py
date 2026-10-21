@@ -3,18 +3,23 @@
 the simulator's TCP cable, so scripts (and a browser that was never shown a port chooser) can drive Console.
 
     tools/bridge.py --tcp 127.0.0.1:7300                 # the simulator (ferrite-sim --term-headless N --term-tcp 7300)
+    tools/bridge.py --tcp-bt 127.0.0.1:7301              # its Bluetooth side (--bt-tcp 7301; 0 9 2 1 on), BT513-paced
     tools/bridge.py --serial /dev/cu.usbserial-114220    # the radio's cable, 115200 8N1 to start
 
 Then open Console with `?bridge` (http://localhost:1420/?bridge) and press Bridge.
 
 The WebSocket (ws://127.0.0.1:8765 by default, 127.0.0.1 only):
 - binary frames are the link's bytes, both ways, as they are;
-- text frames are JSON control messages. The bridge sends {"bridge": 1, "target": "serial"|"tcp", "name": ...,
+- text frames are JSON control messages. The bridge sends {"bridge": 1, "target": "serial"|"tcp"|"bt", "name": ...,
   "baud": 115200} on connect. Console sends {"baud": N} for the link's BAUD (LINK-11); the bridge sets the serial
   port's rate (after the bytes before it are out) and answers {"baud": N, "ok": true} ("ignored": true on TCP,
   which has no rate).
 - One client at a time; another is refused while one is connected. Only pages from localhost or 127.0.0.1 (or
   clients that send no Origin, such as scripts) may connect, so no web page you happen to visit can drive the radio.
+
+Test hooks (the simulator only, never a radio): {"inject_event": [bytes]} sends Console an EVENT frame (LINK-46)
+with that payload as the radio's next one would come (an APRS station heard, which the headless simulator can't
+hear); {"drop_ui": N} drops the next N Live View events from the simulator (a lost update, LINK-48).
 
 With `--fakeboot MODE.json` (the simulator only): once the simulator accepts a link REBOOT (LINK-24), the bytes go
 to a fake stock bootloader (tools/fakeboot.py) instead, until its END; then back to the simulator, which restarted
@@ -237,6 +242,43 @@ class TcpTarget:
         self.w.close()
 
 
+class BtTarget(TcpTarget):
+    """The simulator's Bluetooth side (ferrite-sim --bt-tcp PORT), paced as the radio's BT513 is: 20-byte writes 25 ms
+    apart toward the radio (Console's Web Bluetooth pacing, LINK-25) and the module's 9600-baud UART toward Console
+    (about 960 bytes a second), so a test sees Bluetooth's speed. The radio paces its own answers too (LINK-36)."""
+
+    kind = "bt"
+    CHUNK, GAP_S, DOWN_BPS = 20, 0.025, 960
+
+    async def open(self, on_data, on_close):
+        self.down = asyncio.Queue()
+
+        async def pace():
+            while True:
+                b = await self.down.get()
+                for i in range(0, len(b), self.CHUNK):
+                    part = b[i : i + self.CHUNK]
+                    on_data(part)
+                    await asyncio.sleep(len(part) / self.DOWN_BPS)
+
+        self.pacer = asyncio.create_task(pace())
+        await super().open(self.down.put_nowait, on_close)
+
+    async def write(self, b):
+        for i in range(0, len(b), self.CHUNK):
+            self.w.write(b[i : i + self.CHUNK])
+            await self.w.drain()
+            if i + self.CHUNK < len(b):
+                await asyncio.sleep(self.GAP_S)
+
+    async def set_baud(self, rate):
+        return {"baud": rate, "ok": False, "error": "Bluetooth has no rate"}
+
+    async def close(self):
+        self.pacer.cancel()
+        await super().close()
+
+
 REBOOT = 0x21
 
 
@@ -331,13 +373,43 @@ class Bridge:
         # --fakeboot: REBOOT requests seen (seq) and the simulator's answers watched. The fake bootloader itself is
         # the bridge's (self.boot): it stays across clients, as a radio stays in its bootloader when the cable reopens.
         sent, heard, pending = LinkFrames(), LinkFrames(), set()
+        # The simulator's test hooks (the e2e tests; never on a radio): events seen (their seq, for an injected one),
+        # UI events to drop (a lost Live View update), and the frames held while dropping.
+        sim = target.kind != "serial"
+        hook = {"ev_seq": None, "drop_ui": 0, "buf": b""}
+        events = LinkFrames()
+
+        def forward(b):
+            if not hook["drop_ui"]:
+                asyncio.ensure_future(ws.send(2, b))
+                return
+            # whole frames only while dropping: a UI event (type 0x51, kind 4) goes nowhere
+            hook["buf"] += b
+            *parts, hook["buf"] = hook["buf"].split(b"\x00")
+            out = bytearray()
+            for p in parts:
+                body = cobs_decode(p) if p else None
+                if hook["drop_ui"] and body and len(body) > 3 and body[0] == 0x51 and body[2] == 4:
+                    hook["drop_ui"] -= 1
+                    log(f"test hook: dropped UI event #{body[1]}")
+                    continue
+                out += p + b"\x00"
+            if not hook["drop_ui"]:
+                out += hook["buf"]
+                hook["buf"] = b""
+            if out:
+                asyncio.ensure_future(ws.send(2, bytes(out)))
 
         def on_data(b):
             if self.boot is not None:
                 return  # the simulator restarting meanwhile: the cable belongs to the bootloader
             if self.verbose:
                 log(f"<- {b.hex(' ')}")
-            asyncio.ensure_future(ws.send(2, b))
+            if sim:
+                for ty, seq, _ in events.feed(b):
+                    if ty == 0x51:
+                        hook["ev_seq"] = seq
+            forward(b) if sim else asyncio.ensure_future(ws.send(2, b))
             if self.fakeboot_mode and pending:
                 for ty, seq, payload in heard.feed(b):
                     if ty == REBOOT | 0x80 and seq in pending and payload[:1] == b"\x00":
@@ -402,6 +474,17 @@ class Bridge:
                             ans = {"baud": rate, "ok": False, "error": str(e)}
                         log(f"rate {rate}: {ans}")
                         await ws.send_json(ans)
+                    elif sim and "inject_event" in msg:
+                        # an EVENT frame as the radio would send it next (an APRS station heard, say)
+                        seq = ((hook["ev_seq"] if hook["ev_seq"] is not None else -1) + 1) & 0xFF
+                        hook["ev_seq"] = seq
+                        body = bytes([0x51, seq]) + bytes(msg["inject_event"])
+                        log(f"test hook: injected event #{seq} kind {body[2]}")
+                        await ws.send(2, cobs_encode(body + struct.pack("<H", link_crc(body))) + b"\x00")
+                        await ws.send_json({"injected": seq})
+                    elif sim and "drop_ui" in msg:
+                        hook["drop_ui"] = int(msg["drop_ui"])
+                        await ws.send_json({"dropping": hook["drop_ui"]})
                     else:
                         await ws.send_json({"error": "unknown control message"})
 
@@ -424,6 +507,8 @@ def main():
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--serial", metavar="PORT", help="a serial port, e.g. /dev/cu.usbserial-114220 (115200 8N1)")
     g.add_argument("--tcp", metavar="HOST:PORT", help="the simulator's cable, e.g. 127.0.0.1:7300")
+    g.add_argument("--tcp-bt", metavar="HOST:PORT",
+                   help="the simulator's Bluetooth side (ferrite-sim --bt-tcp PORT), paced as the BT513 is")
     ap.add_argument("--port", type=int, default=8765, help="the WebSocket's port on 127.0.0.1 (default 8765)")
     ap.add_argument("--baud", type=int, default=115200, help="the serial rate to start at (default 115200)")
     ap.add_argument("--allow-origin", action="append", default=[], metavar="ORIGIN",
@@ -432,18 +517,21 @@ def main():
     ap.add_argument("--fakeboot", metavar="MODE.json",
                     help="the simulator only: a fake bootloader takes the cable after REBOOT (tools/fakeboot.py)")
     a = ap.parse_args()
-    if a.fakeboot and a.serial:
-        ap.error("--fakeboot is for the simulator (--tcp) only: a radio has its own bootloader")
+    if a.fakeboot and not a.tcp:
+        ap.error("--fakeboot is for the simulator's cable (--tcp) only: a radio has its own bootloader")
     if a.serial:
         make = lambda: SerialTarget(a.serial, a.baud)  # noqa: E731
+        what = f"serial {a.serial}"
     else:
-        host, _, port = a.tcp.rpartition(":")
-        make = lambda: TcpTarget(host or "127.0.0.1", int(port))  # noqa: E731
+        host, _, port = (a.tcp or a.tcp_bt).rpartition(":")
+        kind = TcpTarget if a.tcp else BtTarget
+        make = lambda: kind(host or "127.0.0.1", int(port))  # noqa: E731
+        what = f"tcp {a.tcp}" if a.tcp else f"bluetooth tcp {a.tcp_bt}"
     bridge = Bridge(make, a.allow_origin, a.verbose, a.fakeboot)
 
     async def serve():
         server = await asyncio.start_server(bridge.client, "127.0.0.1", a.port)
-        log(f"ws://127.0.0.1:{a.port} -> {'serial ' + a.serial if a.serial else 'tcp ' + a.tcp}")
+        log(f"ws://127.0.0.1:{a.port} -> {what}")
         async with server:
             await server.serve_forever()
 

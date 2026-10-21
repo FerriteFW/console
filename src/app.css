@@ -162,3 +162,144 @@ kbd {
   outline: 2px solid var(--blue);
   outline-offset: 2px;
 }
+
+/* Shared by the Activity Log and the APRS pages: a page column, its toolbar, a status line, banners, a table. */
+.pg {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.pg-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.pg-bar .grp {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.pg-bar select,
+.pg-bar input,
+.pg-field {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.pg-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  min-height: 20px;
+  color: var(--sub);
+}
+.pg-banner {
+  padding: 8px 12px;
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  color: var(--red);
+}
+.pg-banner.warn {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+.pg-scroll {
+  overflow: auto;
+  max-height: calc(100vh - 230px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.tbl {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  width: 100%;
+}
+.tbl th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  color: var(--sub);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.tbl tr:last-child td {
+  border-bottom: 0;
+}
+.tbl td.num,
+.tbl td.nowrap {
+  white-space: nowrap;
+}
+.tbl td.num {
+  font-variant-numeric: tabular-nums;
+}
+.tbl .empty {
+  color: var(--sub);
+  text-align: center;
+  padding: 24px;
+}
+.tbl tr.fresh td {
+  animation: fresh 2.5s ease-out;
+}
+@keyframes fresh {
+  from {
+    background: color-mix(in srgb, var(--blue) 18%, var(--bg));
+  }
+}
+.tag {
+  display: inline-block;
+  font-size: 11px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--sub);
+  white-space: nowrap;
+}
+.tag.blue {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.tag.amber {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+.tag.red {
+  border-color: var(--red);
+  color: var(--red);
+}
+.tag.green {
+  border-color: var(--green);
+  color: var(--green);
+}
+.sub {
+  color: var(--sub);
+}
+.dim {
+  color: var(--dim);
+}

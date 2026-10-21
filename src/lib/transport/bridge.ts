@@ -20,16 +20,17 @@ export function bridgeUrl(): string {
   return v && /^wss?:\/\//.test(v) ? v : BRIDGE_URL;
 }
 
-type Hello = { bridge: number; target: "serial" | "tcp"; name: string; baud: number };
+type Hello = { bridge: number; target: "serial" | "tcp" | "bt"; name: string; baud: number };
 type Control = { baud?: number; ok?: boolean; error?: string; closed?: string } & Partial<Hello>;
 
 export class BridgeTransport implements Transport {
-  // Timing as on the cable (time-outs 2 s, polling with a gap): it is the cable, or the simulator's.
-  readonly kind = "cable" as const;
-  readonly slow = false;
+  // Timing as on the cable (time-outs 2 s, polling with a gap): it is the cable, or the simulator's. A bridge to the
+  // simulator's Bluetooth side (`--tcp-bt`, paced as the BT513 is) is Bluetooth: slow, Live View by events.
+  kind: "cable" | "bluetooth" = "cable";
+  slow = false;
   label = "Bridge";
   baud = 115200;
-  target: "serial" | "tcp" = "tcp";
+  target: "serial" | "tcp" | "bt" = "tcp";
   onData: (b: Uint8Array) => void = () => {};
   onClose: (why: string) => void = () => {};
   private closing = false;
@@ -61,7 +62,14 @@ export class BridgeTransport implements Transport {
     });
     t.target = hello.target;
     t.baud = hello.baud;
-    t.label = hello.target === "tcp" ? `Bridge (simulator ${hello.name})` : `Bridge (cable ${hello.name})`;
+    t.label =
+      hello.target === "bt" ? `Bridge (simulator Bluetooth ${hello.name})` : hello.target === "tcp" ? `Bridge (simulator ${hello.name})` : `Bridge (cable ${hello.name})`;
+    if (hello.target === "bt") {
+      t.kind = "bluetooth";
+      t.slow = true;
+    } else {
+      t.setBaud = (rate) => t.applyBaud(rate);
+    }
     ws.onerror = null;
     ws.onmessage = (m) => {
       if (typeof m.data === "string") t.control(JSON.parse(m.data) as Control);
@@ -87,8 +95,11 @@ export class BridgeTransport implements Transport {
     this.ws.send(bytes);
   }
 
+  /** The cable's rate (Bluetooth has none: no `setBaud`, so no BAUD is asked). */
+  setBaud?: (rate: number) => Promise<void>;
+
   /** The serial port at `rate` (the bridge applies it after the bytes before; the simulator's TCP ignores it). */
-  async setBaud(rate: number) {
+  private async applyBaud(rate: number) {
     if (rate === this.baud) return;
     const ans = await new Promise<Control>((ok, fail) => {
       const timer = setTimeout(() => {
@@ -104,6 +115,11 @@ export class BridgeTransport implements Transport {
     });
     if (!ans.ok) throw new Error(`the bridge couldn't set ${rate}: ${ans.error ?? "refused"}`);
     this.baud = rate;
+  }
+
+  /** A control message to the bridge (its simulator test hooks: tools/bridge.py). */
+  sendControl(msg: object) {
+    if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
   async close() {

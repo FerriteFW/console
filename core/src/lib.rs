@@ -17,17 +17,25 @@
 //! - [`records`]: `READ`/`WRITE`/`DELETE`/`BEGIN`/`END` payloads, for channel and zone programming (phase 2).
 //! - [`library`]: the "Add channels" library: fixed sets, airports and TAFL sites near a place, as channels.
 //! - [`settings`]: the radio-wide settings record as the menu shows it (Radio Settings).
+//! - [`aprs`]: the heard list, messages, sending one, and the events a subscription brings (LINK-44 – LINK-46).
+//! - [`aprs_settings`]: the APRS record as MENU 0 5 shows it (LINK-43), changed and checked as the settings are.
+//! - [`log`]: the event log (`LOG_READ`, LINK-42) for the Activity Log.
+//! - [`liveview`]: Live View from the radio's compact UI events (LINK-47, LINK-48), for Bluetooth.
 //! - [`firmware`]: Firmware Update: the `.btf` checks and the stock bootloader's frames (tools/btf.py, flash.py).
 //! - [`demo`]: a demo radio answering from memory, for trying Console without a radio.
 //! - [`timing`]: the reference client's time-outs and pacing, in one place.
 
 pub mod answers;
+pub mod aprs;
+pub mod aprs_settings;
 pub mod channels;
 pub mod chirp;
 pub mod demo;
 pub mod firmware;
 pub mod keys;
 pub mod library;
+pub mod liveview;
+pub mod log;
 pub mod plan;
 pub mod radioside;
 pub mod records;

@@ -15,19 +15,23 @@ pub const SYNC: u8 = 0x00;
 /// Bytes kept waiting for a delimiter: terminal text with no 0x00 must not pile up for ever.
 const MAX_PENDING: usize = 4 * MAX_WIRE;
 
-/// One answer: type (the request's | 0x80), seq, status byte, and the rest of the payload.
+/// One answer: type (the request's | 0x80), seq, status byte, and the rest of the payload. Or an event (LINK-46):
+/// a frame of type 0x51 the radio sends unasked, `seq` its own counter, no status byte (`status` 0, `rest` the whole
+/// payload: the kind and its bytes), never matching a request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Answer {
     pub ty: u8,
     pub seq: u8,
     pub status: u8,
     pub rest: Vec<u8>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub event: bool,
 }
 
 impl Answer {
     /// Whether this answers request `ty` sent with `seq`.
     pub fn answers(&self, ty: u8, seq: u8) -> bool {
-        self.ty == ty | ANSWER && self.seq == seq
+        !self.event && self.ty == ty | ANSWER && self.seq == seq
     }
 }
 
@@ -97,8 +101,9 @@ impl Session {
         Ok(Request { seq, wire })
     }
 
-    /// Bytes read from the transport; the whole answers they complete. Frames that don't decode (terminal text,
-    /// damage) are skipped, as are frames too short to carry a status byte.
+    /// Bytes read from the transport; the whole answers (and events) they complete. Frames that don't decode
+    /// (terminal text, damage) are skipped, as are answers too short to carry a status byte. A type below 0x80 from
+    /// the radio is always an event (it sends no requests: Appendix G).
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<Answer> {
         self.buf.extend_from_slice(bytes);
         let mut out = Vec::new();
@@ -109,8 +114,12 @@ impl Session {
                 continue;
             }
             if let Ok(f) = link::parse(&mut raw) {
-                if let Some((&status, rest)) = f.payload.split_first() {
-                    out.push(Answer { ty: f.ty, seq: f.seq, status, rest: rest.to_vec() });
+                if f.ty & ANSWER == 0 {
+                    if !f.payload.is_empty() {
+                        out.push(Answer { ty: f.ty, seq: f.seq, status: 0, rest: f.payload.to_vec(), event: true });
+                    }
+                } else if let Some((&status, rest)) = f.payload.split_first() {
+                    out.push(Answer { ty: f.ty, seq: f.seq, status, rest: rest.to_vec(), event: false });
                 }
             }
         }
@@ -196,6 +205,22 @@ mod tests {
         assert!(got[1].answers(msg::UI, 2));
         assert_eq!(got[1].status, Status::Busy as u8);
         assert!(!got[1].answers(msg::UI, 3));
+    }
+
+    /// LINK-46: an EVENT frame (type 0x51, no status byte) between answers comes out as an event, its whole
+    /// payload kept, and never answers a request of the same seq.
+    #[test]
+    fn events_are_kept_apart() {
+        let mut s = Session::new();
+        let mut w = [0u8; MAX_WIRE];
+        let n = link::build(msg::EVENT, 7, &[1, 3, 9], &mut w).unwrap();
+        let mut stream = radio_answer(msg::HEARD, 7, Status::Ok, &[0]);
+        stream.extend(&w[..n]);
+        let got = s.feed(&stream);
+        assert_eq!(got.len(), 2);
+        assert!(got[0].answers(msg::HEARD, 7) && !got[0].event);
+        assert!(got[1].event && got[1].rest == [1, 3, 9] && got[1].seq == 7);
+        assert!(!got[1].answers(msg::EVENT & 0x7F, 7));
     }
 
     #[test]

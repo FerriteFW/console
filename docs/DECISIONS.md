@@ -19,11 +19,31 @@
 - The faster cable rate is on by default. A refusal leaves 115200 and says so.
 - The cable tops out at 460800 on the Mac's CH340. At 921600 the radio switches but never answers.
 
+## Events and Live View (Oct 20, 2026)
+
+- One subscription per session (LINK-46): Console ORs what each part wants. APRS pages want heard and messages while open.
+- Bluetooth's Live View is the radio's compact updates (mask 4), decoded by ferrite's own `liveview::apply` in wasm.
+- A lost update or a bad check asks for the whole state (SUBSCRIBE without renew). So does 12 s with no update.
+- The cable keeps polling the text readback. Measured on the simulator: one readback is ~760 B. At 460800 the cable has room; the updates gain little there.
+- `?liveview=events` uses the updates on the cable too; `?liveview=poll` polls on Bluetooth.
+- Firmware without SUBSCRIBE (`unknown type`): polling, and the APRS pages say the firmware is too old.
+- Disconnect ends the subscription first, so events don't run on into `term.py` or `flash.py`.
+
+## Activity Log and APRS
+
+- Times come from each record's age at the read (the radio's clock may have no date). Shown in local time.
+- The APRS group sits in Tools: Messages, Heard stations, Map, APRS Settings. It grows there.
+- MSG_SEND is the radio's own compose: it goes by the radio's TX rules. Console says whether it goes now or waits for APRS mode.
+- The map is Leaflet 1.9.4 from unpkg with SRI hashes, loaded only on the map page. Tiles: OpenStreetMap, attributed. Tests block tile requests.
+- APRS settings: the APRS record's MENU 0 5 items, found by which values follow the record. Changed with the menu's knob or `set`, checked by ferrite's link session, written backup-first like Radio Settings.
+
 ## Bridge and tests
 
 - The bridge is a dev tool, not a transport. It shows only in `npm run dev` or with `?bridge`.
 - It listens on 127.0.0.1 and refuses other origins.
 - E2E tests drive the real UI and check the radio by reading it back. They run on the simulator by default.
+- `--tcp-bt` bridges the simulator's Bluetooth side, paced like the BT513 (20-byte writes 25 ms apart, ~960 B/s back).
+- The headless simulator hears no APRS. The bridge's test hook injects a heard-station event; another drops a Live View update. Simulator only.
 
 ## Channels
 
