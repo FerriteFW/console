@@ -108,23 +108,18 @@ class Channels {
     radio.busy = "Reading channels";
     try {
       const info = await link.info();
+      // LINK-40: several whole records an answer.
+      const zmap = info.zones ? await link.readMany(ZONE, 0, info.zones) : new Map<number, Uint8Array>();
+      const cmap = await link.readMany(CHANNEL, 0, 1000, (at) => {
+        this.progress = { label: `Reading channels: at ${Math.min(at, 1000)} of 1000`, done: at, total: 1000 };
+      });
       const zones: Uint8Array[] = [];
       for (let i = 0; i < info.zones; i++) {
-        this.progress = { label: `Reading zone ${i + 1} of ${info.zones}`, done: i, total: info.zones + info.channels };
-        const r = await link.readRecord(ZONE, i);
+        const r = zmap.get(i);
         if (!r) throw new Error(`Zone ${i + 1} wasn't there (the radio said ${info.zones} zones).`);
         zones.push(r);
       }
-      const chans: Uint8Array[] = [];
-      for (let n = 0; n < 1000 && chans.length < info.channels; n++) {
-        this.progress = {
-          label: `Reading channels: ${chans.length} of ${info.channels} found, at ${n + 1}`,
-          done: info.zones + chans.length,
-          total: info.zones + info.channels,
-        };
-        const r = await link.readRecord(CHANNEL, n);
-        if (r) chans.push(r);
-      }
+      const chans = [...cmap.entries()].sort((x, y) => x[0] - y[0]).map(([, r]) => r);
       const { set, bad } = decodeSet(zones, chans);
       this.notes = bad;
       return set;

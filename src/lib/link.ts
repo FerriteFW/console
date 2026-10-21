@@ -296,6 +296,67 @@ export class Link {
   }
 
   /**
+   * `run` whole-record writes from ops[i] as WRITE_MANY frames (LINK-41). Busy answers carry how many went in;
+   * the rest is sent again. A refusal throws `WriteError` on the op the radio stopped at.
+   */
+  private async writeMany(ops: PlanOp[], i: number, run: number, progress: (done: number) => void): Promise<void> {
+    let done = 0;
+    const end = performance.now() + P.timing.busy_retry_ms;
+    while (done < run) {
+      const recs = ops.slice(i + done, i + run).map((o) => wholeRecord(o)!);
+      const body = new Uint8Array(1 + recs.reduce((n, r) => n + r.entry.length, 0));
+      body[0] = recs[0].what;
+      let o = 1;
+      for (const r of recs) {
+        body.set(r.entry, o);
+        o += r.entry.length;
+      }
+      const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+      const applied = rest.length ? rest[0] : 0;
+      done += status === 0 ? recs.length : applied;
+      progress(i + done);
+      if (status === 0) continue;
+      if (status === 7 && performance.now() < end) {
+        await sleep(P.timing.busy_sleep_ms);
+        continue;
+      }
+      throw new WriteError(ops[i + done], i + done, new RadioError(P.msg.WRITE_MANY, status, rest.slice(1)));
+    }
+  }
+
+  /**
+   * Every record of `what` held at indexes first..end, several whole records an answer (READ_MANY, LINK-40), as a
+   * map index → bytes. `progress(at)` with the index it has reached.
+   */
+  readMany(what: number, first: number, end: number, progress?: (at: number) => void): Promise<Map<number, Uint8Array>> {
+    return this.exclusive(async () => {
+      const out = new Map<number, Uint8Array>();
+      let at = first;
+      while (at < end) {
+        const p = new Uint8Array(5);
+        const v = new DataView(p.buffer);
+        p[0] = what;
+        v.setUint16(1, at, true);
+        v.setUint16(3, Math.min(end - at, 0xffff), true);
+        const a = await this.okRaw(P.msg.READ_MANY, p);
+        const d = new DataView(a.buffer, a.byteOffset, a.byteLength);
+        const next = d.getUint16(0, true);
+        let o = 2;
+        while (o + 3 <= a.length) {
+          const i = d.getUint16(o, true);
+          const n = a[o + 2];
+          out.set(i, a.slice(o + 3, o + 3 + n));
+          o += 3 + n;
+        }
+        if (next <= at) break; // the radio's last index
+        at = next;
+        progress?.(at);
+      }
+      return out;
+    });
+  }
+
+  /**
    * A write session (LINK-9): BEGIN with the count, each op's WRITE parts or DELETE in order, then END, whatever
    * happened, all in one `exclusive` so nothing cuts in. Stops at the first refusal, which it throws with the op it
    * was on; `progress(done)` after each op.
@@ -304,7 +365,15 @@ export class Link {
     return this.exclusive(async () => {
       await this.okRaw(P.msg.BEGIN, begin);
       try {
-        for (let i = 0; i < ops.length; i++) {
+        for (let i = 0; i < ops.length; ) {
+          // LINK-41: channel and zone writes go as WRITE_MANY, several to a frame; deletes and the settings record
+          // (bigger than a frame) as before.
+          const run = manyRun(ops, i);
+          if (run > 0) {
+            await this.writeMany(ops, i, run, progress);
+            i += run;
+            continue;
+          }
           const op = ops[i];
           for (const p of op.payloads) {
             try {
@@ -313,7 +382,8 @@ export class Link {
               throw new WriteError(op, i, e as Error);
             }
           }
-          progress(i + 1);
+          i++;
+          progress(i);
         }
       } finally {
         try {
@@ -324,6 +394,31 @@ export class Link {
       }
     });
   }
+}
+
+/** A WRITE whose record fits one part: [what, index, offset 0, total, bytes] with the whole record in it. */
+function wholeRecord(op: PlanOp): { what: number; entry: Uint8Array } | null {
+  if (op.kind !== "write" || op.msg !== P.msg.WRITE || op.payloads.length !== 1) return null;
+  const p = op.payloads[0];
+  const off = p[3] | (p[4] << 8);
+  const total = p[5] | (p[6] << 8);
+  if ((p[0] !== 2 && p[0] !== 3) || off !== 0 || total !== p.length - 7 || total > 255) return null;
+  return { what: p[0], entry: new Uint8Array([p[1], p[2], total, ...p.slice(7)]) };
+}
+
+/** How many ops from `i` go in one WRITE_MANY frame (MAX_PAYLOAD 240: the what byte, then index, length, record). */
+function manyRun(ops: PlanOp[], i: number): number {
+  const first = wholeRecord(ops[i]);
+  if (!first) return 0;
+  let size = 1;
+  let n = 0;
+  for (let k = i; k < ops.length; k++) {
+    const r = wholeRecord(ops[k]);
+    if (!r || r.what !== first.what || size + r.entry.length > 240) break;
+    size += r.entry.length;
+    n++;
+  }
+  return n;
 }
 
 /** A write session stopped at an op: which, how many went before it, and the radio's reason. */

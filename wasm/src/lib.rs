@@ -84,7 +84,7 @@ pub fn protocol() -> String {
     serde_json::json!({
         "msg": { "HELLO": msg::HELLO, "INFO": msg::INFO, "AUTH": msg::AUTH, "READ": msg::READ, "WRITE": msg::WRITE,
                  "DELETE": msg::DELETE, "BEGIN": msg::BEGIN, "END": msg::END, "SLOT": msg::SLOT, "BAUD": msg::BAUD,
-                 "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI },
+                 "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET },
         "knobMax": key::KNOB_MAX,
         "keys": keys::NAMES,

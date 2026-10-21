@@ -58,7 +58,7 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY", number>;
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET", number>;
   knobMax: number;
   keys: string[];
