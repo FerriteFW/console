@@ -43,3 +43,14 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 3. Pick the nearest airport, add. AM, RX only rows. Write; PTT on one does nothing.
 4. Canadian sites (TAFL): filter, add a group. RX only, NFM rows.
 5. Undo edits if you don't want them.
+
+## Desktop app (macOS)
+
+Open `target/release/bundle/macos/Ferrite Console.app` (unsigned: right-click › Open the first time). Close `term.py` first.
+
+1. Connect › Cable: a list pops up under the bar. The CH340 (`usbserial-…`) is first. Pick it: "460800 baud".
+2. Run the Cable checks above. Unplug: the bar says so. Disconnect: `term.py` answers at 115200.
+3. Connect › Bluetooth: macOS asks for Bluetooth access once. Allow it.
+4. The list shows each radio by its ID, strongest first. Clear is `5F9EEB12-…`, black `E5A6A6FF-…`. Pick one.
+5. Run the Bluetooth checks above. Cancel and Esc close the list without an error.
+6. Write a channel table: the backup file lands in ~/Downloads (the webview's downloads are the open question).

@@ -1,39 +1,91 @@
-// Native transports for the Tauri apps (desktop now; iOS and Android later). The desktop webviews (WKWebView on
-// macOS, WebKitGTK on Linux) have no Web Serial or Web Bluetooth, so the shell will move the bytes: serial through
-// the `serialport` crate, BLE through `btleplug` (FFE0/FFE1 only, never FF31), behind the commands below, with
-// received bytes coming back as `transport://data` events.
-//
-// TODO(phase 1.5): implement `transport_open`, `transport_write`, `transport_close` in src-tauri/src/lib.rs. Until
-// then they answer "not implemented yet" and the desktop app offers the demo radio only (on Windows the WebView2
-// webview has Web Serial and Web Bluetooth of its own, so the web transports may work there as they are).
+// Native transports for the Tauri apps. The desktop webviews (WKWebView on macOS, WebKitGTK on Linux) have no Web
+// Serial or Web Bluetooth, so the shell (src-tauri/src) moves the bytes: the cable through the `serialport` crate,
+// Bluetooth through `btleplug` (FFE0/FFE1 only, never FF31). The user picks a port or a radio in the app's own
+// picker (picker.svelte.ts); received bytes and the close reason come back on a Tauri channel.
+import { picker, type PickItem } from "../picker.svelte";
 import type { Transport, TransportKind } from "./types";
 
 export const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+const api = () => import("@tauri-apps/api/core");
+
+type PortRow = { name: string; detail: string; cable: boolean };
+type BleRow = { id: string; name: string; rssi: number | null };
+type Opened = { label: string; baud: number | null };
+
+const sources = {
+  cable: {
+    async list(): Promise<PickItem[]> {
+      const { invoke } = await api();
+      const rows = await invoke<PortRow[]>("serial_ports");
+      return rows.map((r) => ({ id: r.name, name: r.name.replace(/^\/dev\/cu\./, ""), detail: r.detail, likely: r.cable }));
+    },
+  },
+  bluetooth: {
+    every: 800,
+    async start() {
+      const { invoke } = await api();
+      await invoke("ble_scan_start");
+    },
+    async stop() {
+      const { invoke } = await api();
+      await invoke("ble_scan_stop");
+    },
+    async list(): Promise<PickItem[]> {
+      const { invoke } = await api();
+      const rows = await invoke<BleRow[]>("ble_devices");
+      // By ID, never by name: every radio advertises "walkie-talkie".
+      return rows.map((r) => ({ id: r.id, name: r.name, detail: `${r.id}${r.rssi != null ? ` · ${r.rssi} dBm` : ""}`, likely: true }));
+    },
+  },
+};
+
 export class NativeTransport implements Transport {
   readonly slow: boolean;
-  label: string;
+  label = "";
+  baud?: number;
+  setBaud?: (rate: number) => Promise<void>;
   onData: (b: Uint8Array) => void = () => {};
   onClose: (why: string) => void = () => {};
+  private closing = false;
 
   private constructor(readonly kind: TransportKind) {
     this.slow = kind === "bluetooth";
-    this.label = kind === "bluetooth" ? "Bluetooth (native)" : "Cable (native)";
+    if (kind === "cable") {
+      // LINK-11: the shell changes the port's rate in place.
+      this.setBaud = async (rate: number) => {
+        const { invoke } = await api();
+        await invoke("transport_set_baud", { rate });
+        this.baud = rate;
+      };
+    }
   }
 
   static async open(kind: TransportKind): Promise<NativeTransport> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("transport_open", { kind }); // rejects with "not implemented yet" for now
-    return new NativeTransport(kind);
+    if (kind !== "cable" && kind !== "bluetooth") throw new Error(`No native transport for ${kind}.`);
+    const id = await picker.pick(kind, sources[kind]);
+    const { invoke, Channel } = await api();
+    const t = new NativeTransport(kind);
+    const events = new Channel<ArrayBuffer | string>();
+    events.onmessage = (m) => {
+      if (typeof m === "string") {
+        if (!t.closing) t.onClose(m);
+      } else t.onData(new Uint8Array(m));
+    };
+    const opened = await invoke<Opened>("transport_open", { kind, id, events });
+    t.label = opened.label;
+    if (opened.baud != null) t.baud = opened.baud;
+    return t;
   }
 
   async write(bytes: Uint8Array) {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke } = await api();
     await invoke("transport_write", { bytes: Array.from(bytes) });
   }
 
   async close() {
-    const { invoke } = await import("@tauri-apps/api/core");
+    this.closing = true;
+    const { invoke } = await api();
     await invoke("transport_close");
   }
 }
