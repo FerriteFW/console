@@ -135,6 +135,9 @@ implemented yet" for now. The desktop app runs the demo radio meanwhile. iOS and
   left or right half, or scroll on it or on the screen. Keyboard: digits, Enter/M, Esc/Backspace, arrows, S, V,
   Q, W, `,` `.` for * #, `[` `]` for the knob, Shift for long. There is no PTT: the core has no name for one.
 - Light and dark themes (the radio's own dark and daylight palettes).
+- Terminal (Tools): the radio's command line over the link (`CMD`, LINK-34), its answers and refusals as the radio
+  gives them; Enter, Up/Down history, Ctrl-L; shortcuts `help` `slot` `get` `ch 1` `gps`. `key`, `txtest` and `xb start`
+  are refused by Console (they transmit or press keys); Live View's polling runs alongside.
 
 ## Stubbed or later
 
@@ -142,7 +145,7 @@ implemented yet" for now. The desktop app runs the demo radio meanwhile. iOS and
   firmware sends SCREEN. The Screen option shows it as "soon".
 - Receive audio over the cable (LINK-13.1): a place in the Live View, nothing plays yet.
 - Native transports in the desktop app (above).
-- Sidebar sections marked "Soon": Activity Log, Radio Settings, Terminal, Firmware Update.
+- Sidebar sections marked "Soon": Activity Log, Radio Settings, Firmware Update.
 - Channels & Zones: range presets and the settings record (the link reads and writes them too; not in the table
   yet); channel positions (CHAN-2: not in the link's channel record, so a write keeps the radio's); RepeaterBook
   import; drag to reorder; the table draws every row (fine for a few hundred; 1,000 rows are slow to scroll).

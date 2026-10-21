@@ -6,6 +6,7 @@
   import LiveView from "./lib/pages/LiveView.svelte";
   import About from "./lib/pages/About.svelte";
   import Channels from "./lib/pages/Channels.svelte";
+  import Terminal from "./lib/pages/Terminal.svelte";
   import { channels } from "./lib/channels.svelte";
   import Soon from "./lib/pages/Soon.svelte";
   import { loadCore } from "./lib/core";
@@ -25,7 +26,7 @@
       pages: [
         { id: "channels", name: "Channels & Zones" },
         { id: "settings", name: "Radio Settings", soon: "The radio-wide settings record, read and written over the link." },
-        { id: "terminal", name: "Terminal", soon: "The radio's terminal command lines over the link (CMD), on the same session." },
+        { id: "terminal", name: "Terminal" },
         { id: "firmware", name: "Firmware Update", soon: "Restart into the bootloader (REBOOT) and flash a Ferrite image." },
       ],
     },
@@ -109,6 +110,8 @@
         <LiveView />
       {:else if page === "channels"}
         <Channels />
+      {:else if page === "terminal"}
+        <Terminal />
       {:else if page === "about"}
         <About />
       {:else}
