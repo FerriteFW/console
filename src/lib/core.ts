@@ -58,7 +58,7 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "KEY" | "CMD" | "MORE" | "UI", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI", number>;
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET", number>;
   knobMax: number;
   keys: string[];
@@ -238,3 +238,26 @@ export const settingsLen = () => wasm.settings_len();
 export const settingsBackup = (record: Uint8Array, saved: string, radio: Record<string, string>) => wasm.settings_backup(record, saved, js(radio));
 export const settingsRestore = (text: string): { record: number[]; saved: string; radio: Record<string, string> } =>
   JSON.parse(wasm.settings_restore(text));
+
+// Firmware Update (core/src/firmware.rs): the .btf checks (tools/btf.py) and the stock bootloader's frames
+// (tools/flash.py). The core only ever makes hello, model, count, the image's blocks and end.
+
+export type FirmwareCheck = {
+  file_len: number;
+  blocks: number;
+  image_len: number;
+  ferrite: boolean;
+  version: string | null;
+  crc32: string;
+  describe: string;
+  problems: string[];
+};
+export type BootStep = { cmd: number; what: string; block: number | null; timeout_ms: number };
+
+export const firmwareCheck = (btf: Uint8Array): FirmwareCheck => JSON.parse(wasm.firmware_check(btf));
+export const bootProbe = () => wasm.boot_probe();
+export const bootResultText = (r: number) => wasm.boot_result_text(r);
+export const FirmwareUpdate = wasm.FirmwareUpdate;
+export type FirmwareUpdate = wasm.FirmwareUpdate;
+export const BootReader = wasm.BootReader;
+export type BootReader = wasm.BootReader;

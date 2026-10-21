@@ -54,3 +54,16 @@ Open `target/release/bundle/macos/Ferrite Console.app` (unsigned: right-click �
 4. The list shows each radio by its ID, strongest first. Clear is `5F9EEB12-…`, black `E5A6A6FF-…`. Pick one.
 5. Run the Bluetooth checks above. Cancel and Esc close the list without an error.
 6. Write a channel table: the backup file lands in ~/Downloads (the webview's downloads are the open question).
+
+## Firmware Update (clear radio, cable). Alex only.
+
+1. Have the current image as a fallback, and `flash.py` ready.
+2. Build the new image: `tools/mkbtf.sh tx` in ferrite.
+3. Connect › Cable. Firmware Update › Choose .btf. Version, size, blocks show; "Checks passed".
+4. Pick a stock `.btf`: refused, "not a Ferrite image".
+5. Update firmware…: the radio's firmware and build show against the file's version. Install.
+6. The radio restarts; the bar says "Firmware Update holds"; blocks count up (about 85 s).
+7. Done: Console connects again and shows the version. Check About (MENU 0 9 9) and a channel.
+8. Optional, Dry TX on (MENU 0 8 9 2): hold PTT, press Install. Expect "it refused REBOOT (busy)".
+9. If a block fails: the radio waits in the bootloader. Resume, or reload the page and use "Open the cable and resume".
+10. If nothing answers: power-cycle the radio while Console waits, or fall back to `flash.py`.

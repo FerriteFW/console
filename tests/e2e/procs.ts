@@ -2,7 +2,9 @@
 // radio's cable, each on a free port. global-setup builds the simulator and starts the cable's bridge; each worker
 // starts its own simulator and bridge (helpers.ts), so tests on two workers never share a radio.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 
@@ -52,13 +54,15 @@ export function buildSim() {
 }
 
 /** Starts the bridge (and, without `serial`, a simulator behind it). Returns its ws:// URL and a stop function. */
-export async function startBridge(serial?: string): Promise<{ url: string; stop: () => void }> {
+/** On the simulator the bridge also runs the fake bootloader (tools/fakeboot.py), its mode file in `fakeboot`. */
+export async function startBridge(serial?: string): Promise<{ url: string; stop: () => void; fakeboot?: string }> {
   const procs: ChildProcess[] = [];
   const stop = () => {
     for (const p of procs.reverse()) p.kill();
   };
   try {
     let target: string[];
+    let fakeboot: string | undefined;
     if (serial) {
       target = ["--serial", serial];
     } else {
@@ -66,13 +70,14 @@ export async function startBridge(serial?: string): Promise<{ url: string; stop:
       const sim = spawn(simExe, ["--term-headless", "3600", "--term-tcp", String(simPort)], { stdio: ["ignore", "pipe", "pipe"] });
       procs.push(sim);
       await waitFor(sim, /nc 127\.0\.0\.1/, "the simulator");
-      target = ["--tcp", `127.0.0.1:${simPort}`];
+      fakeboot = join(mkdtempSync(join(tmpdir(), "ferrite-fakeboot-")), "mode.json");
+      target = ["--tcp", `127.0.0.1:${simPort}`, "--fakeboot", fakeboot];
     }
     const wsPort = await freePort();
     const bridge = spawn(python(), [`${root}/tools/bridge.py`, ...target, "--port", String(wsPort)], { stdio: ["ignore", "pipe", "pipe"] });
     procs.push(bridge);
     await waitFor(bridge, /ws:\/\/127\.0\.0\.1/, "the bridge");
-    return { url: `ws://127.0.0.1:${wsPort}`, stop };
+    return { url: `ws://127.0.0.1:${wsPort}`, stop, fakeboot };
   } catch (e) {
     stop();
     throw e;

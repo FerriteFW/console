@@ -1,6 +1,8 @@
 //! The core for the browser. Structures cross as JSON strings (the UI parses them); bytes as `Uint8Array`.
 
-use ferrite_console_core::{answers, channels, chirp, demo, keys, library, plan, records, session, settings, timing, ui, uid};
+use ferrite_console_core::{
+    answers, channels, chirp, demo, firmware, keys, library, plan, records, session, settings, timing, ui, uid,
+};
 use wasm_bindgen::prelude::*;
 
 fn json<T: serde::Serialize>(v: &T) -> String {
@@ -82,7 +84,7 @@ pub fn protocol() -> String {
     serde_json::json!({
         "msg": { "HELLO": msg::HELLO, "INFO": msg::INFO, "AUTH": msg::AUTH, "READ": msg::READ, "WRITE": msg::WRITE,
                  "DELETE": msg::DELETE, "BEGIN": msg::BEGIN, "END": msg::END, "SLOT": msg::SLOT, "BAUD": msg::BAUD,
-                 "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI },
+                 "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET },
         "knobMax": key::KNOB_MAX,
         "keys": keys::NAMES,
@@ -392,4 +394,69 @@ pub fn settings_backup(record: &[u8], saved: &str, radio: &str) -> Result<String
 pub fn settings_restore(text: &str) -> Result<String, JsError> {
     let (rec, b) = settings::restore(text).map_err(|e| JsError::new(&e))?;
     Ok(serde_json::json!({ "record": rec, "saved": b.saved, "radio": b.radio }).to_string())
+}
+
+// Firmware Update (`ferrite_console_core::firmware`): the .btf checks and the bootloader's frames.
+
+/// A picked .btf, checked: `{file_len, blocks, image_len, ferrite, version, crc32, describe, problems}`.
+#[wasm_bindgen]
+pub fn firmware_check(btf: &[u8]) -> String {
+    json(&firmware::check_file(btf))
+}
+
+/// The bootloader's probe frame.
+#[wasm_bindgen]
+pub fn boot_probe() -> Vec<u8> {
+    firmware::probe()
+}
+
+/// flash.py's results table: a reply's result byte as words.
+#[wasm_bindgen]
+pub fn boot_result_text(r: u8) -> String {
+    firmware::result_text(r).into()
+}
+
+/// A checked file's update: `steps()` frames in order (hello, model, count, the blocks, end), nothing else.
+#[wasm_bindgen]
+pub struct FirmwareUpdate(firmware::Update);
+
+#[wasm_bindgen]
+impl FirmwareUpdate {
+    /// Throws the check's problems when the file can't be flashed.
+    #[wasm_bindgen(constructor)]
+    pub fn new(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
+        firmware::Update::new(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
+    }
+    pub fn blocks(&self) -> usize {
+        self.0.blocks()
+    }
+    pub fn steps(&self) -> usize {
+        self.0.steps()
+    }
+    /// `{cmd, what, block, timeout_ms}`.
+    pub fn step(&self, i: usize) -> String {
+        json(&self.0.step(i))
+    }
+    pub fn frame(&self, i: usize) -> Vec<u8> {
+        self.0.frame(i)
+    }
+}
+
+/// The bootloader's replies in what the cable reads: `feed` gives them as flat pairs (cmd, result, cmd, ...).
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct BootReader(firmware::BootReader);
+
+#[wasm_bindgen]
+impl BootReader {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> BootReader {
+        BootReader(firmware::BootReader::new())
+    }
+    pub fn clear(&mut self) {
+        self.0.clear()
+    }
+    pub fn feed(&mut self, bytes: &[u8]) -> Vec<u8> {
+        self.0.feed(bytes).into_iter().flat_map(|(c, r)| [c, r]).collect()
+    }
 }

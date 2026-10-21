@@ -15,6 +15,7 @@ export const test = base.extend<{}, { bridge: string }>({
       if (given) return use(given);
       const b = await startBridge();
       process.env.FERRITE_E2E_BRIDGE = b.url; // openConsole reads it, in this worker only
+      if (b.fakeboot) process.env.FERRITE_E2E_FAKEBOOT = b.fakeboot; // firmware.spec's fake bootloader
       try {
         await use(b.url);
       } finally {

@@ -16,6 +16,10 @@ The WebSocket (ws://127.0.0.1:8765 by default, 127.0.0.1 only):
 - One client at a time; another is refused while one is connected. Only pages from localhost or 127.0.0.1 (or
   clients that send no Origin, such as scripts) may connect, so no web page you happen to visit can drive the radio.
 
+With `--fakeboot MODE.json` (the simulator only): once the simulator accepts a link REBOOT (LINK-24), the bytes go
+to a fake stock bootloader (tools/fakeboot.py) instead, until its END; then back to the simulator, which restarted
+meanwhile. The e2e tests run Firmware Update that way. MODE.json says how it behaves (see fakeboot.py).
+
 Python 3 standard library only, plus pyserial for --serial.
 """
 import argparse
@@ -23,10 +27,14 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 import struct
 import sys
 import threading
 from urllib.parse import urlparse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fakeboot  # noqa: E402
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 OK_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
@@ -229,11 +237,72 @@ class TcpTarget:
         self.w.close()
 
 
+REBOOT = 0x21
+
+
+def link_crc(data):
+    """CRC-16/CCITT-FALSE, the link's."""
+    c = 0xFFFF
+    for x in data:
+        c ^= x << 8
+        for _ in range(8):
+            c = ((c << 1) ^ 0x1021) & 0xFFFF if c & 0x8000 else (c << 1) & 0xFFFF
+    return c
+
+
+def cobs_decode(b):
+    out, i = bytearray(), 0
+    while i < len(b):
+        n = b[i]
+        if n == 0 or i + n > len(b):
+            return None
+        out += b[i + 1 : i + n]
+        i += n
+        if n < 0xFF and i < len(b):
+            out.append(0)
+    return bytes(out)
+
+
+def cobs_encode(b):
+    out, block = bytearray(), bytearray()
+    for x in b:
+        if x == 0:
+            out += bytes([len(block) + 1]) + block
+            block = bytearray()
+        else:
+            block.append(x)
+    return bytes(out + bytes([len(block) + 1]) + block)
+
+
+def link_answer(ty, seq, status):
+    body = bytes([ty | 0x80, seq, status])
+    return cobs_encode(body + struct.pack("<H", link_crc(body))) + b"\x00"
+
+
+class LinkFrames:
+    """Link frames (COBS between 0x00s, CRC last) in a byte stream, as (type, seq, payload)."""
+
+    def __init__(self):
+        self.buf = b""
+
+    def feed(self, data):
+        self.buf += data
+        *parts, self.buf = self.buf.split(b"\x00")
+        out = []
+        for p in parts:
+            body = cobs_decode(p) if p else None
+            if body and len(body) >= 4 and link_crc(body[:-2]) == struct.unpack("<H", body[-2:])[0]:
+                out.append((body[0], body[1], body[2:-2]))
+        return out
+
+
 class Bridge:
-    def __init__(self, make_target, allow_origins, verbose):
+    def __init__(self, make_target, allow_origins, verbose, fakeboot_mode=None):
         self.make_target = make_target
         self.allow_origins = set(allow_origins)
         self.verbose = verbose
+        self.fakeboot_mode = fakeboot_mode
+        self.boot = None
         self.busy = False
 
     async def client(self, r, w):
@@ -259,11 +328,34 @@ class Bridge:
     async def relay(self, ws, peer):
         target = self.make_target()
         gone = asyncio.get_running_loop().create_future()
+        # --fakeboot: REBOOT requests seen (seq) and the simulator's answers watched. The fake bootloader itself is
+        # the bridge's (self.boot): it stays across clients, as a radio stays in its bootloader when the cable reopens.
+        sent, heard, pending = LinkFrames(), LinkFrames(), set()
 
         def on_data(b):
+            if self.boot is not None:
+                return  # the simulator restarting meanwhile: the cable belongs to the bootloader
             if self.verbose:
                 log(f"<- {b.hex(' ')}")
             asyncio.ensure_future(ws.send(2, b))
+            if self.fakeboot_mode and pending:
+                for ty, seq, payload in heard.feed(b):
+                    if ty == REBOOT | 0x80 and seq in pending and payload[:1] == b"\x00":
+                        mode = fakeboot.read_mode(self.fakeboot_mode)
+                        self.boot = fakeboot.FakeBoot(mode, fakeboot.result_path(self.fakeboot_mode), log)
+                        pending.clear()
+                        log(f"fakeboot: REBOOT accepted; the fake bootloader has the cable ({mode})")
+
+        async def to_boot(data):
+            boot = self.boot
+            out = boot.feed(data)
+            if out:
+                await ws.send(2, out)
+            if boot.done:
+                await asyncio.sleep(0.2)  # the reset; the simulator restarted at REBOOT and runs on
+                self.boot = None
+                heard.buf = b""
+                log("fakeboot: END; the cable is the simulator's again")
 
         def on_close(why):
             if not gone.done():
@@ -285,6 +377,16 @@ class Bridge:
                 if op == 2:
                     if self.verbose:
                         log(f"-> {data.hex(' ')}")
+                    if self.boot is not None:
+                        await to_boot(data)
+                        continue
+                    if self.fakeboot_mode:
+                        reboots = [seq for ty, seq, _ in sent.feed(data) if ty == REBOOT]
+                        if reboots and fakeboot.read_mode(self.fakeboot_mode).get("reboot") == "busy":
+                            log("fakeboot: REBOOT answered busy, as asked (the radio transmitting)")
+                            await ws.send(2, link_answer(REBOOT, reboots[-1], 7))
+                            continue
+                        pending.update(reboots)
                     await target.write(data)
                 elif op == 1:
                     try:
@@ -327,13 +429,17 @@ def main():
     ap.add_argument("--allow-origin", action="append", default=[], metavar="ORIGIN",
                     help="also allow pages from this origin (e.g. https://console.ferritefw.dev)")
     ap.add_argument("-v", "--verbose", action="store_true", help="log every byte")
+    ap.add_argument("--fakeboot", metavar="MODE.json",
+                    help="the simulator only: a fake bootloader takes the cable after REBOOT (tools/fakeboot.py)")
     a = ap.parse_args()
+    if a.fakeboot and a.serial:
+        ap.error("--fakeboot is for the simulator (--tcp) only: a radio has its own bootloader")
     if a.serial:
         make = lambda: SerialTarget(a.serial, a.baud)  # noqa: E731
     else:
         host, _, port = a.tcp.rpartition(":")
         make = lambda: TcpTarget(host or "127.0.0.1", int(port))  # noqa: E731
-    bridge = Bridge(make, a.allow_origin, a.verbose)
+    bridge = Bridge(make, a.allow_origin, a.verbose, a.fakeboot)
 
     async def serve():
         server = await asyncio.start_server(bridge.client, "127.0.0.1", a.port)

@@ -10,6 +10,7 @@ Private until the licence is chosen.
 - `src/`: the Svelte 5 UI (Vite).
 - `public/data/`: the channel library's data. See [tools/library/README.md](tools/library/README.md).
 - `tools/bridge.py`: the dev bridge. A local WebSocket to a serial port or the simulator.
+- `tools/fakeboot.py`: a fake stock bootloader the bridge runs after REBOOT, for testing Firmware Update on the simulator.
 - `tests/e2e/`: Playwright end-to-end tests.
 - `src-tauri/`: the Tauri 2 desktop shell. Native cable and Bluetooth; the protocol stays in the webview.
 
@@ -69,6 +70,7 @@ npm run e2e:run     # the same without the build
 - Add channels: Canadian licensed sites (TAFL) near a place, grouped by licensee.
 - Radio Settings: every menu setting by its number and name; write with a backup and a diff first.
 - Terminal: the radio's command line, with history; `key`, `txtest` and `xb start` refused.
+- Firmware Update: a Ferrite `.btf` into a radio already on Ferrite, over the cable. First installs stay with `flash.py`.
 - Light and dark themes.
 
 ## Not done yet
@@ -76,7 +78,7 @@ npm run e2e:run     # the same without the build
 - Repeaters in Add channels. NeonPlug's list is DMR only, with no tones or coordinates (the tab says why).
 - The pixel mirror (SCREEN) and receive audio over the cable.
 - Signed and notarised desktop builds. Windows and Linux builds aren't tried yet.
-- Activity Log, Firmware Update.
+- Activity Log.
 - APRS settings in Radio Settings (the link doesn't carry the APRS record yet).
 - Range presets and the settings record in the table.
 - Channel positions, drag to reorder, a virtual table for 1,000 rows.

@@ -17,6 +17,7 @@
 //! - [`records`]: `READ`/`WRITE`/`DELETE`/`BEGIN`/`END` payloads, for channel and zone programming (phase 2).
 //! - [`library`]: the "Add channels" library: fixed sets, airports and TAFL sites near a place, as channels.
 //! - [`settings`]: the radio-wide settings record as the menu shows it (Radio Settings).
+//! - [`firmware`]: Firmware Update: the `.btf` checks and the stock bootloader's frames (tools/btf.py, flash.py).
 //! - [`demo`]: a demo radio answering from memory, for trying Console without a radio.
 //! - [`timing`]: the reference client's time-outs and pacing, in one place.
 
@@ -24,6 +25,7 @@ pub mod answers;
 pub mod channels;
 pub mod chirp;
 pub mod demo;
+pub mod firmware;
 pub mod keys;
 pub mod library;
 pub mod plan;
