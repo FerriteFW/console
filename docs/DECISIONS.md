@@ -72,3 +72,4 @@
 - REBOOT `busy` (transmitting) is shown, and the session goes on.
 - A failed block keeps the cable held. Resume probes again, no REBOOT. A reloaded page can resume from the cable.
 - Tests: the bridge's fake bootloader (`tools/fakeboot.py`) on the simulator. Never a radio from the tests.
+- Oct 20, 2026 (Alex): the Tauri desktop app is parked as is: it builds and runs, no more work on it. The web Console comes first. A phone app needs its own small-screen UI whatever wraps it; likely native (SwiftUI) on the Rust core, decided later. Keep the core free of web-only code.
