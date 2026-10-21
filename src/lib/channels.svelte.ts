@@ -255,7 +255,16 @@ class Channels {
     const imp = this.imported;
     if (!imp) return;
     const byNum = new Map((replace ? [] : this.table.channels).map((c) => [c.number, c]));
-    for (const c of imp.channels) byNum.set(c.number, c);
+    for (const c of imp.channels) {
+      // Merge: what CHIRP's columns can't hold stays as the table had it (an export and import changes nothing).
+      const was = byNum.get(c.number);
+      byNum.set(
+        c.number,
+        was
+          ? { ...c, squelch: was.squelch, busy: was.busy, reverse: was.reverse, aprs: was.aprs, hidden: was.hidden, end_tone: was.end_tone, tail: was.tail, keep: was.keep }
+          : c,
+      );
+    }
     this.table.channels = [...byNum.values()].sort((a, b) => a.number - b.number);
     this.source = `${imp.channels.length} channels imported from ${imp.file}${replace ? " (replacing all)" : ""}`;
     this.notes = imp.notes;

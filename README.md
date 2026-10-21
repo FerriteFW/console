@@ -16,6 +16,8 @@ Phase 2: channel programming. Read the radio's channels and zones into a table, 
 | `core/` | The Rust core (`ferrite-console-core`): link sessions (sans I/O), answers (`HELLO`, `INFO`, `SLOT`, text), the UI readback parser, key codes, the unique ID's text, record payloads, channel and zone records (`channels.rs`), the write plan and backup files (`plan.rs`), CHIRP CSV (`chirp.rs`), ferrite's radio side in memory (`radioside.rs`), a demo radio. It reuses ferrite's own code by path, never a copy: `ferrite-core` (the frame codec, message and status numbers, the key map, the unique ID's base32) and `ferrite-app` (the `Channel`, `SlotCfg` and `ZoneCfg` types, their byte layouts in `persist.rs`, the tone and step tables, and the radio's own link session `link::Session` with its checks). |
 | `wasm/` | The core for the browser (wasm-bindgen). Built into `src/core-wasm/` (not in git) by `npm run wasm`. |
 | `src/` | The Svelte 5 UI (Vite). `lib/link.ts` is the session logic (mirrors `ferrite/tools/ferrite_link.py`), `lib/transport/` the byte pipes (Web Serial, Web Bluetooth, demo, native stub), `lib/components/` the screen, keypad and panels. |
+| `tools/bridge.py` | The development bridge: the link's bytes over a local WebSocket to a serial port or the simulator (below). |
+| `tests/e2e/` | The end-to-end tests (Playwright, Chromium) through the bridge. |
 | `src-tauri/` | The Tauri 2 desktop shell: the same UI. Native transports are stubbed (see below). |
 
 It needs the ferrite checkout next to it (`../ferrite`): the core builds against ferrite-core, and the UI uses
@@ -43,6 +45,58 @@ npm test             # the core's Rust tests (cargo test -p ferrite-console-core
 
 `http://localhost:1420/?demo` connects the demo radio at once (no hardware: the core's `DemoRadio` answers HELLO,
 INFO, UI and keys from memory). `?demo&press=MENU,DOWN,HASH:long` then presses keys; `?theme=light` picks the theme.
+
+### The bridge and the end-to-end tests
+
+A browser opens a serial port only after a person picks it, so scripts can't drive Console against the radio. The
+development bridge (`tools/bridge.py`, Python 3, standard library; pyserial for `--serial`) relays the link's raw
+bytes between a local WebSocket (`ws://127.0.0.1:8765`, 127.0.0.1 only, pages from localhost only, one client at a
+time) and the radio's cable or the simulator's TCP cable. Console shows a **Bridge** connect button in `npm run dev`
+or with `?bridge` in the URL (`?bridge=ws://127.0.0.1:PORT` for another port); normal users never see it. Binary
+frames are the bytes; text frames are JSON: the bridge says `{"bridge":1,"target":"serial"|"tcp","name":...,"baud":115200}`
+first, and Console's BAUD switch (LINK-11) sends `{"baud":460800}`, which the bridge applies to the serial port
+(after the bytes before it are out) and answers `{"baud":460800,"ok":true}` (`"ignored":true` on TCP).
+
+```sh
+# the simulator (from ../ferrite), its cable on TCP 7300, and the bridge in front of it
+../ferrite/target/debug/ferrite-sim --term-headless 3600 --term-tcp 7300   # cargo build -p ferrite-sim first
+python3 tools/bridge.py --tcp 127.0.0.1:7300
+# or the radio's cable (close term.py and anything else holding it)
+../.venv/bin/python tools/bridge.py --serial /dev/cu.usbserial-114220      # ls /dev/cu.usbserial-* for the name
+npm run dev    # then http://localhost:1420 > Bridge  (or a build: http://localhost:4173/?bridge)
+```
+
+`-v` logs every byte. The cable tops out at 460800 on the Mac with the CH340 cable: at 921600 the radio switches but
+never answers, so Console's ladder stays 460800, 230400, 115200.
+
+End-to-end tests (`tests/e2e/`, Playwright with its Chromium: `npx playwright install chromium` once):
+
+```sh
+npm run e2e        # builds, then runs them against a headless simulator through the bridge (both started for the run)
+npm run e2e:run    # the same without the build (dist/ must be current)
+npx playwright show-report                     # the HTML report; failures keep a screenshot and a trace
+```
+
+Tests, one per flow: connect (Radio panel, Live View shows home), keys (MENU opens a screen, BACK returns home),
+disconnect (BAUD 115200 and the port switched before closing), channels read (counts match INFO), edit and write
+(a backup downloads first and holds the old name; the diff shows exactly that channel's name old to new; written and
+read back by Console), read back (the radio holds the new name; then it is put back and checked), CHIRP (export,
+import that file by merge, Write shows nothing to write). Step screenshots, the backups and the CSV land in
+`test-results/shots/` (`FERRITE_E2E_OUT=dir` for another folder); `FERRITE_E2E_VERBOSE=1` shows the simulator's and
+bridge's output.
+
+Against the radio (the clear one or black, over the cable). **The write tests change the radio**: they rename one
+channel and put it back (also when a test fails), and each write downloads a backup first. Name a scratch channel:
+
+```sh
+FERRITE_E2E_SERIAL=/dev/cu.usbserial-114220 FERRITE_E2E_CHANNEL=999 npm run e2e
+```
+
+`FERRITE_E2E_SERIAL` makes the run start the bridge with `--serial` (the `radio` project, longer time-outs); or
+start a bridge yourself and pass `FERRITE_E2E_BRIDGE=ws://127.0.0.1:8765` (then `FERRITE_E2E_SERIAL` only picks the
+radio's time-outs and the channel rule). `FERRITE_E2E_CHANNEL` is the channel's number as the radio shows it and is
+required on the radio; on the simulator the last channel is used. Keep the backups from `test-results/shots/` until
+the channel is checked on the radio.
 
 ### Desktop app (Tauri 2)
 
@@ -121,7 +175,8 @@ implemented yet" for now. The desktop app runs the demo radio meanwhile. iOS and
   Tone/rToneFreq/cToneFreq/DtcsCode/DtcsPolarity/RxDtcsCode/CrossMode to and from the RX and TX tone words (every
   pair round-trips; `TSQL-R`/`DTCS-R` import without tones); Skip `S` skip, `P` priority; Power High/Mid/Low (watts:
   4 W up High, 1.5 W up Mid); Comment = the zone's name; modes FM, NFM, AM, USB, LSB, CW (others skipped); TStep to
-  the radio's step if it has it (else 12.5 kHz). Imported channels get squelch Global. Each imported channel is
+  the radio's step if it has it (else 12.5 kHz). New channels get squelch Global; a merge keeps what CHIRP can't hold (squelch, busy lockout, reverse, APRS,
+  hidden, end tone, tail) from the channel it replaces, so an export imported back changes nothing. Each imported channel is
   checked by ferrite's code; refused ones are skipped with the reason.
 - **Backup**: Back up radio (a fresh read to a file), Save table (the table, same format), Load file (a backup into
   the table; Write then shows the diff back to it and asks: that is the restore). The file is Console's JSON
@@ -218,6 +273,10 @@ backup first. Keep the downloaded backups until done.
 - Keypad presses are short or long only (KEY short/long); KEY down/up are in `Link.key` for later (holds such as
   SIDE1 monitor while held).
 - The cable's faster rate is on by default; a refusal or no answer leaves the link at 115200 and says so.
+- The bridge is a development tool, not a transport for users: it shows only in `npm run dev` or with `?bridge`,
+  listens on 127.0.0.1 and refuses pages from other origins, so a web page can't reach the radio through it.
+- End-to-end tests drive the real UI (buttons, the table, downloads, file inputs) in Playwright, not Console's
+  internals, and check the radio's side by reading it back; they run on the simulator by default.
 - Phase 2: the record layouts come from ferrite-app by path (its types and `Persist` impls); the field order of a
   link record is `link.rs`'s `channel_save`/`zone_save`, which are private there, so `channels.rs` calls the same
   `save`/`load` in the same order and the tests check the bytes against ferrite's real link session.
@@ -230,4 +289,4 @@ backup first. Keep the downloaded backups until done.
 - Backup files are Console's own JSON with the link's record bytes (exact, version-tied as LINK-21 says), not CHIRP
   CSV (which can't hold zones, end tones or flags).
 - CHIRP: Location is the radio's channel number (1-1000), a 0-based file moved up one; Comment carries the zone
-  name; new and imported channels get squelch Global; WFM and digital modes are skipped.
+  name; new channels get squelch Global, merged ones keep the fields CHIRP has no column for; WFM and digital modes are skipped.

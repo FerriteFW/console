@@ -3,6 +3,7 @@
 import { loadCore, parseUi, type Hello, type Info, type Ui } from "./core";
 import { Link, RadioError, TimeoutError } from "./link";
 import { provider, type Transport, type TransportKind } from "./transport";
+import { BridgeTransport } from "./transport/bridge";
 import { sleep } from "./transport/types";
 
 export type Phase = "idle" | "connecting" | "pin" | "connected";
@@ -57,6 +58,15 @@ class Radio {
   }
 
   async connect(kind: TransportKind) {
+    return this.connectWith(() => provider.open(kind));
+  }
+
+  /** The development bridge (tools/bridge.py): the cable or the simulator over a local WebSocket. */
+  async connectBridge(url?: string) {
+    return this.connectWith(() => BridgeTransport.open(url));
+  }
+
+  private async connectWith(open: () => Promise<Transport>) {
     if (this.phase !== "idle") return;
     this.error = "";
     this.note = "";
@@ -64,9 +74,9 @@ class Radio {
     const gen = ++this.generation;
     try {
       await loadCore();
-      const t = await provider.open(kind);
+      const t = await open();
       this.t = t;
-      this.kind = kind;
+      this.kind = t.kind;
       this.label = t.label;
       const link = new Link(t);
       this.link = link;

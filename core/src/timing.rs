@@ -33,6 +33,7 @@ pub const BAUD_FALLBACK_MS: u32 = 1_000;
 /// The cable's resting rate.
 pub const CABLE_BAUD: u32 = 115_200;
 /// The rates Console tries on the cable, best first (LINK-13.3, decision 213); 115200 if neither answers.
+/// 460800 is the top: at 921600 the radio switches but never answers on the CH340 cable (Alex, Oct 20, 2026).
 pub const CABLE_FAST_RATES: [u32; 2] = [460_800, 230_400];
 /// A long press on the drawn keypad: held this long, it is sent as a long press (the radio's own is 700 ms,
 /// KEY-3; remote long presses hold 750 ms).

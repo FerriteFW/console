@@ -1,6 +1,10 @@
 <script lang="ts">
   import { radio } from "../radio.svelte";
   import type { TransportKind } from "../transport";
+  import { bridgeEnabled, bridgeUrl } from "../transport/bridge";
+
+  // The development bridge (tools/bridge.py): only in `npm run dev` or with ?bridge in the URL.
+  const bridge = bridgeEnabled();
 
   const avail = $derived(radio.available());
   let pin = $state("");
@@ -64,6 +68,9 @@
           onclick={() => radio.connect(b.kind)}>{b.name}</button
         >
       {/each}
+      {#if bridge}
+        <button class="btn" title={`Development bridge: ${bridgeUrl()} (tools/bridge.py)`} onclick={() => radio.connectBridge()}>Bridge</button>
+      {/if}
     {:else if radio.phase === "pin"}
       <form class="pin" onsubmit={sendPin}>
         <label for="pin">PIN</label>
