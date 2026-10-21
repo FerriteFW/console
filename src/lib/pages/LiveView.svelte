@@ -9,6 +9,8 @@
   import KeyboardHelp from "../components/KeyboardHelp.svelte";
   import { radio } from "../radio.svelte";
   import { presser, turn } from "../press.svelte";
+  import { sequencer } from "../sequence.svelte";
+  import { copyPng, download, pngName, screenPng } from "../snapshot";
 
   let scale = $state(load("scale", 1.5));
   let showKeypad = $state(true);
@@ -67,6 +69,39 @@
     const name = keyName(e);
     if (name) presser.up(name);
   }
+  // Save the screen as a PNG at the radio's 240 x 320 (or 2x), or copy it.
+  let shotNote = $state("");
+  const screenEl = () => document.querySelector<HTMLElement>("[data-readback-screen]");
+  async function savePng(scale = 1) {
+    const el = screenEl();
+    if (!el) return;
+    shotNote = "";
+    try {
+      download(await screenPng(el, scale), pngName(radio.ui?.screen?.id));
+    } catch (e) {
+      shotNote = `PNG: ${(e as Error).message}`;
+    }
+  }
+  async function copyShot() {
+    const el = screenEl();
+    if (!el) return;
+    try {
+      await copyPng(() => screenPng(el, 1));
+      shotNote = "Copied";
+    } catch (e) {
+      shotNote = `Copy: ${(e as Error).message}`;
+    }
+    setTimeout(() => (shotNote = ""), 3000);
+  }
+
+  // A typed key sequence, pressed in order; a disconnect ends it.
+  let seqText = $state("");
+  async function sendSeq(e: SubmitEvent) {
+    e.preventDefault();
+    if (sequencer.running) return;
+    await sequencer.run(seqText);
+  }
+
   function onblur() {
     for (const k of Object.keys(presser.shown)) presser.cancel(k);
   }
@@ -90,10 +125,45 @@
       <span class="meta">{radio.uiMs} ms{#if radio.ui?.screen} · {radio.ui.screen.id}{/if}</span>
     {/if}
     <span class="spacer"></span>
+    <span class="group">
+      <button class="btn quiet" onclick={() => savePng(1)} disabled={!connected || !radio.ui} title="Save the screen as a 240×320 PNG"
+        >Save PNG</button
+      ><button
+        class="btn quiet more"
+        popovertarget="shot-menu"
+        disabled={!connected || !radio.ui}
+        title="More: 2× PNG, copy"
+        aria-label="More screenshot options">▾</button
+      >
+    </span>
+    {#if shotNote}<span class="meta" aria-live="polite">{shotNote}</span>{/if}
     {#if connected}
       <button class="btn quiet" popovertarget="radio-info" title="The radio's details">Radio</button>
     {/if}
     <button class="btn quiet" popovertarget="keys-help" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+    <form class="seq" onsubmit={sendSeq} aria-label="Key sequence">
+      <input
+        type="text"
+        bind:value={seqText}
+        oninput={() => (sequencer.error = "")}
+        list="seq-recent"
+        placeholder="Keys: MENU 0 7 1 · MENU:long DOWN"
+        aria-label="Key sequence"
+        autocomplete="off"
+        spellcheck="false"
+        disabled={!connected}
+      />
+      <datalist id="seq-recent">
+        {#each sequencer.recent as r (r)}<option value={r}></option>{/each}
+      </datalist>
+      {#if sequencer.running}
+        <button type="button" class="btn quiet" onclick={() => sequencer.stop()}>Stop</button>
+        <span class="meta">{sequencer.at + 1}/{sequencer.total}</span>
+      {:else}
+        <button type="submit" class="btn quiet" disabled={!connected || !seqText.trim()}>Send</button>
+      {/if}
+      {#if sequencer.error}<span class="err" role="alert">{sequencer.error}</span>{/if}
+    </form>
   </div>
 
   <section class="radio" aria-label="The radio">
@@ -125,6 +195,10 @@
   </section>
 
   <div id="radio-info" popover class="pop"><RadioInfo /></div>
+  <div id="shot-menu" popover class="pop menu">
+    <button class="btn quiet" popovertarget="shot-menu" popovertargetaction="hide" onclick={() => savePng(2)}>Save PNG 2× (480×640)</button>
+    <button class="btn quiet" popovertarget="shot-menu" popovertargetaction="hide" onclick={copyShot}>Copy to clipboard</button>
+  </div>
   <div id="keys-help" popover class="pop"><KeyboardHelp /></div>
 </div>
 
@@ -156,6 +230,46 @@
   }
   .spacer {
     flex: 1;
+  }
+  .group {
+    display: inline-flex;
+  }
+  .group .btn:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+  .group .more {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    border-left: 0;
+    padding-inline: 6px;
+  }
+  .menu:popover-open {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+  }
+  .seq {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    flex: 1 1 100%;
+  }
+  .seq input {
+    flex: 1 1 200px;
+    min-width: 0;
+    font: 12px/1.2 "JetBrains Mono", monospace;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 4px 8px;
+  }
+  .err {
+    color: var(--red);
+    font-size: 12px;
   }
   .pop {
     margin: auto;

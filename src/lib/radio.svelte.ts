@@ -173,14 +173,16 @@ class Radio {
     return this.fails >= FAILS_SHOWN;
   }
 
-  /** A key: "short" or "long" (never PTT). */
-  async press(name: string, long = false) {
-    if (!this.link || this.phase !== "connected") return;
+  /** A key: "short" or "long" (never PTT). True once the radio answered it. */
+  async press(name: string, long = false): Promise<boolean> {
+    if (!this.link || this.phase !== "connected") return false;
     try {
       await this.link.key(name, long ? "long" : "short");
       this.refresh();
+      return true;
     } catch (e) {
       this.flash(e);
+      return false;
     }
   }
 
