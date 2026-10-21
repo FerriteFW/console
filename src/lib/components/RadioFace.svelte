@@ -5,7 +5,7 @@
   import type { Snippet } from "svelte";
   import { presser, turn } from "../press.svelte";
 
-  let { screen, scale = 1.5, disabled = false }: { screen: Snippet; scale?: number; disabled?: boolean } = $props();
+  let { screen, scale = 1.5, disabled = false, asleep = false }: { screen: Snippet; scale?: number; disabled?: boolean; asleep?: boolean } = $props();
 
   type K = { name: string; label: string; small?: string; cls?: string; aria?: string };
   const digits: K[] = [
@@ -117,6 +117,8 @@
         <div class="scaled" style:transform={`scale(${scale})`}>
           {@render screen()}
         </div>
+        <!-- The radio's backlight is off: a small mark on the bezel; Console keys wake it and act at once (DISP-15.1). -->
+        {#if asleep}<span class="asleep" title="The radio's screen is dark. Keys from here wake it and act at once.">☾</span>{/if}
       </div>
 
       <div class="fkeys">
@@ -241,11 +243,21 @@
     box-shadow: var(--shadow);
   }
   .bezel {
+    position: relative;
     background: var(--bezel);
     border-radius: 10px;
     padding: 9px;
     width: calc(var(--screen-w) + 18px);
     height: calc(320px * var(--k) + 18px);
+  }
+  .asleep {
+    position: absolute;
+    right: 1px;
+    bottom: -2px;
+    font-size: 9px;
+    line-height: 1;
+    color: #8a929c;
+    pointer-events: none;
   }
   .scaled {
     width: 240px;

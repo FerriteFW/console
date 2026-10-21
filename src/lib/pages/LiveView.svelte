@@ -30,6 +30,7 @@
   });
 
   const connected = $derived(radio.phase === "connected");
+  const asleep = $derived(connected && Number(radio.ui?.state?.dark) === 1);
   // Narrow windows (a phone): the radio shrinks to fit, the side keys and bezel (~150 px) included.
   let innerWidth = $state(1200);
   const fit = $derived(Math.max(0.8, Math.min(scale, (innerWidth - 32 - (showKeypad ? 150 : 16)) / 240)));
@@ -116,9 +117,9 @@
       {/if}
     {/snippet}
     {#if showKeypad}
-      <RadioFace {screen} scale={fit} disabled={!connected} />
+      <RadioFace {screen} scale={fit} disabled={!connected} {asleep} />
     {:else}
-      <div class="bare" style:width={`${240 * fit}px`} style:height={`${320 * fit}px`}>
+      <div class="bare" title={asleep ? "The radio's screen is dark" : undefined} class:asleep style:width={`${240 * fit}px`} style:height={`${320 * fit}px`}>
         <div style:transform={`scale(${fit})`} style:transform-origin="0 0">{@render screen()}</div>
       </div>
     {/if}
@@ -191,6 +192,9 @@
   .idle b {
     color: var(--text);
     font-size: 14px;
+  }
+  .bare.asleep {
+    border-color: #2a2f36;
   }
   .bare {
     border-radius: 8px;
