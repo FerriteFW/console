@@ -97,6 +97,8 @@
     >
       <span>‹</span><span class="ridges"></span><span>›</span>
     </button>
+    <!-- The radio's top, left to right: volume, channel knob, the LED (a rectangle), the antenna. -->
+    <div class="led" title="LED"></div>
     <div class="antenna"></div>
   </div>
 
@@ -188,12 +190,21 @@
   .knob:hover:not(:disabled) {
     border-color: var(--blue);
   }
+  .led {
+    width: 30px;
+    height: 10px;
+    margin-left: auto;
+    margin-bottom: 6px;
+    border-radius: 2px;
+    background: #2a2f36;
+    border: 1px solid var(--key-edge);
+  }
   .antenna {
     width: 72px;
     height: 40px;
     border-radius: 4px 4px 0 0;
     background: #15171a;
-    margin-left: auto;
+    margin-left: 18px;
     margin-right: 40px;
   }
   .bodyrow {
