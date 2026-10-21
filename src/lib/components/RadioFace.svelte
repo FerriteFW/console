@@ -1,7 +1,7 @@
 <script lang="ts">
   // The RT-950 Pro's front, after ferrite's simulator (sim/src/face.rs): the channel knob on top, SIDE1 and SIDE2
   // on the left edge, the screen, the function keys (OK/MENU, A·B·C, the arrows, BACK, V/M) and the 3 x 4 keypad.
-  // No PTT is drawn: remote keys never transmit.
+  // PTT A and PTT B are drawn, greyed: remote keys never transmit.
   import type { Snippet } from "svelte";
   import { presser, turn } from "../press.svelte";
 
@@ -102,7 +102,10 @@
 
   <div class="bodyrow">
     <div class="sidekeys">
-      <div class="ptt" title="PTT: never from Console">PTT</div>
+      <!-- The radio's side keys top to bottom: PTT A, PTT B, PF1, PF2. The PTTs are drawn but never pressed from
+           Console: remote keys never transmit (LINK-19). -->
+      <div class="ptt" title="PTT A: never from Console">PTT A</div>
+      <div class="ptt" title="PTT B: never from Console">PTT B</div>
       {@render key({ name: "SIDE1", label: "SIDE1", small: "PF1", cls: "side" })}
       {@render key({ name: "SIDE2", label: "SIDE2", small: "PF2", cls: "side" })}
     </div>
@@ -204,7 +207,7 @@
     padding-top: 90px;
   }
   .ptt {
-    height: 78px;
+    height: 56px;
     border-radius: 8px 0 0 8px;
     background: #15171a;
     color: #4a5059;
