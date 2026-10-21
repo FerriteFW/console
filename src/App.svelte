@@ -5,6 +5,8 @@
   import Wordmark from "./lib/components/Wordmark.svelte";
   import LiveView from "./lib/pages/LiveView.svelte";
   import About from "./lib/pages/About.svelte";
+  import Channels from "./lib/pages/Channels.svelte";
+  import { channels } from "./lib/channels.svelte";
   import Soon from "./lib/pages/Soon.svelte";
   import { loadCore } from "./lib/core";
   import { radio } from "./lib/radio.svelte";
@@ -21,7 +23,7 @@
     {
       name: "Tools",
       pages: [
-        { id: "channels", name: "Channels & Zones", soon: "Read, edit and write the radio's channels and zones (READ and WRITE records). Phase 2, next." },
+        { id: "channels", name: "Channels & Zones" },
         { id: "settings", name: "Radio Settings", soon: "The radio-wide settings record, read and written over the link." },
         { id: "terminal", name: "Terminal", soon: "The radio's terminal command lines over the link (CMD), on the same session." },
         { id: "firmware", name: "Firmware Update", soon: "Restart into the bootloader (REBOOT) and flash a Ferrite image." },
@@ -46,12 +48,19 @@
     return () => window.removeEventListener("hashchange", on);
   });
 
+  // LINK-11: a page closed while connected puts the cable back at 115200 (best effort).
+  $effect(() => {
+    const off = () => radio.releaseNow();
+    window.addEventListener("pagehide", off);
+    return () => window.removeEventListener("pagehide", off);
+  });
+
   loadCore().catch((e) => (coreError = `The core didn't load: ${e.message}`));
 
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels };
   if (params.has("demo")) {
     void radio.connect("demo").then(async () => {
       for (const k of (params.get("press") ?? "").split(",").filter(Boolean)) {
@@ -98,6 +107,8 @@
     <main>
       {#if page === "live"}
         <LiveView />
+      {:else if page === "channels"}
+        <Channels />
       {:else if page === "about"}
         <About />
       {:else}

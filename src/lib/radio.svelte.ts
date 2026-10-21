@@ -39,11 +39,18 @@ class Radio {
     this.refresh();
   }
   pinError = $state("");
+  /** A transfer (channels read or written) holds the link: the Live View stops polling meanwhile. */
+  busy = $state("");
 
   private link: Link | null = null;
   private t: Transport | null = null;
   private wake: (() => void) | null = null;
   private generation = 0;
+
+  /** The link while connected (channel programming uses it directly). */
+  get connectedLink(): Link | null {
+    return this.phase === "connected" ? this.link : null;
+  }
 
   available() {
     return provider.available();
@@ -116,7 +123,7 @@ class Radio {
 
   private async poll(gen: number) {
     while (gen === this.generation && this.phase === "connected") {
-      if (this.live && this.link) {
+      if (this.live && this.link && !this.busy) {
         const t0 = performance.now();
         try {
           const text = await this.link.uiText();
@@ -140,6 +147,11 @@ class Radio {
       });
       this.wake = null;
     }
+  }
+
+  /** The page is closing: the cable's rate back to 115200, best effort (no waiting). */
+  releaseNow() {
+    if (this.phase === "connected") this.link?.releaseNow();
   }
 
   /** Read the screen again now (after a key). */
@@ -207,6 +219,7 @@ class Radio {
     this.kind = null;
     this.fails = 0;
     this.pinError = "";
+    this.busy = "";
     if (t) {
       try {
         await t.close();
@@ -217,6 +230,16 @@ class Radio {
   }
 
   async disconnect() {
+    // LINK-11: the cable back at 115200 first, so tools/flash.py and the terminal find the radio there.
+    const link = this.link;
+    if (link && this.phase === "connected") {
+      this.busy = "Restoring the cable's rate";
+      try {
+        await Promise.race([link.lowerBaud(), sleep(2500)]);
+      } catch {
+        /* best effort */
+      }
+    }
     await this.teardown();
     this.error = "";
     this.note = "";

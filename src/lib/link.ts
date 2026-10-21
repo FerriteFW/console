@@ -12,10 +12,12 @@ import {
   parseHello,
   parseInfo,
   parseTextChunk,
+  recordReader,
   statusText,
   type Answer,
   type Hello,
   type Info,
+  type PlanOp,
 } from "./core";
 import { sleep, type Transport } from "./transport/types";
 
@@ -229,5 +231,108 @@ export class Link {
       }
       return t.baud ?? cable_baud;
     });
+  }
+
+  /**
+   * LINK-11: puts the cable back at 115200 before Console lets it go, so the flasher and the terminal find the radio
+   * at its default rate (a raised rate otherwise stays until the radio restarts). BAUD 115200, the port switched,
+   * a HELLO there; best effort, quietly.
+   */
+  lowerBaud(): Promise<void> {
+    const t = this.t;
+    const { BAUD, HELLO } = P.msg;
+    const { baud_switch_ms, cable_baud } = P.timing;
+    if (!t.setBaud || (t.baud ?? cable_baud) === cable_baud || this.closed) return Promise.resolve();
+    return this.exclusive(async () => {
+      const { status } = await this.askRaw(BAUD, baudPayload(cable_baud), 600, false);
+      if (status !== 0) return;
+      await sleep(baud_switch_ms);
+      await t.setBaud!(cable_baud);
+      try {
+        await this.askRaw(HELLO, helloPayload(CLIENT_NAME), 800, false);
+      } catch {
+        /* the radio falls back to 115200 by itself without it (LINK-11) */
+      }
+    });
+  }
+
+  /**
+   * The page is going away: the BAUD 115200 request alone, written at once and not awaited. The radio switches
+   * after answering, and with no HELLO stays at 115200 (LINK-11's fall-back).
+   */
+  releaseNow() {
+    const base = P.timing.cable_baud;
+    if (this.closed || !this.t.setBaud || (this.t.baud ?? base) === base) return;
+    try {
+      void this.t.write(this.session.request(P.msg.BAUD, baudPayload(base), performance.now()));
+    } catch {
+      /* gone already */
+    }
+  }
+
+  /**
+   * One record, read in parts of 200 bytes (LINK-21): its bytes, or null when the radio has none at that index
+   * (`not found`). `busy` is asked again as for any request.
+   */
+  readRecord(what: number, index: number): Promise<Uint8Array | null> {
+    return this.exclusive(async () => {
+      const r = recordReader(what, index);
+      try {
+        while (!r.done()) {
+          let rest: Uint8Array;
+          try {
+            rest = await this.okRaw(P.msg.READ, r.next_payload());
+          } catch (e) {
+            if (e instanceof RadioError && e.status === 8) return null;
+            throw e;
+          }
+          if (!r.take(rest)) throw new Error("A READ answer didn't parse.");
+        }
+        return r.record();
+      } finally {
+        r.free();
+      }
+    });
+  }
+
+  /**
+   * A write session (LINK-9): BEGIN with the count, each op's WRITE parts or DELETE in order, then END, whatever
+   * happened, all in one `exclusive` so nothing cuts in. Stops at the first refusal, which it throws with the op it
+   * was on; `progress(done)` after each op.
+   */
+  writeSession(begin: Uint8Array, ops: PlanOp[], progress: (done: number) => void): Promise<void> {
+    return this.exclusive(async () => {
+      await this.okRaw(P.msg.BEGIN, begin);
+      try {
+        for (let i = 0; i < ops.length; i++) {
+          const op = ops[i];
+          for (const p of op.payloads) {
+            try {
+              await this.okRaw(op.msg, new Uint8Array(p));
+            } catch (e) {
+              throw new WriteError(op, i, e as Error);
+            }
+          }
+          progress(i + 1);
+        }
+      } finally {
+        try {
+          await this.okRaw(P.msg.END);
+        } catch {
+          /* the session also ends by itself after 5 s */
+        }
+      }
+    });
+  }
+}
+
+/** A write session stopped at an op: which, how many went before it, and the radio's reason. */
+export class WriteError extends Error {
+  constructor(
+    readonly op: PlanOp,
+    readonly done: number,
+    readonly reason: Error,
+  ) {
+    super(`${op.what} ${op.number}: ${reason instanceof RadioError && reason.status === 10 ? "cancelled on the radio (BACK)" : reason.message}`);
   }
 }

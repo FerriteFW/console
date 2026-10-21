@@ -96,3 +96,80 @@ export const knobPayloads = (steps: number): Uint8Array[] => {
   for (let i = 0; i < flat.length; i += 2) out.push(flat.slice(i, i + 2));
   return out;
 };
+
+// Phase 2: channels and zones. Record layouts, the views, the write plan (dry-run through ferrite's own link
+// session), backups and CHIRP CSV are all the core's (core/src/channels.rs, plan.rs, chirp.rs).
+
+export type Channel = {
+  number: number;
+  name: string;
+  rx: string;
+  duplex: string;
+  offset: string;
+  mode: string;
+  rx_tone: string;
+  tx_tone: string;
+  power: string;
+  step: string;
+  squelch: string;
+  zone: number | null;
+  busy: boolean;
+  reverse: boolean;
+  skip: boolean;
+  aprs: boolean;
+  rx_only: boolean;
+  hidden: boolean;
+  priority: boolean;
+  end_tone: string;
+  tail: string;
+  keep: number;
+};
+export type Zone = {
+  number: number;
+  name: string;
+  scan_all: boolean;
+  shown: boolean;
+  by_distance: boolean;
+  resume: string;
+  dwell: string;
+  pri1: number | null;
+  pri2: number | null;
+};
+export type ChannelSet = { zones: Zone[]; channels: Channel[] };
+export type Choices = {
+  modes: string[];
+  powers: string[];
+  steps: string[];
+  endTones: string[];
+  tails: string[];
+  resumes: string[];
+  duplex: string[];
+  squelch: string[];
+  ctcss: string[];
+  dcs: string[];
+  maxChannels: number;
+  maxZones: number;
+};
+export type Field = { field: string; from: string; to: string };
+export type Change = { what: "zone" | "channel"; number: number; kind: "added" | "changed" | "deleted"; name: string; fields: Field[] };
+export type Problem = { what: string; number: number; error: string };
+export type PlanOp = { kind: "write" | "delete"; what: "zone" | "channel"; number: number; msg: number; payloads: number[][] };
+export type Plan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[] };
+export type ChirpImport = { channels: Channel[]; notes: string[]; skipped: number };
+
+const js = JSON.stringify;
+export const channelChoices = (): Choices => JSON.parse(wasm.channel_choices());
+export const decodeSet = (zones: Uint8Array[], channels: Uint8Array[]): { set: ChannelSet; bad: string[] } =>
+  JSON.parse(wasm.decode_set(js(zones.map((z) => [...z])), js(channels.map((c) => [...c]))));
+export const normalizeChannel = (c: Channel): Channel => JSON.parse(wasm.normalize_channel(js(c)));
+export const normalizeZone = (z: Zone): Zone => JSON.parse(wasm.normalize_zone(js(z)));
+export const checkChannel = (c: Channel, zones: number): string | undefined => wasm.check_channel(js(c), zones) ?? undefined;
+export const newChannel = (number: number, rxMhz: string): Channel => JSON.parse(wasm.new_channel(number, rxMhz));
+export const newZone = (number: number, name: string): Zone => JSON.parse(wasm.new_zone(number, name));
+export const writePlan = (base: ChannelSet, want: ChannelSet): Plan => JSON.parse(wasm.write_plan(js(base), js(want)));
+export const backupFile = (set: ChannelSet, saved: string, radio: Record<string, string>) => wasm.backup_file(js(set), saved, js(radio));
+export const restoreFile = (text: string): { set: ChannelSet; saved: string; radio: Record<string, string> } =>
+  JSON.parse(wasm.restore_file(text));
+export const chirpExport = (set: ChannelSet) => wasm.chirp_export(js(set));
+export const chirpImport = (text: string, zones: Zone[]): ChirpImport => JSON.parse(wasm.chirp_import(text, js(zones)));
+export const recordReader = (what: number, index: number) => new wasm.RecordReader(what, index);
