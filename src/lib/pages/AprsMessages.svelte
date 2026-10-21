@@ -48,7 +48,7 @@
     if (m.state === "retrying") return `retrying (${m.tries})`;
     return m.state;
   }
-  const stateTag = (m: MsgRow) => ({ acked: "green", failed: "red", retrying: "amber", pending: "amber", unread: "blue" })[m.state as string] ?? "";
+  const stateTag = (m: MsgRow) => ({ acked: "green", failed: "red", rejected: "red", retrying: "amber", pending: "amber", unread: "blue" })[m.state as string] ?? "";
 
   async function send(e: SubmitEvent) {
     e.preventDefault();

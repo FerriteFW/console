@@ -279,7 +279,7 @@ export type Station = {
   path: string;
   comment: string;
 };
-export type MsgState = "unread" | "read" | "pending" | "acked" | "retrying" | "failed";
+export type MsgState = "unread" | "read" | "pending" | "acked" | "retrying" | "failed" | "rejected";
 export type Message = { inbound: boolean; state: MsgState; state_n: number; tries: number; ago_s: number; peer: string; text: string };
 export type AprsEvent =
   | { kind: "heard"; count: number; station: Station }

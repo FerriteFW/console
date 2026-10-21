@@ -41,7 +41,7 @@ impl<'a> Rd<'a> {
 /// The symbols a station record names (LINK-44).
 pub const SYMBOLS: [&str; 8] = ["Car", "Home", "Digi", "Weather", "Handheld", "iGate", "Truck", "Boat"];
 /// A message's states (LINK-44).
-pub const STATES: [&str; 6] = ["unread", "read", "pending", "acked", "retrying", "failed"];
+pub const STATES: [&str; 7] = ["unread", "read", "pending", "acked", "retrying", "failed", "rejected"];
 
 /// A station heard (LINK-44).
 #[derive(Clone, Debug, PartialEq, Serialize)]
