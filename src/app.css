@@ -1,0 +1,164 @@
+/* Ferrite's look: the radio's own colour tokens (ferrite/crates/ferrite-ui/src/gfx.rs for dark, theme.rs `day` for
+   light, which is the radio's daylight theme), JetBrains Mono for text, Ferrite Mono Tight for frequency digits,
+   Barlow for the wordmark. The fonts are ferrite's own files (ferrite/fonts), bundled by Vite. */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("@ferrite/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("@ferrite/fonts/JetBrainsMono-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("@ferrite/fonts/JetBrainsMono-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ferrite Mono Tight";
+  src: url("@ferrite/fonts/FerriteMonoTight-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Barlow Semi Condensed";
+  src: url("@ferrite/fonts/BarlowSemiCondensed-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-display: swap;
+}
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0b0d10;
+  --surface: #111418;
+  --raised: #171b20;
+  --line: #2a2f36;
+  --text: #f0f3f6;
+  --sub: #9aa3ae;
+  --dim: #5a616b;
+  --blue: #4da3ff;
+  --blue-fg: #08121f;
+  --green: #7ce38b;
+  --amber: #f5c542;
+  --red: #e5484d;
+  --violet: #b59cff;
+  --focus: #0f1b2a;
+  --toast: #1b2a3d;
+  /* The drawn radio: body, bezel and keys (ferrite/sim/src/face.rs). */
+  --body: #1a1d22;
+  --bezel: #050607;
+  --key: #2c3139;
+  --key-edge: #444b55;
+  --key-text: #eef1f4;
+  --shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 8px 24px rgb(0 0 0 / 0.35);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #eef1f4;
+  --raised: #f6f8fa;
+  --line: #b3bcc7;
+  --text: #0b0d10;
+  --sub: #3d4652;
+  --dim: #7a838e;
+  --blue: #0057c2;
+  --blue-fg: #ffffff;
+  --green: #0e7a2a;
+  --amber: #9a6700;
+  --red: #c21a1f;
+  --violet: #6a3fd1;
+  --focus: #e1ecfa;
+  --toast: #dce7f5;
+  --body: #2a2e35;
+  --bezel: #0b0c0e;
+  --key: #3a4049;
+  --key-edge: #555d68;
+  --key-text: #f4f6f8;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 8px 24px rgb(0 0 0 / 0.12);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 400 14px/1.45 "JetBrains Mono", ui-monospace, monospace;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+kbd {
+  font: 500 12px "JetBrains Mono", monospace;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--blue);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn.primary {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: var(--blue-fg);
+  font-weight: 700;
+}
+.btn.quiet {
+  background: transparent;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.label {
+  color: var(--sub);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}

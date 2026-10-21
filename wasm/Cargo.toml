@@ -1,0 +1,16 @@
+[package]
+name = "ferrite-console-wasm"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "The core for the browser: wasm-bindgen exports the web UI calls (sessions, answers, the UI readback, keys)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ferrite-console-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Pinned: `wasm-bindgen` (the CLI that writes the JS glue) must be this exact version (README).
+wasm-bindgen = "=0.2.129"
