@@ -14,7 +14,8 @@
       {
         "title": "Ferrite Console",
         "width": 1280,
-        "height": 940,
+        "height": 800,
+        "center": true,
         "minWidth": 720,
         "minHeight": 600,
         "backgroundColor": "#0B0D10"

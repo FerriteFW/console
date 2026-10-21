@@ -141,6 +141,20 @@ fn core_protocol() -> u8 {
 pub fn run() {
     tauri::Builder::default()
         .manage(App::default())
+        // The window fits the screen it opens on (a 14" MacBook is ~1512 x 945 points): 90 % of its height, up to
+        // 1440 wide, centred. The config's size is only the fallback.
+        .setup(|app| {
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                if let Ok(Some(m)) = w.current_monitor() {
+                    let s = m.size().to_logical::<f64>(m.scale_factor());
+                    let size = tauri::LogicalSize::new((s.width * 0.9).min(1440.0), (s.height * 0.9).min(1100.0));
+                    let _ = w.set_size(size);
+                    let _ = w.center();
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             serial_ports,
             ble_scan_start,

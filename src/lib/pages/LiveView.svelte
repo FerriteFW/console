@@ -34,8 +34,15 @@
   const connected = $derived(radio.phase === "connected");
   const asleep = $derived(connected && Number(radio.ui?.state?.dark) === 1);
   // Narrow windows (a phone): the radio shrinks to fit, the side keys and bezel (~150 px) included.
+  // The radio fits the window both ways: drawn at 1.5x it is about 490 x 920 px with the keypad (the screen alone
+  // 256 x 336); the sidebar, header and toolbar take about 300 px across and 230 px down.
   let innerWidth = $state(1200);
-  const fit = $derived(Math.max(0.8, Math.min(scale, (innerWidth - 32 - (showKeypad ? 150 : 16)) / 240)));
+  let innerHeight = $state(900);
+  const fit = $derived.by(() => {
+    const [w, h] = showKeypad ? [490, 920] : [256, 336];
+    const room = innerWidth > 860 ? innerWidth - 300 : innerWidth - 32;
+    return Math.max(0.6, Math.min(scale, (1.5 * room) / w, (1.5 * (innerHeight - 230)) / h));
+  });
 
   // Keyboard: as the web simulator's map (ferrite/sim-web), plus M for MENU; Shift for a long press.
   const CODES: Record<string, string> = {
@@ -108,7 +115,7 @@
   }
 </script>
 
-<svelte:window {onkeydown} {onkeyup} {onblur} bind:innerWidth />
+<svelte:window {onkeydown} {onkeyup} {onblur} bind:innerWidth bind:innerHeight />
 
 <div class="live">
   <div class="toolbar" role="toolbar" aria-label="Display">
@@ -187,7 +194,8 @@
       {/if}
     {/snippet}
     {#if showKeypad}
-      <RadioFace {screen} scale={fit} disabled={!connected} {asleep} />
+      <!-- The whole radio scales as one (keys and knob with the screen), drawn at 1.5x and zoomed to fit. -->
+      <div style:zoom={fit / 1.5}><RadioFace {screen} scale={1.5} disabled={!connected} {asleep} /></div>
     {:else}
       <div class="bare" title={asleep ? "The radio's screen is dark" : undefined} class:asleep style:width={`${240 * fit}px`} style:height={`${320 * fit}px`}>
         <div style:transform={`scale(${fit})`} style:transform-origin="0 0">{@render screen()}</div>
