@@ -60,3 +60,4 @@
 - Sidebar groups: Viewer, Tools, Console. Not-yet sections carry "Soon".
 - Connection flow: a status line, a "Ready to connect" panel, Connect and Disconnect.
 - Live View: the screen with a keypad that can hide, a size option, keyboard controls with Shift for long presses.
+- Oct 20, 2026 (Alex): a dark radio screen shows as a small "screen off" mark in Live View, not a grey cover. Console keys wake it and act at once (DISP-15.1), so there is no separate wake.

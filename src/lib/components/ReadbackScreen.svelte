@@ -180,7 +180,9 @@
   {#if ui.toast}
     <div class="toast"><b>{ui.toast.head}</b>{#if ui.toast.body}<span>{ui.toast.body}</span>{/if}</div>
   {/if}
-  {#if dark}<div class="darkness">Backlight off</div>{/if}
+  <!-- The radio's backlight is off: a small mark only. Console keys wake it and act at once (DISP-15.1), so the
+       screen stays readable here. -->
+  {#if dark}<div class="asleep" title="The radio's screen is dark. Keys from here wake it and act at once.">☾ screen off</div>{/if}
 </div>
 
 <style>
@@ -537,13 +539,16 @@
   .qv {
     color: var(--sub);
   }
-  .darkness {
+  .asleep {
     position: absolute;
-    inset: 0;
-    background: rgb(0 0 0 / 0.78);
-    color: #6b7280;
-    display: grid;
-    place-items: center;
-    font-size: 12px;
+    right: 6px;
+    bottom: 6px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgb(0 0 0 / 0.6);
+    border: 1px solid #3a4049;
+    color: #aab2bd;
+    font-size: 10px;
+    pointer-events: none;
   }
 </style>
