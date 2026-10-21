@@ -190,21 +190,24 @@
   .knob:hover:not(:disabled) {
     border-color: var(--blue);
   }
+  /* Centred between the channel knob and the antenna; whitish on the dark theme, grey on the light one. */
   .led {
-    width: 30px;
-    height: 10px;
-    margin-left: auto;
-    border-radius: 2px 2px 0 0;
-    border-bottom: 0;
-    background: #2a2f36;
+    width: 40px;
+    height: 13px;
+    margin: 0 auto;
+    border-radius: 3px 3px 0 0;
+    background: #d9dee4;
     border: 1px solid var(--key-edge);
+    border-bottom: 0;
+  }
+  :global([data-theme="light"]) .led {
+    background: #8a929c;
   }
   .antenna {
     width: 72px;
     height: 40px;
     border-radius: 4px 4px 0 0;
     background: #15171a;
-    margin-left: 18px;
     margin-right: 40px;
   }
   .bodyrow {
