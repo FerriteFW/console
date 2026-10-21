@@ -63,6 +63,7 @@ npm run e2e:run     # the same without the build
 - Add channels: fixed sets (FRS, GMRS, MURS, PMR446, marine, weather, BC resource roads, calling).
 - Add channels: airports near a place (AM, RX only), place typed or from the radio's GPS or fixed position.
 - Add channels: Canadian licensed sites (TAFL) near a place, grouped by licensee.
+- Terminal: the radio's command line, with history; `key`, `txtest` and `xb start` refused.
 - Light and dark themes.
 
 ## Not done yet
@@ -70,7 +71,7 @@ npm run e2e:run     # the same without the build
 - Repeaters in Add channels. NeonPlug's list is DMR only, with no tones or coordinates (the tab says why).
 - The pixel mirror (SCREEN) and receive audio over the cable.
 - Native transports in the desktop app (it runs the demo radio).
-- Activity Log, Radio Settings, Terminal, Firmware Update.
+- Activity Log, Radio Settings, Firmware Update.
 - Range presets and the settings record in the table.
 - Channel positions, drag to reorder, a virtual table for 1,000 rows.
 
