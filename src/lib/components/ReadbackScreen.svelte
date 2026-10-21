@@ -53,7 +53,7 @@
     st === "TX" ? "var(--red)" : st.startsWith("RX") || st === "MON" ? "var(--green)" : st === "heard" ? "var(--amber)" : "var(--sub)";
 </script>
 
-<div class="screen" style:width={`${W}px`} style:height={`${H}px`} aria-label="The radio's screen, from the UI readback">
+<div class="screen" data-readback-screen style:width={`${W}px`} style:height={`${H}px`} aria-label="The radio's screen, from the UI readback">
   <!-- status bar -->
   <div class="sbar" style:height={`${BAR}px`}>
     <span class="title">{title}</span>
