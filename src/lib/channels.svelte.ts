@@ -50,7 +50,7 @@ export function download(name: string, text: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-function stamp(d = new Date()) {
+export function stamp(d = new Date()) {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }

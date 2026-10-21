@@ -1,6 +1,6 @@
 //! The core for the browser. Structures cross as JSON strings (the UI parses them); bytes as `Uint8Array`.
 
-use ferrite_console_core::{answers, channels, chirp, demo, keys, library, plan, records, session, timing, ui, uid};
+use ferrite_console_core::{answers, channels, chirp, demo, keys, library, plan, records, session, settings, timing, ui, uid};
 use wasm_bindgen::prelude::*;
 
 fn json<T: serde::Serialize>(v: &T) -> String {
@@ -350,4 +350,44 @@ pub fn airport_name(icao: &str, type_name: &str, khz: u32, repeat: bool) -> Stri
 pub fn tafl_groups(names: &str) -> Result<String, JsError> {
     let n: Vec<String> = from_json(names, "names")?;
     Ok(json(&library::tafl_groups(&n, 2)))
+// Radio Settings: the settings record (bytes) as the radio's menu shows it, changed and checked by ferrite's own
+// App and link session (`ferrite_console_core::settings`).
+
+/// The record as the menu shows it (`settings::View` as JSON).
+#[wasm_bindgen]
+pub fn settings_view(record: &[u8]) -> String {
+    json(&settings::view(record))
+}
+
+/// One setting changed (`id`: "0 7 1", or a text field's name) to a value as the menu shows it: the new record, or
+/// the radio's reason.
+#[wasm_bindgen]
+pub fn settings_set(record: &[u8], id: &str, value: &str) -> Result<Vec<u8>, JsError> {
+    settings::set(record, id, value).map_err(|e| JsError::new(&e))
+}
+
+/// The write from the radio's record to the edited one (`settings::Plan` as JSON), dry-run through ferrite's link
+/// session.
+#[wasm_bindgen]
+pub fn settings_plan(base: &[u8], want: &[u8]) -> String {
+    json(&settings::plan(base, want))
+}
+
+/// This Console's record length (the radio's INFO says its own).
+#[wasm_bindgen]
+pub fn settings_len() -> u32 {
+    settings::record_len() as u32
+}
+
+#[wasm_bindgen]
+pub fn settings_backup(record: &[u8], saved: &str, radio: &str) -> Result<String, JsError> {
+    let r = from_json(radio, "radio")?;
+    Ok(settings::backup(record, saved, r))
+}
+
+/// A settings backup file to `{record, saved, radio}`, or why not.
+#[wasm_bindgen]
+pub fn settings_restore(text: &str) -> Result<String, JsError> {
+    let (rec, b) = settings::restore(text).map_err(|e| JsError::new(&e))?;
+    Ok(serde_json::json!({ "record": rec, "saved": b.saved, "radio": b.radio }).to_string())
 }
