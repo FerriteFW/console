@@ -194,8 +194,8 @@
     width: 30px;
     height: 10px;
     margin-left: auto;
-    margin-bottom: 6px;
-    border-radius: 2px;
+    border-radius: 2px 2px 0 0;
+    border-bottom: 0;
     background: #2a2f36;
     border: 1px solid var(--key-edge);
   }
