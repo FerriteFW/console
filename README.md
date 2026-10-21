@@ -11,13 +11,14 @@ Private until the licence is chosen.
 - `public/data/`: the channel library's data. See [tools/library/README.md](tools/library/README.md).
 - `tools/bridge.py`: the dev bridge. A local WebSocket to a serial port or the simulator.
 - `tests/e2e/`: Playwright end-to-end tests.
-- `src-tauri/`: the Tauri 2 desktop shell.
+- `src-tauri/`: the Tauri 2 desktop shell. Native cable and Bluetooth; the protocol stays in the webview.
 
 ## Setup
 
 - Node 20+, npm, Rust via rustup (`rust-toolchain.toml` pins it).
 - `cargo install wasm-bindgen-cli --version 0.2.129 --locked`
 - The ferrite checkout next to this one (`../ferrite`), and git access to `infamy/udigimodes`.
+- The desktop app on Linux also needs `libdbus-1-dev` and `libudev-dev` (Bluetooth, USB names).
 - `npm install`, then `npx playwright install chromium` once for the e2e tests.
 
 ## Run
@@ -26,7 +27,7 @@ Private until the licence is chosen.
 npm run dev                                    # http://localhost:1420 in Chrome
 npm run build                                  # the web build in dist/
 npm run tauri dev                              # the desktop app
-npm run tauri build -- --debug --bundles app   # Ferrite Console.app
+npm run tauri build                            # the .app and a .dmg in target/release/bundle/
 ```
 
 - `?demo` connects the demo radio. `?demo&press=MENU,DOWN` presses keys. `?theme=light` picks the theme.
@@ -51,6 +52,8 @@ npm run e2e:run     # the same without the build
 ## What works
 
 - Connect over the cable (Web Serial), Bluetooth (Web Bluetooth) or the demo radio.
+- The desktop app connects natively: the cable through `serialport`, Bluetooth through `btleplug`.
+- The desktop app picks the port or radio in its own list. Radios show by device ID.
 - PIN prompt when the radio's Bluetooth PIN lock is on.
 - Cable at 460800 or 230400 baud; back to 115200 on disconnect.
 - Radio panel: firmware, build, callsign, unique ID.
@@ -71,7 +74,7 @@ npm run e2e:run     # the same without the build
 
 - Repeaters in Add channels. NeonPlug's list is DMR only, with no tones or coordinates (the tab says why).
 - The pixel mirror (SCREEN) and receive audio over the cable.
-- Native transports in the desktop app (it runs the demo radio).
+- Signed and notarised desktop builds. Windows and Linux builds aren't tried yet.
 - Activity Log, Firmware Update.
 - APRS settings in Radio Settings (the link doesn't carry the APRS record yet).
 - Range presets and the settings record in the table.
