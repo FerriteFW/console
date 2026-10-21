@@ -44,6 +44,12 @@
     <span class="dot {status.dot}"></span>
     <span class="text">{status.text}</span>
     {#if radio.keyNote || radio.note}<span class="note" class:warn={!!radio.keyNote}>· {radio.keyNote || radio.note}</span>{/if}
+    {#if radio.phase === "connected" && radio.info}
+      <!-- The radio in one line; its full details open from Live View's Radio button. -->
+      <span class="strip"
+        >{[radio.info.callsign || "no callsign", radio.info.firmware, radio.info.build?.name, radio.kind === "cable" && radio.baud ? `${radio.baud} baud` : ""].filter(Boolean).join(" · ")}</span
+      >
+    {/if}
   </div>
 
   <div class="actions">
@@ -163,5 +169,13 @@
     border-radius: 8px;
     background: var(--surface);
     color: var(--red);
+  }
+  .strip {
+    color: var(--sub);
+    font-size: 12px;
+    margin-left: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

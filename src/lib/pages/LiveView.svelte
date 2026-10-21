@@ -1,17 +1,15 @@
 <script lang="ts">
   // Live View (UV Studio's "Live Viewer"): the radio's screen beside its keys. The screen comes from the UI
-  // readback while connected (cable: several a second; Bluetooth: about one a second); the pixel mirror's source
-  // slots in later (PixelScreen). Keys from the drawn keypad or the keyboard; never PTT.
+  // readback while connected (cable: several a second; Bluetooth: about one a second; the pixel mirror, LINK-18,
+  // is shelved: decision 212). Keys from the drawn keypad or the keyboard; never PTT. Display options sit in a slim
+  // toolbar above the radio; the radio's details and the keyboard help open as pop-overs (Alex, Oct 20).
   import RadioFace from "../components/RadioFace.svelte";
   import ReadbackScreen from "../components/ReadbackScreen.svelte";
-  import PixelScreen from "../components/PixelScreen.svelte";
   import RadioInfo from "../components/RadioInfo.svelte";
   import KeyboardHelp from "../components/KeyboardHelp.svelte";
   import { radio } from "../radio.svelte";
   import { presser, turn } from "../press.svelte";
 
-  type Source = "readback" | "pixels";
-  let source = $state<Source>("readback");
   let scale = $state(load("scale", 1.5));
   let showKeypad = $state(true);
 
@@ -77,11 +75,30 @@
 <svelte:window {onkeydown} {onkeyup} {onblur} bind:innerWidth />
 
 <div class="live">
+  <div class="toolbar" role="toolbar" aria-label="Display">
+    <label
+      >Size
+      <select bind:value={scale}>
+        <option value={1}>1×</option>
+        <option value={1.5}>1.5×</option>
+        <option value={2}>2×</option>
+      </select>
+    </label>
+    <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
+    <label title="Pause reading the screen (keys still work)"><input type="checkbox" bind:checked={radio.live} /> Live</label>
+    {#if connected}
+      <span class="meta">{radio.uiMs} ms{#if radio.ui?.screen} · {radio.ui.screen.id}{/if}</span>
+    {/if}
+    <span class="spacer"></span>
+    {#if connected}
+      <button class="btn quiet" popovertarget="radio-info" title="The radio's details">Radio</button>
+    {/if}
+    <button class="btn quiet" popovertarget="keys-help" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+  </div>
+
   <section class="radio" aria-label="The radio">
     {#snippet screen()}
-      {#if source === "pixels"}
-        <PixelScreen />
-      {:else if radio.ui && connected}
+      {#if radio.ui && connected}
         <ReadbackScreen ui={radio.ui} />
       {:else}
         <div class="idle">
@@ -107,65 +124,55 @@
     {/if}
   </section>
 
-  <aside class="panels">
-    <RadioInfo />
-
-    <div class="card">
-      <div class="label">Display</div>
-      <div class="opts">
-        <label
-          >Size
-          <select bind:value={scale}>
-            <option value={1}>1×</option>
-            <option value={1.5}>1.5×</option>
-            <option value={2}>2×</option>
-          </select>
-        </label>
-        <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
-        <label title="Pause reading the screen (keys still work)"><input type="checkbox" bind:checked={radio.live} /> Live</label>
-      </div>
-      <div class="opts">
-        <span>Screen</span>
-        <label><input type="radio" bind:group={source} value="readback" /> Readback</label>
-        <label title="The cable's pixel mirror (SCREEN): coming in a later firmware">
-          <input type="radio" bind:group={source} value="pixels" disabled /> Pixels <span class="soon">soon</span>
-        </label>
-      </div>
-      {#if connected}
-        <div class="meta">
-          Readback {radio.uiMs} ms{#if radio.ui?.screen} · screen {radio.ui.screen.id}{/if}
-        </div>
-      {/if}
-    </div>
-
-    <div class="card audio" aria-label="Receive audio">
-      <div class="label">Audio</div>
-      <p>Receive audio over the cable (8 kHz IMA ADPCM, LINK-13.1) plays here in a later version.</p>
-    </div>
-
-    <KeyboardHelp />
-  </aside>
+  <div id="radio-info" popover class="pop"><RadioInfo /></div>
+  <div id="keys-help" popover class="pop"><KeyboardHelp /></div>
 </div>
 
 <style>
   .live {
     display: flex;
-    gap: 28px;
+    flex-direction: column;
+    gap: 14px;
     align-items: flex-start;
+  }
+  .toolbar {
+    display: flex;
     flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+    width: 100%;
+    max-width: 760px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    font-size: 13px;
+  }
+  .toolbar label {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    cursor: pointer;
+  }
+  .spacer {
+    flex: 1;
+  }
+  .pop {
+    margin: auto;
+    max-width: min(480px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .pop::backdrop {
+    background: rgba(0, 0, 0, 0.4);
   }
   .radio {
     flex: none;
     max-width: 100%;
     overflow-x: auto;
-  }
-  .panels {
-    flex: 1;
-    min-width: 280px;
-    max-width: 460px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
   }
   .idle {
     width: 240px;
@@ -191,19 +198,6 @@
     border: 8px solid var(--bezel);
     box-sizing: content-box;
   }
-  .opts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    align-items: center;
-    margin-top: 10px;
-  }
-  .opts label {
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
-    cursor: pointer;
-  }
   select {
     font: inherit;
     color: var(--text);
@@ -212,21 +206,8 @@
     border-radius: 6px;
     padding: 3px 6px;
   }
-  .soon {
-    font-size: 10px;
-    color: var(--sub);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 0 4px;
-  }
   .meta {
-    margin-top: 10px;
     color: var(--sub);
     font-size: 12px;
-  }
-  .audio p {
-    margin: 8px 0 0;
-    color: var(--sub);
-    font-size: 13px;
   }
 </style>

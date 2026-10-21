@@ -160,14 +160,15 @@
     padding-left: calc(58px + 34px);
     height: 40px;
   }
+  /* Alex, Oct 20: the volume knob about 70 % of the channel knob, the antenna three times wider than before. */
   .vol {
-    width: 36px;
-    height: 28px;
-    border-radius: 6px 6px 0 0;
-    background: var(--key);
+    width: 84px;
+    height: 26px;
+    border-radius: 7px 7px 0 0;
+    background: repeating-linear-gradient(90deg, var(--key) 0 6px, #23272d 6px 9px);
     border: 1px solid var(--key-edge);
     border-bottom: 0;
-    opacity: 0.6;
+    opacity: 0.7;
   }
   .knob {
     width: 120px;
@@ -188,7 +189,7 @@
     border-color: var(--blue);
   }
   .antenna {
-    width: 24px;
+    width: 72px;
     height: 40px;
     border-radius: 4px 4px 0 0;
     background: #15171a;
