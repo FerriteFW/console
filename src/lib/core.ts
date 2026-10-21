@@ -153,7 +153,7 @@ export type Choices = {
 export type Field = { field: string; from: string; to: string };
 export type Change = { what: "zone" | "channel"; number: number; kind: "added" | "changed" | "deleted"; name: string; fields: Field[] };
 export type Problem = { what: string; number: number; error: string };
-export type PlanOp = { kind: "write" | "delete"; what: "zone" | "channel"; number: number; msg: number; payloads: number[][] };
+export type PlanOp = { kind: "write" | "delete"; what: "zone" | "channel" | "settings"; number: number; msg: number; payloads: number[][] };
 export type Plan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[] };
 export type ChirpImport = { channels: Channel[]; notes: string[]; skipped: number };
 
@@ -173,3 +173,34 @@ export const restoreFile = (text: string): { set: ChannelSet; saved: string; rad
 export const chirpExport = (set: ChannelSet) => wasm.chirp_export(js(set));
 export const chirpImport = (text: string, zones: Zone[]): ChirpImport => JSON.parse(wasm.chirp_import(text, js(zones)));
 export const recordReader = (what: number, index: number) => new wasm.RecordReader(what, index);
+
+// Radio Settings: the settings record as the radio's menu shows it (core/src/settings.rs: ferrite's own App and
+// link session decide the values, choices and checks).
+
+export type SettingKind = "pick" | "level" | "text" | "readonly";
+export type SettingItem = {
+  id: string;
+  path: string;
+  name: string;
+  sub: string;
+  help: string;
+  value: string;
+  changed: boolean;
+  kind: SettingKind;
+  choices: string[];
+  hint: string;
+  note: string;
+};
+export type SettingsGroup = { path: string; name: string; items: SettingItem[]; note: string };
+export type SettingsView = { groups: SettingsGroup[]; notes: string[] };
+export type SettingChange = { id: string; path: string; group: string; name: string; from: string; to: string };
+export type SettingsPlan = { changes: SettingChange[]; begin: number[]; ops: PlanOp[]; problems: Problem[] };
+
+export const settingsView = (record: Uint8Array): SettingsView => JSON.parse(wasm.settings_view(record));
+/** The record with one setting changed, or throws the radio's reason. */
+export const settingsSet = (record: Uint8Array, id: string, value: string): Uint8Array => wasm.settings_set(record, id, value);
+export const settingsPlan = (base: Uint8Array, want: Uint8Array): SettingsPlan => JSON.parse(wasm.settings_plan(base, want));
+export const settingsLen = () => wasm.settings_len();
+export const settingsBackup = (record: Uint8Array, saved: string, radio: Record<string, string>) => wasm.settings_backup(record, saved, js(radio));
+export const settingsRestore = (text: string): { record: number[]; saved: string; radio: Record<string, string> } =>
+  JSON.parse(wasm.settings_restore(text));

@@ -15,6 +15,7 @@
 //! - [`keys`]: key names to stock key codes, `KEY` and knob payloads (never PTT).
 //! - [`uid`]: the unique ID as About shows it.
 //! - [`records`]: `READ`/`WRITE`/`DELETE`/`BEGIN`/`END` payloads, for channel and zone programming (phase 2).
+//! - [`settings`]: the radio-wide settings record as the menu shows it (Radio Settings).
 //! - [`demo`]: a demo radio answering from memory, for trying Console without a radio.
 //! - [`timing`]: the reference client's time-outs and pacing, in one place.
 
@@ -27,6 +28,7 @@ pub mod plan;
 pub mod radioside;
 pub mod records;
 pub mod session;
+pub mod settings;
 pub mod timing;
 pub mod ui;
 pub mod uid;

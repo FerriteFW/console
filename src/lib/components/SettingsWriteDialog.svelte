@@ -1,0 +1,182 @@
+<script lang="ts">
+  // A settings write's steps: the backup read (saved as a file), the diff with ferrite's own dry run, the write on
+  // confirm, and the read back.
+  import { settings } from "../settings.svelte";
+
+  const w = $derived(settings.write);
+</script>
+
+{#if w}
+  <div class="overlay" role="presentation">
+    <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="swrite-title">
+      <h2 id="swrite-title">Write settings to the radio</h2>
+
+      {#if w.step === "backup"}
+        <p>Reading the radio's settings for a backup first…</p>
+      {:else if w.step === "review"}
+        <p class="ok">Backup saved: <b>{w.backupName}</b> (your downloads). Load it here to put the radio back.</p>
+        {#if w.drifted}
+          <p class="note">The radio's settings changed since they were read: this diff is against the radio as it is now.</p>
+        {/if}
+        {#if w.plan.problems.length}
+          <div class="problems">
+            <b>The radio would refuse or keep {w.plan.problems.length === 1 ? "this" : "these"}:</b>
+            <ul>{#each w.plan.problems as p, i (i)}<li>{p.error}</li>{/each}</ul>
+          </div>
+        {/if}
+        {#if !w.plan.changes.length}
+          <p>Nothing to write: the radio already holds these settings.</p>
+        {:else}
+          <div class="diff">
+            <h3 class="changed">Changed ({w.plan.changes.length})</h3>
+            <ul>
+              {#each w.plan.changes as c (c.id)}
+                <li>
+                  <span class="what">{c.path}</span>
+                  <span class="nm">{c.name}</span>
+                  <span class="f"><s>{c.from || "–"}</s> → <b>{c.to || "–"}</b></span>
+                  <span class="grp">{c.group}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
+        <div class="actions">
+          <button class="btn" onclick={() => settings.closeWrite()}>Cancel</button>
+          <button class="btn primary" disabled={!!w.plan.problems.length || !w.plan.ops.length} onclick={() => settings.commitWrite()}>
+            Write {w.plan.changes.length} {w.plan.changes.length === 1 ? "change" : "changes"}
+          </button>
+        </div>
+      {:else if w.step === "writing"}
+        <p>Writing… The radio shows its progress; BACK there cancels.</p>
+      {:else}
+        {#if w.error}
+          <p class="err">Not written: {w.error}</p>
+          <p class="sub">The editor keeps your edits; Write again shows what is left.</p>
+        {:else if w.verified}
+          <p class="ok">Written: {w.plan.changes.length} {w.plan.changes.length === 1 ? "change" : "changes"}. Read back: the radio holds these settings.</p>
+        {:else}
+          <p class="note">Written, but the read back differs: the editor now shows what the radio holds.</p>
+        {/if}
+        <div class="actions"><button class="btn primary" onclick={() => settings.closeWrite()}>Close</button></div>
+      {/if}
+    </div>
+  </div>
+{/if}
+
+<style>
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgb(0 0 0 / 0.55);
+    display: grid;
+    place-items: center;
+    z-index: 20;
+    padding: 16px;
+  }
+  .dialog {
+    width: min(760px, 100%);
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    box-shadow: var(--shadow);
+  }
+  h2 {
+    margin: 0 0 12px;
+    font-size: 17px;
+  }
+  h3 {
+    margin: 14px 0 6px;
+    font-size: 13px;
+  }
+  h3.added {
+    color: var(--green);
+  }
+  h3.changed {
+    color: var(--amber);
+  }
+  h3.deleted {
+    color: var(--red);
+  }
+  p {
+    margin: 0 0 10px;
+  }
+  .sub {
+    color: var(--sub);
+    font-size: 12px;
+  }
+  .ok {
+    color: var(--green);
+  }
+  .note {
+    color: var(--amber);
+  }
+  .err {
+    color: var(--red);
+  }
+  .problems {
+    border: 1px solid var(--red);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    color: var(--red);
+  }
+  .problems ul,
+  .diff ul {
+    margin: 6px 0 0;
+    padding-left: 0;
+    list-style: none;
+  }
+  .diff li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .what {
+    color: var(--sub);
+    min-width: 64px;
+  }
+  .nm {
+    font-weight: 500;
+    min-width: 140px;
+  }
+  .fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    flex-basis: 100%;
+    padding-left: 74px;
+  }
+  .f i {
+    color: var(--sub);
+    font-style: normal;
+  }
+  .f s {
+    color: var(--dim);
+  }
+  .bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--raised);
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .bar div {
+    height: 100%;
+    background: var(--blue);
+    transition: width 0.1s;
+  }
+  .grp {
+    color: var(--dim);
+    font-size: 11px;
+    margin-left: auto;
+  }
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 16px;
+  }
+</style>

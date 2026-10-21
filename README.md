@@ -290,3 +290,12 @@ backup first. Keep the downloaded backups until done.
   CSV (which can't hold zones, end tones or flags).
 - CHIRP: Location is the radio's channel number (1-1000), a 0-based file moved up one; Comment carries the zone
   name; new channels get squelch Global, merged ones keep the fields CHIRP has no column for; WFM and digital modes are skipped.
+
+## Radio Settings
+
+- Read, edit, write the settings record (`READ`/`WRITE` what 1); groups, numbers, names and values as MENU 0 shows them.
+- All from ferrite's own App in the core (`core/src/settings.rs`): choices by turning the knob on the menu row, changes by its `set`.
+- Read only, "changes only on the radio": LINK-5's (region, Extend TX, PIN, cable port, KISS port), found by a dry write.
+- Not shown: what isn't in this record (APRS's own record isn't on the link yet; Watch, Battery Save, Dry TX); each group lists them.
+- Write: backup file, diff, ferrite's dry run, write, read back. Load file + Write restores.
+- Tests: `core` (record against ferrite's session, set, diff, write and read back); e2e `settings.spec.ts` (Key beep, Beep volume, restore).

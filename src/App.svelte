@@ -6,6 +6,8 @@
   import LiveView from "./lib/pages/LiveView.svelte";
   import About from "./lib/pages/About.svelte";
   import Channels from "./lib/pages/Channels.svelte";
+  import Settings from "./lib/pages/Settings.svelte";
+  import { settings } from "./lib/settings.svelte";
   import { channels } from "./lib/channels.svelte";
   import Soon from "./lib/pages/Soon.svelte";
   import { loadCore } from "./lib/core";
@@ -24,7 +26,7 @@
       name: "Tools",
       pages: [
         { id: "channels", name: "Channels & Zones" },
-        { id: "settings", name: "Radio Settings", soon: "The radio-wide settings record, read and written over the link." },
+        { id: "settings", name: "Radio Settings" },
         { id: "terminal", name: "Terminal", soon: "The radio's terminal command lines over the link (CMD), on the same session." },
         { id: "firmware", name: "Firmware Update", soon: "Restart into the bootloader (REBOOT) and flash a Ferrite image." },
       ],
@@ -60,7 +62,7 @@
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, settings };
   if (params.has("demo")) {
     void radio.connect("demo").then(async () => {
       for (const k of (params.get("press") ?? "").split(",").filter(Boolean)) {
@@ -109,6 +111,8 @@
         <LiveView />
       {:else if page === "channels"}
         <Channels />
+      {:else if page === "settings"}
+        <Settings />
       {:else if page === "about"}
         <About />
       {:else}

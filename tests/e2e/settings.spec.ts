@@ -1,0 +1,144 @@
+// Radio Settings through the bridge: read the settings record, change Key beep (a choice) and Beep volume (a level),
+// write them (a backup and the diff first), read back, then restore the backup file (the restore path) and check
+// both are back. On the radio both are put back even when a test fails.
+import { expect, test, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { connect, disconnect, onRadio, openConsole, shot, shotsDir, state } from "./helpers";
+
+test.describe.configure({ mode: "serial" });
+
+const long = () => (onRadio() ? 120_000 : 30_000);
+const BEEP = "0 7 5 1 Key beep";
+const VOL = "0 7 5 2 Beep volume";
+
+let page: Page;
+/** Key beep and Beep volume as read, and the first write's backup file (while the radio holds the edit). */
+let was: { beep: string; vol: string } | null = null;
+let backup: string | null = null;
+
+const dialog = () => page.getByRole("dialog");
+const beep = () => page.getByLabel(BEEP, { exact: true });
+const vol = () => page.getByLabel(`${VOL} value`, { exact: true });
+const values = () => state(page, (f) => Object.fromEntries(f.settings.view.groups.flatMap((g: any) => g.items.map((i: any) => [i.id, i.value]))));
+
+async function readRadio() {
+  await page.evaluate(() => ((window as any).__e2eBase = (window as any).ferrite.settings.base));
+  await page.getByRole("button", { name: "Read from radio" }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).ferrite.settings.base !== (window as any).__e2eBase), { timeout: long() }).toBe(true);
+  await expect(page.getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
+}
+
+async function startWrite() {
+  const dl = page.waitForEvent("download", { timeout: long() });
+  await page.getByRole("button", { name: "Write to radio…" }).click();
+  const d = await dl;
+  expect(d.suggestedFilename()).toMatch(/^ferrite-.*-settings-backup\.json$/);
+  const path = join(shotsDir(), `${onRadio() ? "radio" : "sim"}-${d.suggestedFilename()}`);
+  await d.saveAs(path);
+  await expect(dialog()).toContainText("Backup saved", { timeout: long() });
+  return path;
+}
+
+async function commitWrite(n: number) {
+  await dialog().getByRole("button", { name: `Write ${n} ${n === 1 ? "change" : "changes"}` }).click();
+  await expect(dialog()).toContainText("Read back: the radio holds these settings.", { timeout: long() });
+  await dialog().getByRole("button", { name: "Close" }).click();
+  await expect(dialog()).toHaveCount(0);
+}
+
+/** The backup file into the editor, then written: the radio as it was. */
+async function restore(path: string) {
+  await page.locator('input[type=file][accept^=".json"]').setInputFiles(path);
+  await expect(page.getByText(/^Loaded .*settings-backup\.json/)).toBeVisible();
+  await startWrite();
+  await commitWrite(2);
+}
+
+test.beforeAll(async ({ browser }) => {
+  page = await browser.newPage();
+  await openConsole(page, "settings");
+  await connect(page);
+});
+
+test.afterAll(async () => {
+  if (backup) {
+    try {
+      if (await dialog().count()) await dialog().getByRole("button", { name: /^(Close|Cancel)$/ }).click();
+      await restore(backup);
+    } catch (e) {
+      console.error(`couldn't put Key beep and Beep volume back (${backup}): ${(e as Error).message}`);
+    }
+  }
+  await disconnect(page);
+  await page.close();
+});
+
+test("read: the record as the radio's menu shows it", async ({}, info) => {
+  await readRadio();
+  await expect(page.getByRole("region", { name: "Display, sound, power" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Transmit" })).toBeVisible();
+  // The radio's own option names; LINK-5's settings read only.
+  await expect(page.getByLabel("0 7 1 Theme", { exact: true }).locator("option")).toHaveText(["Dark", "Daylight", "Night red", "Cyberpunk"]);
+  await expect(beep().locator("option")).toHaveText(["Off", "On"]);
+  const region = page.locator('[data-id="0 9 4"]');
+  await expect(region).toContainText("changes only on the radio");
+  await expect(region.locator("select, input, button")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "APRS" })).toContainText("APRS record");
+  const v = await values();
+  was = { beep: v["0 7 5 1"], vol: v["0 7 5 2"] };
+  expect(["Off", "On"]).toContain(was.beep);
+  await expect(beep()).toHaveValue(was.beep);
+  console.log(`Key beep ${was.beep}, Beep volume ${was.vol}`);
+  await page.getByRole("region", { name: "Display, sound, power" }).scrollIntoViewIfNeeded();
+  await shot(page, info, "20-settings-read");
+});
+
+test("change and write: a backup first, the diff, then the write", async ({}, info) => {
+  expect(was).not.toBeNull();
+  const beepTo = was!.beep === "On" ? "Off" : "On";
+  await beep().selectOption(beepTo);
+  await expect(page.locator('[data-id="0 7 5 1"]')).toHaveClass(/changed/);
+  // A level: one step (down from the top, else up).
+  const up = was!.vol !== "High";
+  await page.getByRole("button", { name: `${VOL} ${up ? "up" : "down"}` }).click();
+  await expect(vol()).not.toHaveText(was!.vol);
+  const volTo = (await vol().textContent())!;
+  await expect(page.getByText("not written: 2 settings changed")).toBeVisible();
+  await page.getByRole("region", { name: "Display, sound, power" }).scrollIntoViewIfNeeded();
+  await shot(page, info, "21-settings-edited");
+  const path = await startWrite();
+  const file = JSON.parse(readFileSync(path, "utf8"));
+  expect(file.format).toBe("ferrite-console-settings");
+  expect(file.settings[BEEP]).toBe(was!.beep);
+  expect(file.settings[VOL]).toBe(was!.vol);
+  // The diff: exactly the two, old to new.
+  const items = dialog().locator("li");
+  await expect(items).toHaveCount(2);
+  const b = items.filter({ hasText: "0 7 5 1" });
+  await expect(b.locator("s")).toHaveText(was!.beep);
+  await expect(b.locator("b")).toHaveText(beepTo);
+  const l = items.filter({ hasText: "0 7 5 2" });
+  await expect(l.locator("s")).toHaveText(was!.vol);
+  await expect(l.locator("b")).toHaveText(volTo);
+  await shot(page, info, "22-settings-diff");
+  backup = path;
+  await commitWrite(2);
+  await shot(page, info, "23-settings-written");
+});
+
+test("read back: the radio holds both; then the backup restores them", async ({}, info) => {
+  expect(backup).not.toBeNull();
+  await readRadio();
+  const v = await values();
+  expect(v["0 7 5 1"]).not.toBe(was!.beep);
+  expect(v["0 7 5 2"]).not.toBe(was!.vol);
+  await restore(backup!);
+  backup = null;
+  await readRadio();
+  const back = await values();
+  expect([back["0 7 5 1"], back["0 7 5 2"]]).toEqual([was!.beep, was!.vol]);
+  await expect(beep()).toHaveValue(was!.beep);
+  await page.getByRole("region", { name: "Display, sound, power" }).scrollIntoViewIfNeeded();
+  await shot(page, info, "24-settings-restored");
+});

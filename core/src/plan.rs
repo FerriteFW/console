@@ -367,11 +367,11 @@ pub struct BackupRecord {
 
 pub const BACKUP_FORMAT: &str = "ferrite-console-channels";
 
-fn hex(b: &[u8]) -> String {
+pub(crate) fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-fn unhex(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn unhex(s: &str) -> Option<Vec<u8>> {
     let s = s.trim();
     s.len().is_multiple_of(2).then_some(())?;
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
