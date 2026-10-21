@@ -6,7 +6,8 @@ import { provider, type Transport, type TransportKind } from "./transport";
 import { BridgeTransport } from "./transport/bridge";
 import { sleep } from "./transport/types";
 
-export type Phase = "idle" | "connecting" | "pin" | "connected";
+/** "updating": Firmware Update holds the cable (no link: the bootloader's protocol, or waiting for the restart). */
+export type Phase = "idle" | "connecting" | "pin" | "connected" | "updating";
 
 /** Cable: a readback every so often (each takes ~50-100 ms at 115200). Bluetooth: back to back (~1 s each). */
 const POLL_GAP_MS = { cable: 150, bluetooth: 0, demo: 150 } as const;
@@ -64,6 +65,55 @@ class Radio {
   /** The development bridge (tools/bridge.py): the cable or the simulator over a local WebSocket. */
   async connectBridge(url?: string) {
     return this.connectWith(() => BridgeTransport.open(url));
+  }
+
+  /**
+   * Firmware Update takes the cable from a connected session: polling stops; the link stays usable for REBOOT. The
+   * bar shows "Updating firmware" until `handBack` or `disconnect`.
+   */
+  takeForUpdate(): { t: Transport; link: Link } | null {
+    if (this.phase !== "connected" || !this.link || !this.t || this.kind !== "cable") return null;
+    const gen = ++this.generation; // the poll loop stops
+    this.wake?.();
+    this.phase = "updating";
+    this.busy = "";
+    this.note = "";
+    this.ui = null;
+    const t = this.t;
+    t.onClose = (why) => {
+      if (gen === this.generation) this.drop(why);
+    };
+    return { t, link: this.link };
+  }
+
+  /**
+   * Firmware Update with no session: the cable (or the bridge) opened as it is, for a radio waiting in the
+   * bootloader after a failed update. No HELLO: the bootloader doesn't speak the link.
+   */
+  async openForUpdate(how: "cable" | "bridge"): Promise<Transport> {
+    if (this.phase !== "idle") throw new Error("Disconnect first.");
+    this.error = "";
+    this.note = "";
+    await loadCore();
+    const t = how === "bridge" ? await BridgeTransport.open() : await provider.open("cable");
+    const gen = ++this.generation;
+    this.t = t;
+    this.kind = t.kind;
+    this.label = t.label;
+    this.phase = "updating";
+    t.onClose = (why) => {
+      if (gen === this.generation) this.drop(why);
+    };
+    return t;
+  }
+
+  /** The update is done: the same cable, connected again as usual (HELLO, INFO, the faster rate). */
+  async handBack(t: Transport) {
+    if (this.phase !== "updating" || this.t !== t) return;
+    this.link?.close();
+    this.link = null;
+    this.phase = "idle";
+    await this.connectWith(async () => t);
   }
 
   private async connectWith(open: () => Promise<Transport>) {

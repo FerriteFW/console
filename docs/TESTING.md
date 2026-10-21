@@ -43,3 +43,16 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 3. Pick the nearest airport, add. AM, RX only rows. Write; PTT on one does nothing.
 4. Canadian sites (TAFL): filter, add a group. RX only, NFM rows.
 5. Undo edits if you don't want them.
+
+## Firmware Update (clear radio, cable). Alex only.
+
+1. Have the current image as a fallback, and `flash.py` ready.
+2. Build the new image: `tools/mkbtf.sh tx` in ferrite.
+3. Connect › Cable. Firmware Update › Choose .btf. Version, size, blocks show; "Checks passed".
+4. Pick a stock `.btf`: refused, "not a Ferrite image".
+5. Update firmware…: the radio's firmware and build show against the file's version. Install.
+6. The radio restarts; the bar says "Firmware Update holds"; blocks count up (about 85 s).
+7. Done: Console connects again and shows the version. Check About (MENU 0 9 9) and a channel.
+8. Optional, Dry TX on (MENU 0 8 9 2): hold PTT, press Install. Expect "it refused REBOOT (busy)".
+9. If a block fails: the radio waits in the bootloader. Resume, or reload the page and use "Open the cable and resume".
+10. If nothing answers: power-cycle the radio while Console waits, or fall back to `flash.py`.

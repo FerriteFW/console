@@ -60,3 +60,14 @@
 - Sidebar groups: Viewer, Tools, Console. Not-yet sections carry "Soon".
 - Connection flow: a status line, a "Ready to connect" panel, Connect and Disconnect.
 - Live View: the screen with a keypad that can hide, a size option, keyboard controls with Shift for long presses.
+
+## Firmware Update
+
+- Radios already on Ferrite only, over the cable. First installs need the whole-flash backup: `flash.py`.
+- Ferrite images only (the "Ferrite terminal" mark), under 948 KB (`APP_MAX`). Stock goes back with `flash.py`.
+- The checks are `btf.py`'s, ported to `core/src/firmware.rs`. The core makes every frame, only from a checked file.
+- The frames are hello, model, count, the blocks, end. Nothing else reaches the bootloader.
+- REBOOT (LINK-24), then probes at 115200. No stock `PROGRAMBT9000U` nudge: Ferrite answers REBOOT.
+- REBOOT `busy` (transmitting) is shown, and the session goes on.
+- A failed block keeps the cable held. Resume probes again, no REBOOT. A reloaded page can resume from the cable.
+- Tests: the bridge's fake bootloader (`tools/fakeboot.py`) on the simulator. Never a radio from the tests.

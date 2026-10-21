@@ -1,5 +1,6 @@
 <script lang="ts">
   import { radio } from "../radio.svelte";
+  import { firmware } from "../firmware.svelte";
   import type { TransportKind } from "../transport";
   import { bridgeEnabled, bridgeUrl } from "../transport/bridge";
 
@@ -23,6 +24,7 @@
   const status = $derived.by(() => {
     if (radio.phase === "connecting") return { dot: "busy", text: "Connecting…" };
     if (radio.phase === "pin") return { dot: "busy", text: "The radio asks for its PIN" };
+    if (radio.phase === "updating") return { dot: "busy", text: `Firmware Update holds ${radio.label}` };
     if (radio.phase === "connected")
       return radio.notAnswering
         ? { dot: "bad", text: `${radio.label}: the radio isn't answering` }
@@ -79,7 +81,12 @@
         <button class="btn" type="button" onclick={() => radio.disconnect()}>Cancel</button>
       </form>
     {:else}
-      <button class="btn" onclick={() => radio.disconnect()}>Disconnect</button>
+      <button
+        class="btn"
+        disabled={firmware.running}
+        title={firmware.running ? "Firmware Update is using the cable: wait until it is done" : undefined}
+        onclick={() => radio.disconnect()}>Disconnect</button
+      >
     {/if}
     <button class="btn quiet" onclick={toggleTheme} title="Light or dark" aria-label="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
       >{theme === "dark" ? "Light" : "Dark"}</button

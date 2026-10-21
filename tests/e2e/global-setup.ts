@@ -1,9 +1,12 @@
 // Starts what the tests talk to: a headless simulator (unless FERRITE_E2E_SERIAL names the radio's cable) and the
 // bridge in front of it, on free ports, unless FERRITE_E2E_BRIDGE names a bridge already running. The bridge's URL
-// goes to the tests as FERRITE_E2E_BRIDGE; FERRITE_E2E_TARGET is "sim" or "radio".
+// goes to the tests as FERRITE_E2E_BRIDGE; FERRITE_E2E_TARGET is "sim" or "radio". On the simulator the bridge also
+// runs the fake bootloader (tools/fakeboot.py); its mode file is FERRITE_E2E_FAKEBOOT.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -63,7 +66,9 @@ export default async function setup() {
     const sim = spawn(exe, ["--term-headless", "3600", "--term-tcp", String(simPort)], { stdio: ["ignore", "pipe", "pipe"] });
     procs.push(sim);
     await waitFor(sim, /nc 127\.0\.0\.1/, "the simulator");
-    target = ["--tcp", `127.0.0.1:${simPort}`];
+    const mode = join(mkdtempSync(join(tmpdir(), "ferrite-fakeboot-")), "mode.json");
+    process.env.FERRITE_E2E_FAKEBOOT = mode;
+    target = ["--tcp", `127.0.0.1:${simPort}`, "--fakeboot", mode];
   }
   const wsPort = await freePort();
   const bridge = spawn(python(), [`${root}/tools/bridge.py`, ...target, "--port", String(wsPort)], { stdio: ["ignore", "pipe", "pipe"] });
