@@ -80,7 +80,9 @@ impl DemoRadio {
                 Ok(f) => {
                     let (ty, seq, p) = (f.ty, f.seq, f.payload.to_vec());
                     let (status, rest) = match ty {
-                        msg::READ | msg::WRITE | msg::DELETE | msg::BEGIN | msg::END => self.side.ask(ty, &p),
+                        msg::READ | msg::WRITE | msg::READ_MANY | msg::WRITE_MANY | msg::USED | msg::DELETE | msg::BEGIN | msg::END => {
+                            self.side.ask(ty, &p)
+                        }
                         _ => {
                             let (s, r) = self.answer(ty, &p);
                             (s as u8, r)
@@ -382,20 +384,21 @@ mod tests {
         assert_eq!((i.channels as usize, i.zones as usize), (set.channels.len(), set.zones.len()));
         let mut zones = Vec::new();
         for z in 0..i.zones {
-            let mut rd = crate::records::Reader::new(link::what::ZONE, z as u16);
-            while !rd.done() {
-                let (st, rest) = ask(&mut r, &mut s, msg::READ, &rd.next_payload());
-                assert_eq!(st, 0);
-                rd.take(&rest);
-            }
-            zones.push(rd.record);
+            let mut p = vec![link::what::ZONE];
+            p.extend((z as u16).to_le_bytes());
+            p.extend(1u16.to_le_bytes());
+            let (st, rest) = ask(&mut r, &mut s, msg::READ_MANY, &p);
+            assert_eq!(st, 0);
+            zones.push(rest[5..5 + rest[4] as usize].to_vec());
         }
         let mut chans = Vec::new();
         for n in 0..1000u16 {
-            let (st, rest) =
-                ask(&mut r, &mut s, msg::READ, &crate::records::read_payload(link::what::CHANNEL, n, 0, 200));
-            if st == 0 {
-                chans.push(rest[2..].to_vec());
+            let mut p = vec![link::what::CHANNEL];
+            p.extend(n.to_le_bytes());
+            p.extend(1u16.to_le_bytes());
+            let (st, rest) = ask(&mut r, &mut s, msg::READ_MANY, &p);
+            if st == 0 && rest.len() > 2 {
+                chans.push(rest[5..5 + rest[4] as usize].to_vec());
             }
         }
         let (back, bad) = Set::from_records(&zones, &chans);

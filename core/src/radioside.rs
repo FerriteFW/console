@@ -260,6 +260,35 @@ impl RadioSide {
         }
     }
 
+    /// One channel or zone record by `READ_MANY` (LINK-40: they aren't read one at a time any more): its bytes, or
+    /// the status (`NotFound` when there is none at that index).
+    pub fn read_one(&mut self, w: u8, idx: u16) -> Result<Vec<u8>, u8> {
+        let mut p = vec![w];
+        p.extend(idx.to_le_bytes());
+        p.extend(1u16.to_le_bytes());
+        let (s, rest) = self.ask(link::msg::READ_MANY, &p);
+        if s != 0 {
+            return Err(s);
+        }
+        let r = &rest[2..];
+        if r.len() < 3 || u16::from_le_bytes([r[0], r[1]]) != idx {
+            return Err(link::Status::NotFound as u8);
+        }
+        Ok(r[3..3 + r[2] as usize].to_vec())
+    }
+
+    /// One channel or zone record by `WRITE_MANY` (LINK-41): the status and, for a refusal, its reason (the
+    /// applied count taken off).
+    pub fn write_one(&mut self, w: u8, idx: u16, rec: &[u8]) -> (u8, Vec<u8>) {
+        let mut p = vec![w];
+        p.extend(idx.to_le_bytes());
+        p.push(rec.len() as u8);
+        p.extend_from_slice(rec);
+        let (s, rest) = self.ask(link::msg::WRITE_MANY, &p);
+        let counted = s == 0 || s == link::Status::Invalid as u8 || rest.len() == 1;
+        (s, if counted && !rest.is_empty() { rest[1..].to_vec() } else { rest })
+    }
+
     /// Puts zones and channels straight into the store (a radio's starting state), bypassing the link's checks.
     pub fn seed(&mut self, zones: &[(Name, ZoneCfg)], chans: &[Channel]) {
         *self.store.zones.borrow_mut() = zones.to_vec();

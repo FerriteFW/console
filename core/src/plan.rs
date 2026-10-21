@@ -272,6 +272,21 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
 
 /// The plan through ferrite's own radio side, seeded with the radio's set: every refusal, with ferrite's reason;
 /// then what it ends up holding, against what the table wants.
+/// A one-part channel or zone `WRITE` payload (what, index, offset 0, total, record) as a one-record `WRITE_MANY`
+/// body (what, then index, length, record).
+fn many_body(m: u8, p: &[u8]) -> Option<Vec<u8>> {
+    if m != msg::WRITE || p.len() < 7 || !(p[0] == what::CHANNEL || p[0] == what::ZONE) {
+        return None;
+    }
+    let total = u16::from_le_bytes([p[5], p[6]]) as usize;
+    if p[3] != 0 || p[4] != 0 || total != p.len() - 7 || total > 255 {
+        return None;
+    }
+    let mut b = vec![p[0], p[1], p[2], total as u8];
+    b.extend_from_slice(&p[7..]);
+    Some(b)
+}
+
 fn dry_run(base: &Parts, ops: &[Op], want: &Parts) -> Vec<Problem> {
     let mut r = RadioSide::new();
     r.seed(&base.0, &base.1);
@@ -282,7 +297,12 @@ fn dry_run(base: &Parts, ops: &[Op], want: &Parts) -> Vec<Problem> {
     }
     for op in ops {
         for p in &op.payloads {
-            let (s, rest) = r.ask(op.msg, p);
+            // LINK-21, LINK-41: channels and zones go by WRITE_MANY (Console sends runs of them; one at a time here).
+            let many = many_body(op.msg, p);
+            let (s, rest) = match &many {
+                Some(b) => r.ask(msg::WRITE_MANY, b),
+                None => r.ask(op.msg, p),
+            };
             if s != 0 {
                 out.push(Problem { what: op.what.into(), number: op.number, error: reason(s, &rest) });
                 break;
@@ -332,13 +352,8 @@ pub fn check_channel(v: &ChanView, zones: u8) -> Option<String> {
         let zs: Vec<(Name, ZoneCfg)> =
             (0..zones).map(|i| (Name::from(format!("Zone {}", i + 1).as_bytes()), ZoneCfg::default())).collect();
         r.seed(&zs, &[]);
-        for p in write_payloads(what::CHANNEL, c.num, &channel_record(&c)) {
-            let (s, rest) = r.ask(msg::WRITE, &p);
-            if s != 0 {
-                return Some(reason(s, &rest));
-            }
-        }
-        None
+        let (s, rest) = r.write_one(what::CHANNEL, c.num, &channel_record(&c));
+        (s != 0).then(|| reason(s, &rest))
     })
 }
 

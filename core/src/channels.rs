@@ -444,26 +444,11 @@ mod tests {
     use ferrite_core::link::{msg, what, Status};
 
     fn read(r: &mut RadioSide, w: u8, idx: u16) -> Result<Vec<u8>, u8> {
-        let mut rd = crate::records::Reader::new(w, idx);
-        while !rd.done() {
-            let (s, rest) = r.ask(msg::READ, &rd.next_payload());
-            if s != 0 {
-                return Err(s);
-            }
-            assert!(rd.take(&rest));
-        }
-        Ok(rd.record)
+        r.read_one(w, idx)
     }
 
     fn write(r: &mut RadioSide, w: u8, idx: u16, rec: &[u8]) -> (u8, Vec<u8>) {
-        let mut last = (0, Vec::new());
-        for p in crate::records::write_payloads(w, idx, rec) {
-            last = r.ask(msg::WRITE, &p);
-            if last.0 != 0 {
-                break;
-            }
-        }
-        last
+        r.write_one(w, idx, rec)
     }
 
     fn sample() -> Channel {
