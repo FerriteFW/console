@@ -18,11 +18,13 @@
   import AprsMessages from "./lib/pages/AprsMessages.svelte";
   import AprsMap from "./lib/pages/AprsMap.svelte";
   import AprsSettings from "./lib/pages/AprsSettings.svelte";
+  import AprsContacts from "./lib/pages/AprsContacts.svelte";
   import Soon from "./lib/pages/Soon.svelte";
   import { loadCore } from "./lib/core";
   import { radio } from "./lib/radio.svelte";
   import { aprs } from "./lib/aprs.svelte";
   import { aprsSettings } from "./lib/aprsSettings.svelte";
+  import { contacts } from "./lib/contacts.svelte";
   import { activity } from "./lib/activity.svelte";
   import { route } from "./lib/route.svelte";
 
@@ -45,6 +47,7 @@
         { id: "firmware", name: "Firmware Update" },
         { id: "aprs-messages", name: "Messages", sub: "APRS" },
         { id: "aprs-heard", name: "Heard stations", sub: "APRS" },
+        { id: "aprs-contacts", name: "Contacts", sub: "APRS" },
         { id: "aprs-map", name: "Map", sub: "APRS" },
         { id: "aprs-settings", name: "APRS Settings", sub: "APRS" },
       ],
@@ -69,7 +72,7 @@
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, aprs, aprsSettings, activity };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, aprs, aprsSettings, activity, contacts };
   if (params.has("demo")) {
     void radio.connect("demo").then(async () => {
       for (const k of (params.get("press") ?? "").split(",").filter(Boolean)) {
@@ -138,6 +141,8 @@
         <AprsMap />
       {:else if page === "aprs-settings"}
         <AprsSettings />
+      {:else if page === "aprs-contacts"}
+        <AprsContacts />
       {:else}
         <Soon title={current.name} text={current.soon ?? ""} />
       {/if}

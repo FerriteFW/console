@@ -341,6 +341,35 @@ export class Link {
   }
 
   /**
+   * APRS contacts written (APRS-42, record 6): each a callsign (10 bytes), a name (12) and flags (bit 0 deletes),
+   * added or renamed by callsign. Nine to a WRITE_MANY frame; `busy` is sent again; a refusal throws with its reason.
+   */
+  writeContacts(recs: Uint8Array[]): Promise<void> {
+    return this.exclusive(async () => {
+      for (let i = 0; i < recs.length; ) {
+        const part = recs.slice(i, i + 9);
+        const body = new Uint8Array(1 + part.length * 26);
+        body[0] = 6;
+        part.forEach((r, k) => {
+          body.set([0xff, 0xff, 23], 1 + k * 26);
+          body.set(r, 4 + k * 26);
+        });
+        const end = performance.now() + P.timing.busy_retry_ms;
+        for (;;) {
+          const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+          if (status === 0) break;
+          if (status === 7 && performance.now() < end) {
+            await sleep(P.timing.busy_sleep_ms);
+            continue;
+          }
+          throw new RadioError(P.msg.WRITE_MANY, status, rest.slice(1));
+        }
+        i += part.length;
+      }
+    });
+  }
+
+  /**
    * Every record of `what` held at indexes first..end, several whole records an answer (READ_MANY, LINK-40), as a
    * map index → bytes. `progress(at)` with the index it has reached.
    */
