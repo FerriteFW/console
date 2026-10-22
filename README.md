@@ -1,7 +1,7 @@
 # Ferrite Console
 
 The companion app for Ferrite on the Radtel RT-950 Pro: live view, remote keys, channel programming.
-Private until the licence is chosen.
+[PolyForm Noncommercial 1.0.0](LICENSE.md), copyright 2026 Alex Harvey: free for any noncommercial use.
 
 ## Layout
 

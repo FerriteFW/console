@@ -2,6 +2,7 @@
 name = "ferrite-console-wasm"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish.workspace = true
 description = "The core for the browser: wasm-bindgen exports the web UI calls (sessions, answers, the UI readback, keys)"
 
