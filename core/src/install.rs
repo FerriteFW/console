@@ -13,6 +13,10 @@
 //!   writable ranges. Calibration (0x00F000-0x00FFFF) and the update area (0x300000 up) are left out by
 //!   construction: the ranges are cut to ferrite's `layout::WRITABLE` and every request is checked again with
 //!   [`never_written`], whatever the radio's answer says. Then [`stock_update`] flashes the stock `.BTF`.
+//! - Which radio a backup is from (decision 263): the MCU's unique ID, as the reader's `sys` and Ferrite's `START`
+//!   answer give it. The backup stays a raw flash image, so the ID travels in its file name ([`backup_name`],
+//!   [`name_uid`]) and in the browser's own record; calibration alone can't tell two radios apart (it can be the
+//!   factory's same data on both), so its CRC is only a check against a blank or damaged file.
 
 use crate::firmware::{self, check_image, pack, unpack, Update, APP_BASE, APP_MAX, BOOT_MAX, FERRITE_MARK};
 use ferrite_core::layout::{CALIBRATION, UPDATE_AREA, WRITABLE};
@@ -155,6 +159,32 @@ pub fn parse_uid(line: &str) -> Option<[u32; 3]> {
 pub fn uid_text(w: [u32; 3]) -> String {
     let b: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
     crate::uid::text(&b).unwrap_or_default()
+}
+
+/// ferrite's base32 digits (`ferrite_core::uid`): what an ID is written in.
+const UID_DIGITS: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// An ID as typed or written anywhere ("n0eq8 0r081...", "N0EQ80R081..."): its 20 digits, upper case, or None when
+/// it isn't one.
+pub fn uid_key(s: &str) -> Option<String> {
+    let k: String = s.chars().filter(|c| !c.is_whitespace() && *c != '-').map(|c| c.to_ascii_uppercase()).collect();
+    (k.len() == 20 && k.bytes().all(|c| UID_DIGITS.contains(&c))).then_some(k)
+}
+
+/// The ID grouped as About shows it.
+fn uid_grouped(key: &str) -> String {
+    (0..4).map(|i| &key[5 * i..5 * i + 5]).collect::<Vec<_>>().join(" ")
+}
+
+/// The backup's file name: `rt950pro-backup-<ID>-<YYYYMMDD>.bin`, the ID's 20 digits (decision 263).
+pub fn backup_name(uid: &str, date: &str) -> String {
+    format!("rt950pro-backup-{}-{date}.bin", uid_key(uid).unwrap_or_else(|| "unknown-id".into()))
+}
+
+/// The radio ID a backup's file name carries ([`backup_name`]), grouped, or None (a renamed file).
+pub fn name_uid(name: &str) -> Option<String> {
+    let at = name.find("rt950pro-backup-")? + 16;
+    uid_key(name.get(at..at + 20)?).map(|k| uid_grouped(&k))
 }
 
 /// `flashcrc`: "flash crc32 1A2B3C4D over 4096 KB, 52 s" -> (crc, bytes).
@@ -523,20 +553,34 @@ pub fn never_written(addr: u32, len: u32) -> bool {
     hit(&CALIBRATION) || hit(&UPDATE_AREA) || end > u32::MAX as u64
 }
 
-/// The radio's `START` answer: chip size, calibration CRC-32, then its ranges.
+/// The radio's `START` answer: chip size, calibration CRC-32, its ranges, then the MCU's unique ID (decision 263;
+/// None from a Ferrite before it).
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct RestoreStart {
     pub chip: u32,
     pub cal_crc32: u32,
     pub ranges: Vec<(u32, u32)>,
+    /// As About shows it ("XXXXX XXXXX XXXXX XXXXX").
+    pub uid: Option<String>,
 }
 
 pub fn parse_start(rest: &[u8]) -> Option<RestoreStart> {
     if rest.len() < 9 || rest.len() < 9 + 8 * rest[8] as usize {
         return None;
     }
-    let ranges = (0..rest[8] as usize).map(|i| (le32(&rest[9 + 8 * i..]), le32(&rest[13 + 8 * i..]))).collect();
-    Some(RestoreStart { chip: le32(rest), cal_crc32: le32(&rest[4..]), ranges })
+    let n = rest[8] as usize;
+    let ranges = (0..n).map(|i| (le32(&rest[9 + 8 * i..]), le32(&rest[13 + 8 * i..]))).collect();
+    let uid = rest.get(9 + 8 * n..9 + 8 * n + 12).and_then(crate::uid::text);
+    Some(RestoreStart { chip: le32(rest), cal_crc32: le32(&rest[4..]), ranges, uid })
+}
+
+/// What Console knows of the backup's radio (decision 263).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BackupId {
+    /// The ID the backup was taken from: its file name's, or this browser's record of its SHA-256.
+    pub uid: Option<String>,
+    /// The radio's ID as the owner typed it, when Console doesn't know the backup's.
+    pub confirmed: Option<String>,
 }
 
 /// One `STOCK_RESTORE` request of the plan.
@@ -558,6 +602,8 @@ pub struct RestorePlan {
     pub ranges: Vec<(u32, u32)>,
     pub bytes: u32,
     pub problems: Vec<String>,
+    /// Console doesn't know which radio the backup is from: the owner types this radio's ID (this) to go on.
+    pub confirm_uid: Option<String>,
 }
 
 fn op(kind: &'static str, code: u8, addr: u32, len: u32, data: &[u8], expect: Option<u32>) -> RestoreOp {
@@ -570,17 +616,51 @@ fn op(kind: &'static str, code: u8, addr: u32, len: u32, data: &[u8], expect: Op
     RestoreOp { kind, addr, len, payload, expect }
 }
 
+/// Why the backup can't go into the radio whose ID is `radio_uid` (decision 263), and the ID to confirm when
+/// Console doesn't know the backup's. Console asks this before `START` with `INFO`'s ID (nothing stops), and the
+/// plan asks it again with the `START` answer's.
+pub fn check_id(radio_uid: Option<&str>, id: &BackupId) -> (Vec<String>, Option<String>) {
+    let Some(here) = radio_uid.and_then(uid_key) else {
+        return (
+            vec!["This Ferrite doesn't say which radio it is. Update it (Firmware Update), then start Back to stock again.".into()],
+            None,
+        );
+    };
+    let shown = uid_grouped(&here);
+    match id.uid.as_deref().map(|u| uid_key(u).unwrap_or_default()) {
+        Some(b) if b == here => (vec![], None),
+        Some(b) if !b.is_empty() => (
+            vec![format!(
+                "This backup is from another radio (ID {}). This radio's ID is {shown}. Writing it would replace this radio's settings and channels with the other radio's. Use this radio's own backup.",
+                uid_grouped(&b)
+            )],
+            None,
+        ),
+        _ if id.confirmed.as_deref().and_then(uid_key).as_deref() == Some(here.as_str()) => (vec![], None),
+        _ => (
+            vec![format!(
+                "Console can't tell which radio this backup is from (its file name was changed, or it was saved in another browser). A backup from another radio overwrites this radio's settings and channels. If this file is this radio's backup, type this radio's ID ({shown}) below, then start Back to stock again."
+            )],
+            Some(shown),
+        ),
+    }
+}
+
 /// What to write back (BACKUP-7): the backup inside the ranges the radio named, cut to ferrite's own
 /// `layout::WRITABLE`, whole sectors only, never calibration or the update area. Each sector is erased, then its
-/// bytes that aren't 0xFF are programmed 128 at a time; each range is read back by CRC. Refused when the backup
-/// isn't this radio's (the calibration CRCs differ) or doesn't match its chip.
-pub fn restore_plan(backup: &[u8], radio: &RestoreStart) -> RestorePlan {
-    let mut problems = shape_problems(backup); // a pending update doesn't matter: the update area is never written
+/// bytes that aren't 0xFF are programmed 128 at a time; each range is read back by CRC. Refused when the backup is
+/// another radio's by its ID, or Console doesn't know its ID and the owner hasn't typed this radio's (decision 263),
+/// or its calibration differs from the radio's (a damaged file), or it doesn't match the chip.
+pub fn restore_plan(backup: &[u8], radio: &RestoreStart, id: &BackupId) -> RestorePlan {
+    let (mut problems, confirm_uid) = check_id(radio.uid.as_deref(), id);
+    problems.extend(shape_problems(backup)); // a pending update doesn't matter: the update area is never written
     if backup.len() != radio.chip as usize {
         problems.push(format!("the backup is {} KB, the radio's chip {} KB", backup.len() / 1024, radio.chip / 1024));
     }
     if cal_crc(backup) != Some(radio.cal_crc32) {
-        problems.push("this backup is from another radio: its calibration doesn't match this one's".into());
+        problems.push(
+            "the backup's calibration sector doesn't match this radio's: the file is damaged, or it isn't this radio's backup".into(),
+        );
     }
     let mut ranges = Vec::new();
     for &(s, e) in &radio.ranges {
@@ -616,7 +696,7 @@ pub fn restore_plan(backup: &[u8], radio: &RestoreStart) -> RestorePlan {
     if ranges.is_empty() {
         problems.push("the radio named nothing Console may restore".into());
     }
-    RestorePlan { ops, ranges, bytes, problems }
+    RestorePlan { ops, ranges, bytes, problems, confirm_uid }
 }
 
 pub fn restore_payload(code: u8) -> Vec<u8> {
@@ -906,7 +986,15 @@ mod tests {
             chip: 4 << 20,
             cal_crc32: cal_crc(&backup()).unwrap(),
             ranges: WRITABLE.iter().map(|r| (r.start, r.end)).collect(),
+            uid: Some(HERE.into()),
         }
+    }
+
+    const HERE: &str = "N0EQ8 0R081 H4T84 MXM3G";
+    const OTHER: &str = "7K2PD 9X0AA H4T84 QW3ZB";
+
+    fn mine() -> BackupId {
+        BackupId { uid: Some(HERE.into()), confirmed: None }
     }
 
     fn touched(p: &RestorePlan) -> Vec<(u32, u32)> {
@@ -922,7 +1010,7 @@ mod tests {
         let mut hostile = writable_start();
         hostile.ranges = vec![(0, 4 << 20), (0xF000, 0x10000), (0x300000, 0x400000), (0x0, 0xFFFF_FFFF)];
         for start in [writable_start(), hostile] {
-            let p = restore_plan(&b, &start);
+            let p = restore_plan(&b, &start, &mine());
             assert!(p.problems.is_empty(), "{:?}", p.problems);
             assert!(!p.ops.is_empty());
             for (s, e) in touched(&p) {
@@ -960,29 +1048,70 @@ mod tests {
         for a in (0..0x40_0000u32).step_by(0x1000) {
             let mut s = base.clone();
             s.ranges = vec![(a, a + 0x1000)];
-            for (x, y) in touched(&restore_plan(&b, &s)) {
+            for (x, y) in touched(&restore_plan(&b, &s, &mine())) {
                 assert!(!never_written(x, y - x), "{x:#x}");
             }
         }
     }
 
-    /// BACKUP-7: another radio's backup (its calibration differs) or the wrong size is refused.
+    /// BACKUP-7: a damaged backup (its calibration differs from the radio's) or the wrong size is refused; the
+    /// START answer parses with and without the ID (decision 263).
     #[test]
     fn restore_needs_this_radios_backup() {
         let b = backup();
         let mut s = writable_start();
         s.cal_crc32 ^= 1;
-        assert!(restore_plan(&b, &s).problems.iter().any(|p| p.contains("another radio")));
+        assert!(restore_plan(&b, &s, &mine()).problems.iter().any(|p| p.contains("calibration sector doesn't match")));
         let mut s = writable_start();
         s.chip = 8 << 20;
-        assert!(restore_plan(&b, &s).problems.iter().any(|p| p.contains("chip")));
+        assert!(restore_plan(&b, &s, &mine()).problems.iter().any(|p| p.contains("chip")));
         let mut answer = vec![0, 0, 0x40, 0, 1, 2, 3, 4, 1];
         answer.extend_from_slice(&0x2C000u32.to_le_bytes());
         answer.extend_from_slice(&0x76000u32.to_le_bytes());
-        assert_eq!(
-            parse_start(&answer),
-            Some(RestoreStart { chip: 4 << 20, cal_crc32: 0x0403_0201, ranges: vec![(0x2C000, 0x76000)] })
-        );
+        let old = RestoreStart { chip: 4 << 20, cal_crc32: 0x0403_0201, ranges: vec![(0x2C000, 0x76000)], uid: None };
+        assert_eq!(parse_start(&answer), Some(old.clone()), "an older Ferrite: no ID");
         assert_eq!(parse_start(&answer[..12]), None);
+        let w = [0x3F2A_91C0u32, 0x7D44_0123, 0x89AB_CDEF];
+        answer.extend(w.iter().flat_map(|x| x.to_le_bytes()));
+        assert_eq!(parse_start(&answer), Some(RestoreStart { uid: Some(uid_text(w)), ..old }));
+    }
+
+    /// BACKUP-7 (decision 263): two radios with byte-identical calibration are told apart by the MCU ID. Another
+    /// radio's backup is refused; this radio's passes; a backup whose ID Console doesn't know needs this radio's ID
+    /// typed; a Ferrite that doesn't send its ID is refused.
+    #[test]
+    fn restore_tells_radios_apart_by_their_id() {
+        let b = backup();
+        let s = writable_start(); // the same calibration as the backup's, whichever radio it is from
+        let other = restore_plan(&b, &s, &BackupId { uid: Some(OTHER.into()), confirmed: Some(HERE.into()) });
+        assert!(other.problems.iter().any(|p| p.contains("from another radio (ID 7K2PD")), "{:?}", other.problems);
+        assert_eq!(other.confirm_uid, None, "known to be another radio's: no confirming it away");
+        let p = restore_plan(&b, &s, &BackupId { uid: Some("n0eq80r081h4t84mxm3g".into()), confirmed: None });
+        assert!(p.problems.is_empty() && !p.ops.is_empty(), "{:?}", p.problems);
+
+        let unknown = restore_plan(&b, &s, &BackupId::default());
+        assert!(unknown.problems.iter().any(|p| p.contains("can't tell which radio")), "{:?}", unknown.problems);
+        assert_eq!(unknown.confirm_uid.as_deref(), Some(HERE));
+        let typo = restore_plan(&b, &s, &BackupId { uid: None, confirmed: Some("N0EQ8 0R081 H4T84 MXM3H".into()) });
+        assert_eq!(typo.confirm_uid.as_deref(), Some(HERE));
+        let typed = restore_plan(&b, &s, &BackupId { uid: None, confirmed: Some("n0eq8-0r081-h4t84-mxm3g".into()) });
+        assert!(typed.problems.is_empty(), "{:?}", typed.problems);
+
+        let old = RestoreStart { uid: None, ..s };
+        assert!(restore_plan(&b, &old, &mine()).problems.iter().any(|p| p.contains("doesn't say which radio")));
+    }
+
+    /// Decision 263: the file name carries the ID; a renamed file doesn't.
+    #[test]
+    fn backup_names_carry_the_id() {
+        let n = backup_name(HERE, "20261022");
+        assert_eq!(n, "rt950pro-backup-N0EQ80R081H4T84MXM3G-20261022.bin");
+        assert_eq!(name_uid(&n).as_deref(), Some(HERE));
+        assert_eq!(name_uid("rt950pro-backup-N0EQ80R081H4T84MXM3G-20261022 (1).bin").as_deref(), Some(HERE));
+        assert_eq!(backup_name("", "20261022"), "rt950pro-backup-unknown-id-20261022.bin");
+        assert_eq!(name_uid("rt950pro-backup-unknown-id-20261022.bin"), None);
+        assert_eq!(name_uid("flash.bin"), None);
+        assert_eq!(name_uid("rt950pro-backup-N0EQ80R081H4T84MXM3U-1.bin"), None, "U isn't a digit");
+        assert_eq!(uid_key(&uid_text([0x3F2A_91C0, 0x7D44_0123, 0x89AB_CDEF])).map(|k| k.len()), Some(20));
     }
 }

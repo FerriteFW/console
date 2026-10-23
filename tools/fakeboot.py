@@ -221,6 +221,7 @@ class FakeReader:
         self.mode, self.log, self.mode_path = mode, log, mode_path
         self.flash = bytes(load_flash(mode))
         self.line = b""
+        self.reader_screen = False  # `reader`: Console asked for the plain screen
         self.dump = None  # (addr, len, next offset, frames sent, synced, end sent)
         self.sync = b""
         self.spoiled = set()
@@ -253,6 +254,9 @@ class FakeReader:
             return self.console("v0.9  FreeRTOS 11  clock HEXT 8 MHz  reset cause 00  flash 1024 KB  uid 3F2A91C07D44012389ABCDEF\n")
         if w[0] == "flash":
             return self.console(f"flash id 5E4016 (Zbit, {len(self.flash) // 1024} KB) status 00 uid 0011223344556677\n")
+        if w[0] == "reader":
+            self.reader_screen = True
+            return self.console("reader screen on\n")
         if w[0] == "flashcrc":
             return self.console(f"flash crc32 {zlib.crc32(self.flash):08X} over {len(self.flash) // 1024} KB, 1 s\n")
         if w[0] == "reboot":
@@ -376,6 +380,11 @@ class FakeRestore:
         rest = struct.pack("<IIB", len(self.chip), cal, len(WRITABLE))
         for s, e in WRITABLE:
             rest += struct.pack("<II", s, e)
+        # The MCU's unique ID last (decision 263): the simulator's own (sim/src/fake.rs), as its INFO says, unless
+        # the mode names another ("uid": 24 hex digits, the three words lowest first; "" for an older Ferrite).
+        uid = self.mode.get("uid", "3F2A91C07D440E18A2B65C93")
+        if uid:
+            rest += struct.pack("<III", *(int(uid[8 * i:8 * i + 8], 16) for i in range(3)))
         return link_frame(STOCK_RESTORE | 0x80, seq, b"\x00" + rest)
 
     @staticmethod

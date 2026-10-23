@@ -548,7 +548,27 @@ impl Fdump {
     }
 }
 
-/// `STOCK_RESTORE`'s START answer: `{chip, cal_crc32, ranges}` or null.
+/// The backup's file name for a radio ID and a date (decision 263).
+#[wasm_bindgen]
+pub fn backup_name(uid: &str, date: &str) -> String {
+    install::backup_name(uid, date)
+}
+
+/// The radio ID a backup's file name carries, or nothing.
+#[wasm_bindgen]
+pub fn name_uid(name: &str) -> Option<String> {
+    install::name_uid(name)
+}
+
+/// Whether the backup may go into the radio `radio_uid` by its ID: `{problems, confirm_uid}` (decision 263).
+#[wasm_bindgen]
+pub fn restore_id_check(radio_uid: Option<String>, backup_uid: Option<String>, confirmed: Option<String>) -> String {
+    let (problems, confirm_uid) =
+        install::check_id(radio_uid.as_deref(), &install::BackupId { uid: backup_uid, confirmed });
+    json(&serde_json::json!({"problems": problems, "confirm_uid": confirm_uid}))
+}
+
+/// `STOCK_RESTORE`'s START answer: `{chip, cal_crc32, ranges, uid}` or null.
 #[wasm_bindgen]
 pub fn restore_start(rest: &[u8]) -> String {
     json(&install::parse_start(rest))
@@ -560,9 +580,15 @@ pub struct RestorePlan(install::RestorePlan);
 
 #[wasm_bindgen]
 impl RestorePlan {
-    /// `start` is `restore_start`'s JSON.
+    /// `start` is `restore_start`'s JSON; `backup_uid` the backup's radio ID when Console knows it, `confirmed` the
+    /// ID the owner typed when it doesn't (decision 263).
     #[wasm_bindgen(constructor)]
-    pub fn new(backup: &[u8], start: &str) -> Result<RestorePlan, JsError> {
+    pub fn new(
+        backup: &[u8],
+        start: &str,
+        backup_uid: Option<String>,
+        confirmed: Option<String>,
+    ) -> Result<RestorePlan, JsError> {
         let v: serde_json::Value = serde_json::from_str(start).map_err(|e| JsError::new(&e.to_string()))?;
         let ranges = v["ranges"]
             .as_array()
@@ -571,14 +597,17 @@ impl RestorePlan {
             chip: v["chip"].as_u64().unwrap_or(0) as u32,
             cal_crc32: v["cal_crc32"].as_u64().unwrap_or(0) as u32,
             ranges: ranges.unwrap_or_default(),
+            uid: v["uid"].as_str().map(String::from),
         };
-        Ok(RestorePlan(install::restore_plan(backup, &s)))
+        let id = install::BackupId { uid: backup_uid, confirmed };
+        Ok(RestorePlan(install::restore_plan(backup, &s, &id)))
     }
-    /// `{ranges, bytes, problems, ops}` (the op count).
+    /// `{ranges, bytes, problems, ops, confirm_uid}` (the op count; the radio's ID to type, when asked).
     pub fn summary(&self) -> String {
-        json(
-            &serde_json::json!({"ranges": self.0.ranges, "bytes": self.0.bytes, "problems": self.0.problems, "ops": self.0.ops.len()}),
-        )
+        json(&serde_json::json!({
+            "ranges": self.0.ranges, "bytes": self.0.bytes, "problems": self.0.problems, "ops": self.0.ops.len(),
+            "confirm_uid": self.0.confirm_uid,
+        }))
     }
     pub fn len(&self) -> usize {
         self.0.ops.len()

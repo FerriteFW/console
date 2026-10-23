@@ -278,8 +278,8 @@ export type BackupCheck = {
 export type ImageCheck = { blocks: number; image_len: number; version: string | null; crc32: string; sha256: string; problems: string[] };
 export type SsbFound = { len: number; records: number; sha256: string; known: boolean };
 export type FdStep = { send: number[]; nak: boolean; done: boolean; error: string | null; got: number };
-export type RestoreStart = { chip: number; cal_crc32: number; ranges: [number, number][] };
-export type RestoreSummary = { ranges: [number, number][]; bytes: number; problems: string[]; ops: number };
+export type RestoreStart = { chip: number; cal_crc32: number; ranges: [number, number][]; uid: string | null };
+export type RestoreSummary = { ranges: [number, number][]; bytes: number; problems: string[]; ops: number; confirm_uid: string | null };
 
 export const sha256Hex = (b: Uint8Array): string => wasm.sha256_hex(b);
 export const backupCheck = (b: Uint8Array): BackupCheck => JSON.parse(wasm.backup_check(b));
@@ -288,6 +288,13 @@ export const readerLine = <T>(kind: "flash" | "sys" | "flashcrc", line: string):
 export const ssbExtract = (btf: Uint8Array): Uint8Array | undefined => wasm.ssb_extract(btf);
 export const ssbDescribe = (patch: Uint8Array): SsbFound => JSON.parse(wasm.ssb_describe(patch));
 export const restoreStart = (rest: Uint8Array): RestoreStart | null => JSON.parse(wasm.restore_start(rest));
+/** The backup's file name, carrying the radio's ID (decision 263). */
+export const backupName = (uid: string, date: string): string => wasm.backup_name(uid, date);
+/** Whether a backup may go into the radio `radioUid` by its ID (decision 263). */
+export const restoreIdCheck = (radioUid: string | null, backupUid: string | null, typed: string): { problems: string[]; confirm_uid: string | null } =>
+  JSON.parse(wasm.restore_id_check(radioUid ?? undefined, backupUid ?? undefined, typed || undefined));
+/** The radio ID a backup's file name carries, or null (a renamed file). */
+export const nameUid = (name: string): string | null => wasm.name_uid(name) ?? null;
 export const Fdump = wasm.Fdump;
 export type Fdump = wasm.Fdump;
 export const RestorePlan = wasm.RestorePlan;

@@ -12,15 +12,18 @@
 import { ACK, BootPort, bootRate, CMD_PROBE, sendAll } from "./bootflash";
 import {
   backupCheck,
+  backupName,
   bootProbe,
   firmwareCheck,
   FirmwareUpdate,
   Fdump,
   imageCheck,
   loadCore,
+  nameUid,
   P,
   readerLine,
   RestorePlan,
+  restoreIdCheck,
   restoreStart,
   Session,
   sha256Hex,
@@ -145,6 +148,31 @@ const keep = {
   drop: () => keep.run("readwrite", (s) => s.delete("stock")),
 };
 
+/** Which radio each backup this browser took is from: its SHA-256 -> the radio ID (decision 263). The file name
+ * carries the ID too; this covers a renamed file. Best effort: a private window or cleared storage forgets it. */
+const ids = {
+  key: "ferrite-console-backup-ids",
+  all(): Record<string, string> {
+    try {
+      return JSON.parse(localStorage.getItem(ids.key) ?? "{}") ?? {};
+    } catch {
+      return {};
+    }
+  },
+  get: (sha: string): string | null => ids.all()[sha] ?? null,
+  put(sha: string, uid: string) {
+    if (!uid) return;
+    try {
+      localStorage.setItem(ids.key, JSON.stringify({ ...ids.all(), [sha]: uid }));
+    } catch {
+      /* not kept: the file name still says */
+    }
+  },
+};
+
+type SaveHandle = { name: string; createWritable(): Promise<{ write(b: Blob): Promise<void>; close(): Promise<void> }>; getFile(): Promise<File> };
+type SavePicker = (o: { suggestedName: string; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<SaveHandle>;
+
 function isTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -196,6 +224,11 @@ class Install {
   // Back to stock
   restoreBackup = $state<Picked | null>(null);
   restoreBackupCheck = $state<BackupCheck | null>(null);
+  /** The radio the backup is from, when Console knows it (its file name, or this browser's record). */
+  restoreBackupUid = $state<string | null>(null);
+  /** Console doesn't know the backup's radio: the owner types this radio's ID (this one) to go on. */
+  restoreConfirmUid = $state<string | null>(null);
+  restoreTyped = $state("");
   restoreStep = $state<Step>("idle");
   restoreSummary = $state<RestoreSummary | null>(null);
   /** A failure after the restore wrote: the radio must not start Ferrite again before stock is flashed. */
@@ -293,6 +326,9 @@ class Install {
     } else {
       this.restoreBackup = p;
       this.restoreBackupCheck = backupCheck(p.bytes);
+      this.restoreBackupUid = ids.get(this.restoreBackupCheck.sha256) ?? nameUid(p.name);
+      this.restoreConfirmUid = null;
+      this.restoreTyped = "";
       this.restoreSummary = null;
     }
   }
@@ -351,7 +387,7 @@ class Install {
     }
     this.wire = new Wire(this.t);
     this.linked = true;
-    this.label = this.t.label;
+    this.label = this.t.label || (how === "bridge" ? "Bridge" : "Cable");
   }
 
   async disconnect() {
@@ -477,6 +513,11 @@ class Install {
       await this.flash(FirmwareUpdate.reader(this.readerFile.bytes), "the reader");
       this.message = "Waiting for the reader to start…";
       await this.readerPrompt();
+      // The radio's screen says "Backing up your radio" instead of hwtest's diagnostics pages (an older reader
+      // doesn't know `reader`: its pages stay, nothing else changes).
+      w.clear();
+      await w.write("reader\r");
+      await w.waitFor(/reader screen on/, 1500, this.held);
       w.clear();
       await w.write("sys\r");
       const sys = await w.waitFor(/[^\r\n]* uid [0-9A-F]{24}[^\r\n]*/, 4000, this.held);
@@ -502,7 +543,8 @@ class Install {
         );
       this.backup = data;
       this.check = c;
-      this.backupName = `rt950pro-backup-${(this.uid || "unknown-id").replaceAll(" ", "")}-${today()}.bin`;
+      this.backupName = backupName(this.uid, today());
+      ids.put(c.sha256, this.uid);
       this.message = "";
       this.backupStep = c.problems.some((p) => !p.startsWith("a stock phone")) ? "failed" : "done";
       if (this.backupStep === "failed") {
@@ -607,9 +649,10 @@ class Install {
     }
   }
 
-  /** BACKUP-2: the desktop app's save dialog (the file read back), or the browser's download the owner confirms. */
+  /** BACKUP-2: the desktop app's save dialog (the file read back), Chrome's save dialog (read back too), or the
+   * browser's download the owner confirms. Once: a download already started isn't started again by this. */
   async save() {
-    if (!this.backup) return;
+    if (!this.backup || this.saving) return;
     this.saveError = "";
     if (isTauri()) {
       try {
@@ -624,7 +667,41 @@ class Install {
       }
       return;
     }
-    const url = URL.createObjectURL(new Blob([this.backup as BlobPart], { type: "application/octet-stream" }));
+    const blob = new Blob([this.backup as BlobPart], { type: "application/octet-stream" });
+    const pick = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
+    if (pick) {
+      this.saving = true;
+      try {
+        const h = await pick({ suggestedName: this.backupName, types: [{ description: "Radio backup", accept: { "application/octet-stream": [".bin"] } }] });
+        const w = await h.createWritable();
+        await w.write(blob);
+        await w.close();
+        const back = new Uint8Array(await (await h.getFile()).arrayBuffer());
+        if (back.length === this.backup.length && sha256Hex(back) === this.check?.sha256) {
+          this.savedWhere = h.name;
+          this.saved = true;
+        } else this.saveError = `${h.name} didn't read back as this backup. Save it again.`;
+        return;
+      } catch (e) {
+        if ((e as Error)?.name === "AbortError") return; // the owner closed the dialog
+        // Not allowed here (a sandboxed frame, a policy): the download below.
+      } finally {
+        this.saving = false;
+      }
+    }
+    if (this.downloaded) return; // once: "Download again" says so itself
+    this.download(blob);
+  }
+
+  /** The browser's download, again, when the owner asks for it. */
+  downloadAgain() {
+    if (this.backup) this.download(new Blob([this.backup as BlobPart], { type: "application/octet-stream" }));
+  }
+
+  private saving = false;
+
+  private download(blob: Blob) {
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = this.backupName;
@@ -675,6 +752,7 @@ class Install {
       this.message = "Sent. Ferrite starts, sets up its storage and opens its first-run setup…";
       this.installed = (await this.hello(FIRST_BOOT_MS)) ?? "";
       this.installStep = "done";
+      this.resetRestore();
       this.message = "";
     } catch (e) {
       this.fail("install", e);
@@ -705,6 +783,26 @@ class Install {
 
   // ---- Back to stock ----
 
+  /** A finished Back to stock is history once Ferrite is installed again. */
+  private resetRestore() {
+    this.restoreStep = "idle";
+    this.restoreSummary = null;
+    this.restoreWrote = false;
+    this.restoreConfirmUid = null;
+    this.restoreTyped = "";
+  }
+
+  /** The radio runs stock again: the install card starts over (the backup stays: it is still this radio's). */
+  private backOnStock() {
+    this.restoreWrote = false;
+    this.restoreStep = "done";
+    this.restoreConfirmUid = null;
+    this.restoreTyped = "";
+    this.installStep = "idle";
+    this.installed = "";
+    this.message = "";
+  }
+
   get restoreBlock(): string {
     const b = this.restoreBackupCheck;
     if (!this.restoreBackup || !b) return "Drop in your backup.";
@@ -732,14 +830,24 @@ class Install {
       await link.hello().catch(() => {
         throw new Error("The radio doesn't answer as Ferrite. Back to stock needs Ferrite running; check the cable and that the radio is on.");
       });
+      // Decision 263, before anything stops: the backup must be this radio's by its MCU ID (INFO's; calibration can
+      // be the same on two radios). The START answer's ID is checked again by the plan.
+      const here = (await link.info().catch(() => null))?.uid_text ?? null;
+      if (here) {
+        const pre = restoreIdCheck(here, this.restoreBackupUid, this.restoreTyped);
+        this.restoreConfirmUid = pre.confirm_uid;
+        if (pre.problems.length) throw new Error(`${pre.problems.join(" ")} Nothing was written.`);
+      }
       const { status, rest } = await link.ask(STOCK_RESTORE, new Uint8Array([OP_START]), 10_000);
       if (status === 2) throw new Error("This Ferrite is older than the way back: update it first (Firmware Update), then try again.");
       if (status !== 0) throw new Error(`The radio refused: ${statusText(status, rest)}.`);
       const start = restoreStart(rest);
       if (!start) throw new Error("The radio's answer didn't parse. Turn it off and on, then try again.");
-      plan = new RestorePlan(this.restoreBackup!.bytes, JSON.stringify(start));
+      // Decision 263: the backup must be this radio's by its MCU ID (calibration can match on two radios).
+      plan = new RestorePlan(this.restoreBackup!.bytes, JSON.stringify(start), this.restoreBackupUid ?? undefined, this.restoreTyped || undefined);
       const sum: RestoreSummary = JSON.parse(plan.summary());
       this.restoreSummary = sum;
+      this.restoreConfirmUid = sum.confirm_uid;
       if (sum.problems.length) {
         // Nothing written: the radio resets and starts Ferrite again.
         await link.ask(STOCK_RESTORE, new Uint8Array([OP_FINISH]), 3000).catch(() => {});
@@ -769,15 +877,17 @@ class Install {
         }
       }
       this.done = plan.len();
+      if (start.uid) {
+        this.restoreBackupUid = start.uid;
+        ids.put(this.restoreBackupCheck!.sha256, start.uid); // known from now on
+      }
       this.message = "Restored and read back. Restarting into the bootloader…";
       const fin = await link.ask(STOCK_RESTORE, new Uint8Array([OP_FINISH]), 3000);
       if (fin.status !== 0) throw new Error(`The radio refused to finish: ${statusText(fin.status)}.`);
       link.close();
       this.wire!.attach();
       await this.flash(FirmwareUpdate.stock(this.stock!.bytes), "stock firmware", false);
-      this.restoreWrote = false;
-      this.restoreStep = "done";
-      this.message = "";
+      this.backOnStock();
     } catch (e) {
       link.close();
       this.wire?.attach();
@@ -795,9 +905,7 @@ class Install {
     this.errorAt = "";
     try {
       await this.flash(FirmwareUpdate.stock(this.stock.bytes), "stock firmware");
-      this.restoreWrote = false;
-      this.restoreStep = "done";
-      this.message = "";
+      this.backOnStock();
     } catch (e) {
       this.fail("restore", e);
     }

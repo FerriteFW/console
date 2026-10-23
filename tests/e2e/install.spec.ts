@@ -104,7 +104,37 @@ async function serveRelease(page: Page, badSum = false) {
   });
 }
 
-async function open(page: Page) {
+/** The simulator's radio ID (sim/src/fake.rs; fakeboot's START answer says the same) and another radio's. */
+const HERE = "R28JM FRR1S 27V4T WPTH0";
+const named = (uid: string) => `rt950pro-backup-${uid.replaceAll(" ", "")}-20261022.bin`;
+
+/** `picker`: a stand-in for Chrome's save dialog that counts its writes; otherwise none (the download). */
+async function open(page: Page, picker = false) {
+  await page.addInitScript((fake) => {
+    const w = window as unknown as Record<string, unknown>;
+    if (!fake) {
+      Object.defineProperty(window, "showSaveFilePicker", { value: undefined, configurable: true });
+      return;
+    }
+    w.__writes = 0;
+    Object.defineProperty(window, "showSaveFilePicker", {
+      configurable: true,
+      value: async (o: { suggestedName: string }) => {
+        let data = new Blob();
+        return {
+          name: o.suggestedName,
+          createWritable: async () => ({
+            write: async (b: Blob) => {
+              w.__writes = (w.__writes as number) + 1;
+              data = b;
+            },
+            close: async () => {},
+          }),
+          getFile: async () => new File([data], o.suggestedName),
+        };
+      },
+    });
+  }, picker);
   await page.goto(`/?bridge=${encodeURIComponent(process.env.FERRITE_E2E_BRIDGE!)}#install`);
   await expect(page.getByRole("heading", { name: "Install Ferrite", level: 1 })).toBeVisible();
   await page.getByRole("button", { name: "Bridge" }).click();
@@ -167,6 +197,23 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   expect(rs[1].blocks).toBeGreaterThan(ferriteBtf.length / 1024 + 9); // the patch (9.6 KB) is in it
 });
 
+test("install: Chrome's save dialog saves the backup once and reads it back", async ({ page }) => {
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, chip());
+  setMode({ flash: flashPath });
+  await serveRelease(page);
+  await open(page, true);
+  await backUp(page);
+  const b = card(page, "Back up");
+  let downloads = 0;
+  page.on("download", () => downloads++);
+  await b.getByRole("button", { name: "Save backup…" }).click();
+  await expect(b.locator('[data-k="saved"]')).toContainText(/Saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}\.bin/);
+  expect(await page.evaluate(() => (window as unknown as { __writes: number }).__writes)).toBe(1);
+  expect(downloads).toBe(0);
+  await expect(state(page, "Back up")).toHaveAttribute("data-state", "done");
+});
+
 test("install: a pending phone update is refused after the backup; a bad checksum isn't used", async ({ page }) => {
   const flashPath = join(dir(), "flash-pending.bin");
   writeFileSync(flashPath, chip(true));
@@ -178,6 +225,9 @@ test("install: a pending phone update is refused after the backup; a bad checksu
   await expect(card(page, "Back up")).toContainText("A stock phone or Bluetooth update is waiting");
   const [dl] = await Promise.all([page.waitForEvent("download"), card(page, "Back up").getByRole("button", { name: "Save backup…" }).click()]);
   await dl.path();
+  // Once: the button is gone, only "Download again" downloads again (a second file was finding 2 of Oct 22).
+  await expect(card(page, "Back up").getByRole("button", { name: "Save backup…" })).toHaveCount(0);
+  await expect(card(page, "Back up").getByRole("button", { name: "Download again" })).toBeVisible();
   // Proving the save by picking the file again works too.
   await page.getByLabel("Saved backup").setInputFiles({ name: "saved.bin", mimeType: "application/octet-stream", buffer: chip(true) });
   await expect(card(page, "Back up").locator('[data-k="saved"]')).toContainText("saved.bin");
@@ -186,7 +236,7 @@ test("install: a pending phone update is refused after the backup; a bad checksu
   expect(results().length).toBe(1); // the reader only
 });
 
-test("back to stock: the backup into Ferrite's ranges, never calibration or the update area, then the stock file", async ({ page }, info) => {
+test("back to stock: the backup into Ferrite's ranges, never calibration or the update area, then the stock file (a renamed backup needs the radio's ID typed)", async ({ page }, info) => {
   const flash = chip(false, 4); // 4 MB: the update area is there to be left alone
   const flashPath = join(dir(), "flash.bin");
   writeFileSync(flashPath, flash);
@@ -198,6 +248,15 @@ test("back to stock: the backup into Ferrite's ranges, never calibration or the 
   await page.getByLabel("Backup file").setInputFiles({ name: "backup.bin", mimeType: "application/octet-stream", buffer: flash });
   await page.getByLabel("Stock firmware for Back to stock").setInputFiles({ name: "stock.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
   await expect(back.locator('[data-k="restore-block"]')).toHaveCount(0);
+  await expect(back.locator('[data-k="restore-id"]')).toContainText("doesn't know which radio");
+  // Decision 263: Console doesn't know this file's radio: refused before anything stops, until the ID is typed.
+  await back.getByRole("button", { name: "Back to stock" }).click();
+  await expect(back.getByRole("alert")).toContainText("can't tell which radio", { timeout: 20_000 });
+  await expect(back.getByRole("alert")).toContainText("Nothing was written");
+  expect(existsSync(join(dir(), "mode.restore.json"))).toBe(false); // START never went
+  const confirm = back.getByRole("group", { name: "Confirm the radio" });
+  await expect(confirm).toContainText(HERE);
+  await confirm.getByLabel("This radio's ID").fill(HERE.toLowerCase().replaceAll(" ", ""));
   await shot(page, info, "73-restore-ready");
   await back.getByRole("button", { name: "Back to stock" }).click();
   await expect(page.getByRole("region", { name: "Back on stock" })).toBeVisible({ timeout: 120_000 });
@@ -213,18 +272,35 @@ test("back to stock: the backup into Ferrite's ranges, never calibration or the 
   expect(rs[rs.length - 1].sha256).toBe(sha(stockBtf));
 });
 
-test("back to stock: another radio's backup is refused before anything is written", async ({ page }) => {
+test("back to stock: another radio's backup is refused though its calibration is the same", async ({ page }) => {
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, chip());
+  setMode({ flash: flashPath });
+  await serveRelease(page);
+  await open(page);
+  // Byte-identical calibration (as on Alex's two radios, Oct 22): only the ID tells them apart (decision 263).
+  await page.getByLabel("Backup file").setInputFiles({ name: named("248H2 49248 H24CS K6CSG"), mimeType: "application/octet-stream", buffer: chip() });
+  await expect(card(page, "Back to stock").locator('[data-k="restore-id"]')).toContainText("248H2 49248 H24CS K6CSG");
+  await page.getByLabel("Stock firmware for Back to stock").setInputFiles({ name: "stock.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
+  await card(page, "Back to stock").getByRole("button", { name: "Back to stock" }).click();
+  await expect(card(page, "Back to stock").getByRole("alert")).toContainText("from another radio (ID 248H2", { timeout: 20_000 });
+  await expect(card(page, "Back to stock").getByRole("alert")).toContainText("Nothing was written");
+  await expect(card(page, "Back to stock").getByRole("group", { name: "Confirm the radio" })).toHaveCount(0);
+  expect(existsSync(join(dir(), "mode.restore.json"))).toBe(false); // START never went
+});
+
+test("back to stock: a damaged backup (calibration differs) is refused before anything is written", async ({ page }) => {
   const flashPath = join(dir(), "flash.bin");
   writeFileSync(flashPath, chip());
   setMode({ flash: flashPath });
   await serveRelease(page);
   await open(page);
   const other = chip();
-  other.fill(0x11, 0xf000, 0x10000); // another radio's calibration
-  await page.getByLabel("Backup file").setInputFiles({ name: "other.bin", mimeType: "application/octet-stream", buffer: other });
+  other.fill(0x11, 0xf000, 0x10000);
+  await page.getByLabel("Backup file").setInputFiles({ name: named(HERE), mimeType: "application/octet-stream", buffer: other });
   await page.getByLabel("Stock firmware for Back to stock").setInputFiles({ name: "stock.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
   await card(page, "Back to stock").getByRole("button", { name: "Back to stock" }).click();
-  await expect(card(page, "Back to stock").getByRole("alert")).toContainText("another radio", { timeout: 20_000 });
+  await expect(card(page, "Back to stock").getByRole("alert")).toContainText("calibration sector doesn't match", { timeout: 20_000 });
   await expect(card(page, "Back to stock").getByRole("alert")).toContainText("Nothing was written");
   const r = restoreResult();
   expect(r.erased + r.programmed).toBe(0);

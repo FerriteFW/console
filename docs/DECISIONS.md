@@ -97,6 +97,8 @@
 ## Install page
 
 - Oct 22, 2026 (ferrite decision 261): its own page (`#install` alone, `#/install` in the sidebar). Connect, Back up, SSB, Install unlock in order; nothing writes until the backup is verified against the radio's flashcrc and saved.
-- The backup is a plain 4 MB `.bin` named with the radio's ID, so `flash.py --backup` takes it too. Back to stock checks it against the radio's calibration CRC instead of the name.
+- The backup is a plain 4 MB `.bin` named with the radio's ID, so `flash.py --backup` takes it too.
+- Oct 22, 2026 (ferrite decision 263, replacing the calibration-CRC check): Back to stock tells the backup's radio by its MCU unique ID, not by calibration. Both of Alex's radios have byte-identical calibration sectors, and clear's backup was written into black. Ferrite's `START` answer now ends with the ID. Console knows the backup's ID from its file name (`rt950pro-backup-<ID>-<date>.bin`) or from this browser's record of the backup's SHA-256 (localStorage). A different ID is refused: nothing is written, the radio restarts. An unknown ID (a renamed file, another browser) is refused the same way until the owner types this radio's ID. The calibration CRC stays as a check against a damaged file.
+- Save backup uses Chrome's save dialog when there is one (written once, read back, then Saved) and the download otherwise; a download isn't started twice (a second press said nothing visible and gave `name (1).bin`).
 - The bundled release and reader are copied in by `npm run bundle-firmware`, never committed; the page uses them only when their SHA-256 matches the manifest. No signature check yet (UPD-15's minisign comes later).
 - Back to stock writes only Ferrite's writable ranges (`layout::WRITABLE`), never calibration or the update area, and reads them back by CRC.

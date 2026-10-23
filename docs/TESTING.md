@@ -82,17 +82,19 @@ Open `target/release/bundle/macos/Ferrite Console.app` (unsigned: right-click â€
 
 Needs the `console-install` firmware (STOCK_RESTORE) for steps 9-14. Keep black's existing backups.
 
-1. `npm run bundle-firmware` (ferrite's `target/ferrite-tx.btf` and `../fw/build/target/hwtest.btf`), `npm run build`, open `#install` in Chrome.
-2. Connect cable. Back up the radio: the reader loads, "Reading the flash at 500 kbaud" counts up, then the flashcrc check. Note the time (expect 3-4 min).
-3. The Radio ID matches About (MENU 0 9 8). Save backup: the file is 4 MB and its SHA-256 matches `backups/blackradio/flash.bin` for the regions stock and Ferrite didn't change since.
+1. `npm run bundle-firmware` (ferrite's `target/ferrite-tx.btf` and `../fw/build/target/hwtest.btf`), `npm run build`, open `#install` in Chrome. The release check uses this default `tx` bundle (`bundle-firmware.mjs` defaults to `ferrite-tx.btf`); a bench radio may override it with the tx-bench image.
+2. Connect cable. Back up the radio: the reader loads and the radio's screen says "Ferrite Console / Backing up your radio / Keep the cable in" with a percentage (not hwtest's diagnostics pages); "Reading the flash at 500 kbaud" counts up, then the flashcrc check. Note the time (expect about 4 min).
+3. The Radio ID matches About (MENU 0 9 8). Save backup: Chrome's save dialog opens once; one file lands (no "name (1).bin"); the page says Saved with its name. The file is 4 MB, named `rt950pro-backup-<ID>-<date>.bin` with the radio's ID, and its SHA-256 matches `backups/blackradio/flash.bin` for the regions stock and Ferrite didn't change since.
 4. Before saving: SSB and Install stay locked. After "I have saved it": they unlock.
 5. Drop `firmware/stock/RT_950Pro_V0.29_OEM.BTF`: "the known stock patch".
 6. Install Ferrite: blocks count up; Ferrite starts, formats, opens setup; Console shows its version. MENU 0 9 6 says SSB installed.
 7. Desktop app (`npm run tauri dev`): Save backup opens the macOS save dialog; the page says Saved with the path.
 8. A cut backup: pull the cable mid-read. Console says so; Back up again works after reconnecting.
-9. Back to stock with clear's backup on black: "from another radio", "Nothing was written"; black restarts into Ferrite as it was.
-10. Back to stock with black's backup and the stock `.BTF`: the screen says "Restoring stock data", then "Done: restarting"; Console catches the bootloader without a power cycle and sends the stock file.
+9. Back to stock with clear's backup on black: "from another radio (ID ...)", "Nothing was written"; black restarts into Ferrite as it was. This must refuse even though both radios' calibration sectors are byte-identical (CRC DF32432F): the check is the MCU ID (decision 263).
+9a. Rename black's backup (e.g. `black.bin`) and open the page in a private window: Back to stock asks for the radio's ID ("Console can't tell which radio..."), nothing is written and the radio restarts; typing the ID shown (as About shows it) and starting again goes on.
+10. Back to stock with black's backup and the stock `.BTF`: the screen says "Restoring stock data", then "Done: restarting"; Console catches the bootloader without a power cycle and sends the stock file. The Install card no longer says "Done. The radio runs Ferrite"; it offers Install Ferrite again.
 11. Stock boots with its channels, settings, splash and prompts. Calibration: TX power on Low into the dummy load as before (by hand, SDR away).
 12. Take a new backup (Install page or `fw/tools/backup.py`): 0x00F000-0x00FFFF and 0x300000 up are byte for byte the first backup's.
 13. Pull the cable mid-restore: Console says part is written. Turn black off, hold the two lower side keys, turn on, "Send the stock firmware only": stock boots (its data then is partly Ferrite's: restore again from Ferrite to fix).
 14. Then reinstall Ferrite (tx-bench) from the Install page.
+15. Reload the page and Connect cable again: the card says "Connected: Cable (CH340)" (never a blank name).

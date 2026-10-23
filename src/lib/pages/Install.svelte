@@ -106,7 +106,7 @@
 
   <section class="card" aria-label="Back up">
     {@render head("2", "Back up", backupState)}
-    <p class="sub">Loads a small reader into the radio, reads all 4 MB of its flash and checks it against the radio's own CRC. About 3 to 4 minutes.</p>
+    <p class="sub">Loads a small reader into the radio, reads all 4 MB of its flash and checks it against the radio's own CRC. About 4 minutes.</p>
     {#if I.backupStep !== "running" && I.backupStep !== "done"}
       <div class="row">
         <button class="btn primary" disabled={!I.connected || I.running || !I.readerFile} onclick={() => I.backUp()}>Back up the radio</button>
@@ -147,10 +147,12 @@
         <div class="save" role="group" aria-label="Save the backup">
           <p><strong>Save this file before anything else.</strong> Keep it somewhere safe, off this computer too. It's the only way back to a fully working stock radio.</p>
           <div class="row">
-            <button class="btn primary" onclick={() => I.save()}>Save backup…</button>
-            {#if I.downloaded}
+            {#if !I.downloaded}
+              <button class="btn primary" onclick={() => I.save()}>Save backup…</button>
+            {:else}
               <button class="btn" onclick={() => I.confirmSaved()}>I have saved it</button>
               <label class="btn quiet">Check the saved file…<input type="file" hidden aria-label="Saved backup" onchange={checkSaved} /></label>
+              <button class="btn quiet" onclick={() => I.downloadAgain()}>Download again</button>
             {/if}
           </div>
           {#if I.downloaded}<p class="sub">Check your downloads folder for {I.backupName}, then confirm.</p>{/if}
@@ -228,7 +230,21 @@
         {I.stock ? I.stock.name : "Your stock .BTF"}
       </label>
     </div>
+    {#if I.restoreBackup && I.restoreBackupCheck && !I.restoreBackupCheck.problems.filter((p) => !p.startsWith("a stock phone")).length}
+      <p class="sub" data-k="restore-id">
+        {I.restoreBackupUid ? `Backup of radio ID ${I.restoreBackupUid}.` : "Console doesn't know which radio this backup is from: the radio's ID is asked for first."}
+      </p>
+    {/if}
     {#if I.restoreBlock && I.restoreStep !== "running"}<p class="sub" data-k="restore-block">{I.restoreBlock}</p>{/if}
+    {#if I.restoreConfirmUid && I.restoreStep !== "running" && I.restoreStep !== "done"}
+      <div class="banner warn" role="group" aria-label="Confirm the radio">
+        <p>
+          A backup from another radio overwrites this radio's settings and channels with that radio's. Go on only if this file is this radio's own backup.
+          This radio's ID is <strong class="mono">{I.restoreConfirmUid}</strong> (Ferrite shows it under About).
+        </p>
+        <label class="check">Type this radio's ID: <input class="mono" type="text" autocomplete="off" spellcheck="false" aria-label="This radio's ID" bind:value={I.restoreTyped} /></label>
+      </div>
+    {/if}
     {#if I.restoreStep !== "done"}
       <div class="row">
         <button class="btn" disabled={!!I.restoreBlock || I.running} onclick={() => I.restore()}>Back to stock</button>
