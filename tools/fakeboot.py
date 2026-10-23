@@ -10,14 +10,24 @@ blocks; at END it writes what it got to MODE.json's `.result.json` sibling for t
 MODE.json (read at each REBOOT; missing = defaults): {"reboot": "ok" | "busy", "nak_block": N (once, E3),
 "deaf_ms": 300 (probes ignored at first, as the radio saving before its reset)}.
 
+The Install page's tests go further. An image holding the reader's mark (zero-key packed, so its text is plain) starts
+[FakeReader], hwtest's console with `sys`, `flash`, `flashcrc`, `fdump` (fdump_proto.py's binary dump, ACK/NAK) and
+`reboot` (back to a FakeBoot). Its chip is MODE.json's "flash" (a file; 4 MB), with "corrupt_every": N spoiling
+every Nth dump frame once. A link `STOCK_RESTORE` START starts [FakeRestore] (the bridge answers it, not the
+simulator): Ferrite's restore over the link (ferrite decision 261) on a chip made from "flash" with Ferrite's ranges
+scrambled; its FINISH hands the cable to a FakeBoot. Every END appends to MODE.results.json; FakeRestore writes
+MODE.restore.json.
+
     python3 tools/fakeboot.py selftest
 """
 import hashlib
 import json
 import os
+import random
 import struct
 import sys
 import time
+import zlib
 
 TAG = b"RT-950      "
 LIMIT = 0xFD000
@@ -155,11 +165,278 @@ class FakeBoot:
         return {"blocks": len(self.blocks), "count": self.count, "bytes": len(img),
                 "sha256": hashlib.sha256(img).hexdigest(), "naked": self.naked, "errors": errs}
 
+    def image(self):
+        return b"".join(self.blocks)
+
     def write_result(self):
         r = self.result()
         self.log(f"fakeboot: END after {r['blocks']} blocks, errors {r['errors']}")
         if self.result_path:
             with open(self.result_path, "w") as f:
+                json.dump(r, f)
+            many = self.result_path.replace(".result.json", ".results.json")
+            try:
+                with open(many) as f:
+                    rs = json.load(f)
+            except (OSError, ValueError):
+                rs = []
+            r["reader"] = READER_MARK in self.image()
+            rs.append(r)
+            with open(many, "w") as f:
+                json.dump(rs, f)
+
+    def after(self, mode_path):
+        """What has the cable after END: the reader's console for the reader image, else None (the simulator)."""
+        if READER_MARK in self.image():
+            return FakeReader(read_mode(mode_path), self.log, mode_path)
+        return None
+
+
+READER_MARK = b"fdump <addr> <len>"
+FD_ACK, FD_NAK, FD_CAN = 0x06, 0x15, 0x18
+CAL, UPDATE = (0xF000, 0x10000), (0x300000, 0x400000)
+# Ferrite's layout::WRITABLE (the header to the contacts, the scratch ring).
+WRITABLE = [(0x02C000, 0x076000), (0x1E0000, 0x200000)]
+
+
+def load_flash(mode):
+    try:
+        with open(mode["flash"], "rb") as f:
+            return bytearray(f.read())
+    except (KeyError, OSError):
+        b = bytearray(random.Random(5).randbytes(4 << 20))
+        b[0x300000:0x300002] = b"\xff\xff"
+        return b
+
+
+def fd_frame(kind, addr, payload):
+    h = b"FD" + kind + b"\x00" + struct.pack("<IH", addr, len(payload))
+    return h + payload + struct.pack("<I", zlib.crc32(h + payload))
+
+
+class FakeReader:
+    """hwtest's console and its fdump, fed bytes (no threads, no rates: the bridge's TCP has none)."""
+
+    def __init__(self, mode, log=lambda *a: None, mode_path=None):
+        self.mode, self.log, self.mode_path = mode, log, mode_path
+        self.flash = bytes(load_flash(mode))
+        self.line = b""
+        self.dump = None  # (addr, len, next offset, frames sent, synced, end sent)
+        self.sync = b""
+        self.spoiled = set()
+        self.next = None
+        self.done = False
+        self.frames = 0
+
+    def console(self, text):
+        return text.replace("\n", "\r\n").encode()
+
+    def feed(self, data):
+        if self.dump is not None:
+            return self.fdump(data)
+        out = b""
+        for c in data:
+            if c in (0x0D, 0x0A):
+                out += self.console("\n") + self.command(self.line.decode("latin1").split()) + b"> "
+                self.line = b""
+                if self.dump is not None or self.next is not None:
+                    return out
+            else:
+                self.line += bytes([c])
+                out += bytes([c])  # the echo
+        return out
+
+    def command(self, w):
+        if not w:
+            return b""
+        if w[0] == "sys":
+            return self.console("v0.9  FreeRTOS 11  clock HEXT 8 MHz  reset cause 00  flash 1024 KB  uid 3F2A91C07D44012389ABCDEF\n")
+        if w[0] == "flash":
+            return self.console(f"flash id 5E4016 (Zbit, {len(self.flash) // 1024} KB) status 00 uid 0011223344556677\n")
+        if w[0] == "flashcrc":
+            return self.console(f"flash crc32 {zlib.crc32(self.flash):08X} over {len(self.flash) // 1024} KB, 1 s\n")
+        if w[0] == "reboot":
+            self.log("fakereader: reboot into the bootloader")
+            self.next = FakeBoot({"deaf_ms": 300, **read_mode(self.mode_path)}, result_path(self.mode_path), self.log)
+            return b""
+        if w[0] == "fdump" and len(w) >= 3:
+            addr, n = int(w[1], 0), int(w[2], 0)
+            if addr + n > len(self.flash):
+                return self.console("fdump: range outside the chip\n")
+            self.dump = [addr, n, 0, False, False]
+            self.sync = b""
+            self.log(f"fakereader: fdump {addr:06X}+{n:X}")
+            return self.console(f"fdump {addr:06X} {n:X} {w[3] if len(w) > 3 else 500000} ready, HEXT 8 MHz (crystal)\n")
+        return self.console(f"{w[0]}: ?\n")
+
+    def frame(self):
+        addr, n, off, _, _ = self.dump
+        if off >= n:
+            end = struct.pack("<IIII", addr, n, zlib.crc32(self.flash[addr:addr + n]), 0)
+            return fd_frame(b"E", addr, end)
+        k = min(4096, n - off)
+        f = bytearray(fd_frame(b"B", addr + off, self.flash[addr + off:addr + off + k]))
+        self.frames += 1
+        every = self.mode.get("corrupt_every")
+        if every and self.frames % every == 0 and off not in self.spoiled:
+            self.spoiled.add(off)
+            f[len(f) // 2] ^= 0x40
+        return bytes(f)
+
+    def fdump(self, data):
+        d = self.dump
+        if not d[4]:  # waiting for FDS1
+            self.sync = (self.sync + data)[-8:]
+            if b"FDS1" in self.sync:
+                d[4] = True
+                return b"FDOK" + self.frame()
+            return b""
+        out = b""
+        for c in data:
+            if c == FD_CAN:
+                self.dump = None
+                return out + self.console("\nfdump stopped: cancelled\n> ")
+            if c == FD_NAK:
+                out += self.frame()
+            elif c == FD_ACK:
+                if d[2] >= d[1]:
+                    crc = zlib.crc32(self.flash[d[0]:d[0] + d[1]])
+                    self.dump = None
+                    self.log("fakereader: fdump end")
+                    return out + self.console(f"\nfdump end crc32 {crc:08X}, {d[1]} bytes, 0 resends\n> ")
+                d[2] += min(4096, d[1] - d[2])
+                out += self.frame()
+        return out
+
+
+def link_crc(data):
+    c = 0xFFFF
+    for x in data:
+        c ^= x << 8
+        for _ in range(8):
+            c = ((c << 1) ^ 0x1021) & 0xFFFF if c & 0x8000 else (c << 1) & 0xFFFF
+    return c
+
+
+def cobs_decode(b):
+    out, i = bytearray(), 0
+    while i < len(b):
+        n = b[i]
+        if n == 0 or i + n > len(b):
+            return None
+        out += b[i + 1:i + n]
+        i += n
+        if n < 0xFF and i < len(b):
+            out.append(0)
+    return bytes(out)
+
+
+def cobs_encode(b):
+    out, block = bytearray(), bytearray()
+    for x in b:
+        if x == 0:
+            out += bytes([len(block) + 1]) + block
+            block = bytearray()
+        else:
+            block.append(x)
+            if len(block) == 254:
+                out += b"\xff" + block
+                block = bytearray()
+    return bytes(out + bytes([len(block) + 1]) + block)
+
+
+def link_frame(ty, seq, payload):
+    body = bytes([ty, seq]) + payload
+    return cobs_encode(body + struct.pack("<H", link_crc(body))) + b"\x00"
+
+
+STOCK_RESTORE = 0x60
+
+
+class FakeRestore:
+    """Ferrite's side of STOCK_RESTORE after START: erase, program, CRC, FINISH, on a 4 MB chip whose Ferrite
+    ranges were scrambled (as after using Ferrite). Anything that would touch calibration or the update area is
+    recorded as an error and refused, as the radio's guard refuses it."""
+
+    def __init__(self, mode, log=lambda *a: None, mode_path=None):
+        self.mode, self.log, self.mode_path = mode, log, mode_path
+        self.want = bytes(load_flash(mode))
+        chip = bytearray(self.want)
+        rng = random.Random(3)
+        for s, e in WRITABLE:
+            chip[s:e] = rng.randbytes(e - s)
+        self.chip = chip
+        self.buf = b""
+        self.errors, self.erased, self.programmed, self.crcs = [], 0, 0, 0
+        self.next = None
+        self.done = False
+
+    def start_answer(self, seq):
+        cal = zlib.crc32(self.chip[CAL[0]:CAL[1]])
+        rest = struct.pack("<IIB", len(self.chip), cal, len(WRITABLE))
+        for s, e in WRITABLE:
+            rest += struct.pack("<II", s, e)
+        return link_frame(STOCK_RESTORE | 0x80, seq, b"\x00" + rest)
+
+    @staticmethod
+    def allowed(addr, n):
+        if any(addr < e and s < addr + n for s, e in (CAL, UPDATE)):
+            return False
+        return any(addr >= s and addr + n <= e for s, e in WRITABLE)
+
+    def feed(self, data):
+        self.buf += data
+        *parts, self.buf = self.buf.split(b"\x00")
+        out = b""
+        for p in parts:
+            body = cobs_decode(p) if p else None
+            if not body or len(body) < 4 or link_crc(body[:-2]) != struct.unpack("<H", body[-2:])[0]:
+                continue
+            ty, seq, pl = body[0], body[1], body[2:-2]
+            if ty != STOCK_RESTORE:
+                out += link_frame(ty | 0x80, seq, b"\x07")
+                continue
+            out += link_frame(STOCK_RESTORE | 0x80, seq, self.serve(pl))
+            if pl[:1] == b"\x04":
+                self.write_result()
+                self.next = FakeBoot({"deaf_ms": 300, **read_mode(self.mode_path)}, result_path(self.mode_path), self.log)
+                break
+        return out
+
+    def serve(self, p):
+        op = p[0] if p else 0xFF
+        if op in (1, 2):
+            addr = struct.unpack("<I", p[1:5])[0]
+            n = 4096 if op == 1 else len(p) - 5
+            if not self.allowed(addr, n):
+                self.errors.append(f"{'erase' if op == 1 else 'program'} {addr:06X}+{n:X} refused")
+                return b"\x04"
+            if op == 1:
+                self.chip[addr:addr + n] = b"\xff" * n
+                self.erased += 1
+            else:
+                for i, b in enumerate(p[5:]):
+                    self.chip[addr + i] &= b
+                self.programmed += 1
+            return b"\x00"
+        if op == 3:
+            addr, n = struct.unpack("<II", p[1:9])
+            self.crcs += 1
+            return b"\x00" + struct.pack("<I", zlib.crc32(self.chip[addr:addr + n]))
+        if op == 4:
+            return b"\x00"
+        if op == 0:
+            return b"\x00"  # START again: answered by the bridge's first one
+        return b"\x03"
+
+    def write_result(self):
+        r = {"errors": self.errors, "erased": self.erased, "programmed": self.programmed, "crcs": self.crcs,
+             "equal": bytes(self.chip) == self.want,
+             "cal_untouched": self.chip[CAL[0]:CAL[1]] == self.want[CAL[0]:CAL[1]],
+             "update_untouched": self.chip[UPDATE[0]:] == self.want[UPDATE[0]:]}
+        self.log(f"fakerestore: FINISH {r}")
+        if self.mode_path:
+            with open(self.mode_path.replace(".json", ".restore.json"), "w") as f:
                 json.dump(r, f)
 
 
@@ -195,6 +472,24 @@ def selftest():
     r = fb.result()
     assert fb.done and r["blocks"] == 4 and r["sha256"] == hashlib.sha256(file).hexdigest(), r
     assert r["errors"] == ["bad frame (cmd 0A)", "block 1 out of order (expected 0)"], r["errors"]
+    # The reader: sys, flash, a dump with a spoiled frame NAKed and sent again, the end.
+    rd = FakeReader({"corrupt_every": 2})
+    assert b"uid 3F2A" in rd.feed(b"sys\r")
+    assert b"4096 KB" in rd.feed(b"flash\r")
+    assert b"ready" in rd.feed(b"fdump 0x0 0x2000 500000\r")
+    f1 = rd.feed(b"FDS1")
+    assert f1.startswith(b"FDOK")
+    f2 = rd.feed(bytes([FD_ACK]))
+    assert zlib.crc32(f2[:-4]) != struct.unpack("<I", f2[-4:])[0], "the second frame spoiled"
+    f2 = rd.feed(bytes([FD_NAK]))
+    assert zlib.crc32(f2[:-4]) == struct.unpack("<I", f2[-4:])[0], "sent again whole"
+    end = rd.feed(bytes([FD_ACK]))
+    assert end[2:3] == b"E"
+    assert b"fdump end" in rd.feed(bytes([FD_ACK])) and rd.dump is None
+    # The restore: protected ranges refused and recorded.
+    rs = FakeRestore({})
+    assert rs.serve(b"\x01" + struct.pack("<I", 0xF000)) == b"\x04" and rs.errors
+    assert rs.serve(b"\x01" + struct.pack("<I", 0x2C000)) == b"\x00" and rs.chip[0x2C000:0x2D000] == b"\xff" * 4096
     print("fakeboot selftest: all passed")
 
 

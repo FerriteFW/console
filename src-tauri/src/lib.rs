@@ -7,6 +7,8 @@
 //! - `transport_open(kind, id, events)`: opens a port by name or a radio by device ID; bytes and the close reason
 //!   come back on the `events` channel (an ArrayBuffer per read, a string when the link drops).
 //! - `transport_write(bytes)`, `transport_set_baud(rate)` (the cable), `transport_close()`.
+//! - `save_file` (raw body, the `x-name` header): the native save dialog, the file written and read back; the path,
+//!   or null when cancelled (the Install page's backup, BACKUP-2).
 
 mod ble;
 mod serial;
@@ -131,6 +133,25 @@ async fn transport_close(app: State<'_, App>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn save_file(request: tauri::ipc::Request<'_>) -> Result<Option<String>, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("No file bytes.".into());
+    };
+    let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).unwrap_or("backup.bin").to_string();
+    let Some(f) = rfd::AsyncFileDialog::new().set_file_name(&name).save_file().await else {
+        return Ok(None);
+    };
+    let path = f.path().to_path_buf();
+    std::fs::write(&path, bytes).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+    // Read back: the page only goes on when the file on disk is the backup.
+    let back = std::fs::read(&path).map_err(|e| format!("Couldn't read {} back: {e}", path.display()))?;
+    if back != *bytes {
+        return Err(format!("{} doesn't read back as written.", path.display()));
+    }
+    Ok(Some(path.display().to_string()))
+}
+
 /// The core's protocol version, so the shell is known to link the same core the web build runs.
 #[tauri::command]
 fn core_protocol() -> u8 {
@@ -164,7 +185,8 @@ pub fn run() {
             transport_write,
             transport_set_baud,
             transport_close,
-            core_protocol
+            core_protocol,
+            save_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running Ferrite Console");

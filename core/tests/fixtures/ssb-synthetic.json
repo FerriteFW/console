@@ -1,0 +1,7 @@
+{
+ "made_by": "ferrite/tools/ssbpatch.py extract + bundle (see README.md)",
+ "patch_len": 9600,
+ "patch_sha256": "d1687dfe11477ac23ea15b44da597fe4696a5bfa4fa96adba2e46130bd2831d2",
+ "bundle_at": 30720,
+ "bundle_sha256": "7c4283142dec4d6e250eec3db55d6eade998d489cf82e06073c096c527817c45"
+}

@@ -1,8 +1,8 @@
 //! The core for the browser. Structures cross as JSON strings (the UI parses them); bytes as `Uint8Array`.
 
 use ferrite_console_core::{
-    answers, aprs, aprs_settings, channels, chirp, demo, firmware, keys, library, liveview, log, plan, records,
-    session, settings, timing, ui, uid,
+    answers, aprs, aprs_settings, channels, chirp, demo, firmware, install, keys, library, liveview, log, plan,
+    records, session, settings, timing, ui, uid,
 };
 use wasm_bindgen::prelude::*;
 
@@ -444,6 +444,157 @@ impl FirmwareUpdate {
     }
     pub fn frame(&self, i: usize) -> Vec<u8> {
         self.0.frame(i)
+    }
+}
+
+#[wasm_bindgen]
+impl FirmwareUpdate {
+    /// The Install page's reader image (hwtest), as it is.
+    pub fn reader(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
+        install::reader_update(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
+    }
+    /// A stock `.BTF` for the way back (BACKUP-8), as it is.
+    pub fn stock(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
+        install::stock_update(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
+    }
+    /// A Ferrite image, with the owner's SSB patch bundled when given (INST-11).
+    pub fn ferrite(btf: &[u8], patch: Option<Vec<u8>>) -> Result<FirmwareUpdate, JsError> {
+        install::ferrite_update(btf, patch.as_deref())
+            .map(|(u, _)| FirmwareUpdate(u))
+            .map_err(|p| JsError::new(&p.join("; ")))
+    }
+}
+
+// The Install page (`ferrite_console_core::install`): the reader's backup, SSB, back to stock.
+
+/// SHA-256 as lowercase hex.
+#[wasm_bindgen]
+pub fn sha256_hex(b: &[u8]) -> String {
+    install::sha256_hex(b)
+}
+
+/// `{size, sha256, crc32, cal_crc32, pending_update, regions, problems}`.
+#[wasm_bindgen]
+pub fn backup_check(b: &[u8]) -> String {
+    json(&install::check_backup(b))
+}
+
+/// An image check `{blocks, image_len, version, crc32, sha256, problems}` for `kind` "reader" or "stock".
+#[wasm_bindgen]
+pub fn image_check(kind: &str, btf: &[u8]) -> String {
+    json(&if kind == "reader" { install::check_reader(btf) } else { install::check_stock(btf) })
+}
+
+/// The reader console's lines: `flash` -> `{id, vendor, size}`, `sys` -> `{uid}`, `flashcrc` -> `{crc, size}`; null
+/// when the line isn't one.
+#[wasm_bindgen]
+pub fn reader_line(kind: &str, line: &str) -> String {
+    match kind {
+        "flash" => json(
+            &install::parse_flash(line)
+                .map(|(id, vendor, size)| serde_json::json!({"id": id, "vendor": vendor, "size": size})),
+        ),
+        "sys" => json(&install::parse_uid(line).map(|w| serde_json::json!({"uid": install::uid_text(w)}))),
+        _ => json(&install::parse_flashcrc(line).map(|(crc, size)| serde_json::json!({"crc": crc, "size": size}))),
+    }
+}
+
+/// The SSB patch in a stock `.BTF` (INST-10), or nothing.
+#[wasm_bindgen]
+pub fn ssb_extract(btf: &[u8]) -> Option<Vec<u8>> {
+    install::ssb_extract(btf, true)
+}
+
+/// `{len, records, sha256, known}`.
+#[wasm_bindgen]
+pub fn ssb_describe(patch: &[u8]) -> String {
+    json(&install::ssb_describe(patch))
+}
+
+/// hwtest's binary dump, the host's side: see `install::Fdump`.
+#[wasm_bindgen]
+pub struct Fdump(install::Fdump);
+
+#[wasm_bindgen]
+impl Fdump {
+    #[wasm_bindgen(constructor)]
+    pub fn new(addr: u32, len: u32) -> Fdump {
+        Fdump(install::Fdump::new(addr, len))
+    }
+    pub fn command(&self, baud: u32) -> String {
+        self.0.command(baud)
+    }
+    pub fn synced(&self) -> bool {
+        self.0.synced()
+    }
+    /// `{send, nak, done, error, got}`.
+    pub fn feed(&mut self, bytes: &[u8]) -> String {
+        json(&self.0.feed(bytes))
+    }
+    pub fn timeout(&mut self) -> String {
+        json(&self.0.timeout())
+    }
+    pub fn resume(&mut self) {
+        self.0.resume()
+    }
+    pub fn take_data(&mut self) -> Vec<u8> {
+        self.0.take_data()
+    }
+    pub fn naks(&self) -> usize {
+        self.0.naks
+    }
+    pub fn dups(&self) -> usize {
+        self.0.dups
+    }
+}
+
+/// `STOCK_RESTORE`'s START answer: `{chip, cal_crc32, ranges}` or null.
+#[wasm_bindgen]
+pub fn restore_start(rest: &[u8]) -> String {
+    json(&install::parse_start(rest))
+}
+
+/// The way back's requests (BACKUP-7): never calibration or the update area.
+#[wasm_bindgen]
+pub struct RestorePlan(install::RestorePlan);
+
+#[wasm_bindgen]
+impl RestorePlan {
+    /// `start` is `restore_start`'s JSON.
+    #[wasm_bindgen(constructor)]
+    pub fn new(backup: &[u8], start: &str) -> Result<RestorePlan, JsError> {
+        let v: serde_json::Value = serde_json::from_str(start).map_err(|e| JsError::new(&e.to_string()))?;
+        let ranges = v["ranges"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|r| Some((r[0].as_u64()? as u32, r[1].as_u64()? as u32))).collect());
+        let s = install::RestoreStart {
+            chip: v["chip"].as_u64().unwrap_or(0) as u32,
+            cal_crc32: v["cal_crc32"].as_u64().unwrap_or(0) as u32,
+            ranges: ranges.unwrap_or_default(),
+        };
+        Ok(RestorePlan(install::restore_plan(backup, &s)))
+    }
+    /// `{ranges, bytes, problems, ops}` (the op count).
+    pub fn summary(&self) -> String {
+        json(
+            &serde_json::json!({"ranges": self.0.ranges, "bytes": self.0.bytes, "problems": self.0.problems, "ops": self.0.ops.len()}),
+        )
+    }
+    pub fn len(&self) -> usize {
+        self.0.ops.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.ops.is_empty()
+    }
+    pub fn kind(&self, i: usize) -> String {
+        self.0.ops[i].kind.into()
+    }
+    pub fn payload(&self, i: usize) -> Vec<u8> {
+        self.0.ops[i].payload.clone()
+    }
+    /// A `crc` op's expected answer; -1 for the others.
+    pub fn expect(&self, i: usize) -> f64 {
+        self.0.ops[i].expect.map_or(-1.0, |c| c as f64)
     }
 }
 

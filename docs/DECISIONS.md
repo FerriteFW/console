@@ -93,3 +93,10 @@
 - A failed block keeps the cable held. Resume probes again, no REBOOT. A reloaded page can resume from the cable.
 - Tests: the bridge's fake bootloader (`tools/fakeboot.py`) on the simulator. Never a radio from the tests.
 - Oct 20, 2026 (Alex): the Tauri desktop app is parked as is: it builds and runs, no more work on it. The web Console comes first. A phone app needs its own small-screen UI whatever wraps it; likely native (SwiftUI) on the Rust core, decided later. Keep the core free of web-only code.
+
+## Install page
+
+- Oct 22, 2026 (ferrite decision 261): its own page (`#install` alone, `#/install` in the sidebar). Connect, Back up, SSB, Install unlock in order; nothing writes until the backup is verified against the radio's flashcrc and saved.
+- The backup is a plain 4 MB `.bin` named with the radio's ID, so `flash.py --backup` takes it too. Back to stock checks it against the radio's calibration CRC instead of the name.
+- The bundled release and reader are copied in by `npm run bundle-firmware`, never committed; the page uses them only when their SHA-256 matches the manifest. No signature check yet (UPD-15's minisign comes later).
+- Back to stock writes only Ferrite's writable ranges (`layout::WRITABLE`), never calibration or the update area, and reads them back by CRC.

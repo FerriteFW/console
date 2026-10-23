@@ -9,6 +9,8 @@
   import Terminal from "./lib/pages/Terminal.svelte";
   import Settings from "./lib/pages/Settings.svelte";
   import Firmware from "./lib/pages/Firmware.svelte";
+  import Install from "./lib/pages/Install.svelte";
+  import { install } from "./lib/install.svelte";
   import { firmware } from "./lib/firmware.svelte";
   import { settings } from "./lib/settings.svelte";
   import { channels } from "./lib/channels.svelte";
@@ -44,6 +46,7 @@
         { id: "channels", name: "Channels & Zones" },
         { id: "settings", name: "Radio Settings" },
         { id: "terminal", name: "Terminal" },
+        { id: "install", name: "Install" },
         { id: "firmware", name: "Firmware Update" },
         { id: "aprs-messages", name: "Messages", sub: "APRS" },
         { id: "aprs-heard", name: "Heard stations", sub: "APRS" },
@@ -59,6 +62,13 @@
   let navOpen = $state(false);
   let coreError = $state("");
   const page = $derived(all.find((p) => p.id === route.id)?.id ?? "live");
+  // `#install` (no slash): the Install page alone, for setting up a new radio (ferritefw.dev/install).
+  let focus = $state(location.hash === "#install");
+  $effect(() => {
+    const f = () => (focus = location.hash === "#install");
+    window.addEventListener("hashchange", f);
+    return () => window.removeEventListener("hashchange", f);
+  });
 
   // LINK-11: a page closed while connected puts the cable back at 115200 (best effort).
   $effect(() => {
@@ -72,7 +82,7 @@
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, aprs, aprsSettings, activity, contacts };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts };
   if (params.has("demo")) {
     void radio.connect("demo").then(async () => {
       for (const k of (params.get("press") ?? "").split(",").filter(Boolean)) {
@@ -86,6 +96,13 @@
   const current = $derived(all.find((p) => p.id === page)!);
 </script>
 
+{#if focus}
+  <div class="focus-shell">
+    <div class="brand focus-brand"><Wordmark /></div>
+    {#if coreError}<div class="banner">{coreError}</div>{/if}
+    <main><Install focus /></main>
+  </div>
+{:else}
 <div class="shell" class:nav-open={navOpen}>
   <aside class="side">
     <div class="brand"><Wordmark /></div>
@@ -129,6 +146,8 @@
         <Settings />
       {:else if page === "firmware"}
         <Firmware />
+      {:else if page === "install"}
+        <Install />
       {:else if page === "about"}
         <About />
       {:else if page === "activity"}
@@ -149,8 +168,17 @@
     </main>
   </div>
 </div>
+{/if}
 
 <style>
+  .focus-shell {
+    min-height: 100vh;
+    padding: 20px 16px;
+  }
+  .focus-brand {
+    max-width: 760px;
+    margin: 0 auto 16px;
+  }
   .shell {
     display: grid;
     grid-template-columns: 232px 1fr;

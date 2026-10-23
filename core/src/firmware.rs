@@ -316,6 +316,17 @@ impl Update {
         Ok(Update { data: btf.to_vec(), blocks: c.blocks })
     }
 
+    /// A file checked elsewhere (the Install page's reader, stock and SSB-bundled images: [`crate::install`]).
+    pub(crate) fn raw(data: Vec<u8>) -> Update {
+        let blocks = data.len().div_ceil(BLOCK);
+        Update { data, blocks }
+    }
+
+    /// The whole file the frames carry.
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
     pub fn blocks(&self) -> usize {
         self.blocks
     }

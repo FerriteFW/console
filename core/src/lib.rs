@@ -22,6 +22,7 @@
 //! - [`log`]: the event log (`LOG_READ`, LINK-42) for the Activity Log.
 //! - [`liveview`]: Live View from the radio's compact UI events (LINK-47, LINK-48), for Bluetooth.
 //! - [`firmware`]: Firmware Update: the `.btf` checks and the stock bootloader's frames (tools/btf.py, flash.py).
+//! - [`install`]: the Install page: the reader backup (fdump), the SSB patch, back to stock (`STOCK_RESTORE`).
 //! - [`demo`]: a demo radio answering from memory, for trying Console without a radio.
 //! - [`timing`]: the reference client's time-outs and pacing, in one place.
 
@@ -32,6 +33,7 @@ pub mod channels;
 pub mod chirp;
 pub mod demo;
 pub mod firmware;
+pub mod install;
 pub mod keys;
 pub mod library;
 pub mod liveview;

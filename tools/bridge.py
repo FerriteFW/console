@@ -423,11 +423,14 @@ class Bridge:
             out = boot.feed(data)
             if out:
                 await ws.send(2, out)
-            if boot.done:
+            if getattr(boot, "next", None) is not None:
+                self.boot = boot.next  # the reader's `reboot`, the restore's FINISH: the bootloader next
+                log(f"fakeboot: the cable goes to {type(self.boot).__name__}")
+            elif boot.done:
                 await asyncio.sleep(0.2)  # the reset; the simulator restarted at REBOOT and runs on
-                self.boot = None
+                self.boot = boot.after(self.fakeboot_mode)
                 heard.buf = b""
-                log("fakeboot: END; the cable is the simulator's again")
+                log(f"fakeboot: END; the cable is {'the reader' + chr(39) + 's' if self.boot else 'the simulator' + chr(39) + 's'} again")
 
         def on_close(why):
             if not gone.done():
@@ -453,7 +456,16 @@ class Bridge:
                         await to_boot(data)
                         continue
                     if self.fakeboot_mode:
-                        reboots = [seq for ty, seq, _ in sent.feed(data) if ty == REBOOT]
+                        frames = sent.feed(data)
+                        starts = [seq for ty, seq, p in frames if ty == fakeboot.STOCK_RESTORE and p[:1] == b"\x00"]
+                        if starts:
+                            # Ferrite's restore (decision 261): the fake takes the cable from here, as the radio's
+                            # UI task does; the simulator never sees it.
+                            self.boot = fakeboot.FakeRestore(fakeboot.read_mode(self.fakeboot_mode), log, self.fakeboot_mode)
+                            log("fakeboot: STOCK_RESTORE START; the fake restore has the cable")
+                            await ws.send(2, self.boot.start_answer(starts[-1]))
+                            continue
+                        reboots = [seq for ty, seq, _ in frames if ty == REBOOT]
                         if reboots and fakeboot.read_mode(self.fakeboot_mode).get("reboot") == "busy":
                             log("fakeboot: REBOOT answered busy, as asked (the radio transmitting)")
                             await ws.send(2, link_answer(REBOOT, reboots[-1], 7))
@@ -482,6 +494,11 @@ class Bridge:
                         log(f"test hook: injected event #{seq} kind {body[2]}")
                         await ws.send(2, cobs_encode(body + struct.pack("<H", link_crc(body))) + b"\x00")
                         await ws.send_json({"injected": seq})
+                    elif self.fakeboot_mode and "reset_fake" in msg:
+                        # a test's end: whatever fake has the cable (a reader, a restore) goes, the simulator's again
+                        self.boot = None
+                        heard.buf = b""
+                        await ws.send_json({"reset": True})
                     elif sim and "drop_ui" in msg:
                         hook["drop_ui"] = int(msg["drop_ui"])
                         await ws.send_json({"dropping": hook["drop_ui"]})

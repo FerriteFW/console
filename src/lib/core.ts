@@ -263,6 +263,36 @@ export type FirmwareUpdate = wasm.FirmwareUpdate;
 export const BootReader = wasm.BootReader;
 export type BootReader = wasm.BootReader;
 
+// The Install page (core/src/install.rs): the reader's backup (fdump), the SSB patch, back to stock (STOCK_RESTORE).
+
+export type Region = { name: string; start: number; end: number; crc32: string };
+export type BackupCheck = {
+  size: number;
+  sha256: string;
+  crc32: string;
+  cal_crc32: string;
+  pending_update: boolean;
+  regions: Region[];
+  problems: string[];
+};
+export type ImageCheck = { blocks: number; image_len: number; version: string | null; crc32: string; sha256: string; problems: string[] };
+export type SsbFound = { len: number; records: number; sha256: string; known: boolean };
+export type FdStep = { send: number[]; nak: boolean; done: boolean; error: string | null; got: number };
+export type RestoreStart = { chip: number; cal_crc32: number; ranges: [number, number][] };
+export type RestoreSummary = { ranges: [number, number][]; bytes: number; problems: string[]; ops: number };
+
+export const sha256Hex = (b: Uint8Array): string => wasm.sha256_hex(b);
+export const backupCheck = (b: Uint8Array): BackupCheck => JSON.parse(wasm.backup_check(b));
+export const imageCheck = (kind: "reader" | "stock", btf: Uint8Array): ImageCheck => JSON.parse(wasm.image_check(kind, btf));
+export const readerLine = <T>(kind: "flash" | "sys" | "flashcrc", line: string): T | null => JSON.parse(wasm.reader_line(kind, line));
+export const ssbExtract = (btf: Uint8Array): Uint8Array | undefined => wasm.ssb_extract(btf);
+export const ssbDescribe = (patch: Uint8Array): SsbFound => JSON.parse(wasm.ssb_describe(patch));
+export const restoreStart = (rest: Uint8Array): RestoreStart | null => JSON.parse(wasm.restore_start(rest));
+export const Fdump = wasm.Fdump;
+export type Fdump = wasm.Fdump;
+export const RestorePlan = wasm.RestorePlan;
+export type RestorePlan = wasm.RestorePlan;
+
 // APRS (core/src/aprs.rs, LINK-44 – LINK-46): the heard list, messages, events.
 
 export type Station = {

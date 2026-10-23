@@ -3,8 +3,8 @@
 // then hello, model, count, every 1 KB block and end; then the radio restarts and Console connects again.
 // The frames come from the Rust core (core/src/firmware.rs), only from a file its checks passed: the bootloader
 // only ever gets the image's own blocks.
+import { BootPort } from "./bootflash";
 import {
-  BootReader,
   FirmwareUpdate,
   P,
   bootProbe,
@@ -38,48 +38,6 @@ export type Stage = "pick" | "ready" | "rebooting" | "probing" | "sending" | "re
 export const STAY_IN_BOOTLOADER = "The radio stays in the bootloader: start again (Resume).";
 
 class Abort extends Error {}
-
-/** The bootloader's replies as they arrive, matched by command. */
-class BootPort {
-  private reader = new BootReader();
-  private replies: [number, number][] = [];
-  private wake: (() => void) | null = null;
-
-  constructor(readonly t: Transport) {
-    t.onData = (b) => {
-      const flat = this.reader.feed(b);
-      for (let i = 0; i + 1 < flat.length; i += 2) this.replies.push([flat[i], flat[i + 1]]);
-      this.wake?.();
-    };
-  }
-
-  clear() {
-    this.replies = [];
-    this.reader.clear();
-  }
-
-  /** The next reply to `cmd` (others are dropped), or null after `ms`. */
-  async next(cmd: number, ms: number): Promise<number | null> {
-    const end = performance.now() + ms;
-    for (;;) {
-      while (this.replies.length) {
-        const [c, r] = this.replies.shift()!;
-        if (c === cmd) return r;
-      }
-      const left = end - performance.now();
-      if (left <= 0) return null;
-      await new Promise<void>((ok) => {
-        this.wake = ok;
-        setTimeout(ok, left);
-      });
-      this.wake = null;
-    }
-  }
-
-  free() {
-    this.reader.free();
-  }
-}
 
 type Firmware_ = { firmware: string; build: string };
 
