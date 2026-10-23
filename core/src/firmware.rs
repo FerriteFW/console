@@ -421,14 +421,35 @@ mod tests {
         img
     }
 
-    /// btf.py's selftest: the V0.27 key's second expanded row.
+    /// The expansion rule on an arbitrary key: row r rotates bytes 0-7 left r bits and bytes 8-15 right r bits.
     #[test]
-    fn key_expansion_matches_btf_py() {
-        let k: [u8; 16] =
-            [0x7e, 0x80, 0x7b, 0x17, 0x61, 0xa4, 0xeb, 0xc6, 0xfc, 0x3a, 0x8d, 0xd3, 0x37, 0x52, 0xf3, 0x05];
-        let row: [u8; 16] =
-            [0xfc, 0x01, 0xf6, 0x2e, 0xc2, 0x49, 0xd7, 0x8d, 0x7e, 0x1d, 0xc6, 0xe9, 0x9b, 0x29, 0xf9, 0x82];
-        assert_eq!(expand(&k)[16..32], row);
+    fn key_expansion_follows_the_rule() {
+        let k: [u8; 16] = core::array::from_fn(|i| (i as u8).wrapping_mul(37) ^ 0xA5);
+        let ks = expand(&k);
+        for r in 0..8 {
+            for i in 0..16 {
+                let want = if i < 8 { k[i].rotate_left(r as u32) } else { k[i].rotate_right(r as u32) };
+                assert_eq!(ks[r * 16 + i], want, "row {r} byte {i}");
+            }
+        }
+    }
+
+    /// btf.py's selftest on a real stock file, when this machine has one (never in the repo): the key is read from
+    /// the file at run time, and decrypting with it gives the model tag the bootloader checks at image offset 0x7E0
+    /// (inside the encrypted part) and, when the published decrypted file sits beside it, the same bytes below the
+    /// last block. TODO(owner): the key is published in <TODO: owner gives repo link>.
+    #[test]
+    fn key_expansion_matches_a_real_stock_file_when_present() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../firmware/stock/RT_950Pro_V0.27_260203");
+        let Ok(btf) = std::fs::read(format!("{dir}/RT_950Pro_V0.27_260203.BTF")) else { return };
+        let (img, kb) = unpack(&btf).unwrap();
+        assert_ne!(&kb[..16], &[0u8; 16][..], "stock files carry a key");
+        assert_eq!(&img[MODEL_OFF_BOOT..MODEL_OFF_BOOT + 12], MODEL_TAG);
+        if let Ok(dec) = std::fs::read(format!("{dir}/RT_950Pro_V0.27_decrypted.bin")) {
+            let last = (btf.len().div_ceil(BLOCK) - 1) * BLOCK;
+            let key: [u8; 16] = kb[..16].try_into().unwrap();
+            assert_eq!(crypt(&btf, &key)[ENC_START..last], dec[ENC_START..last]);
+        }
     }
 
     #[test]
