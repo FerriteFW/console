@@ -1022,7 +1022,7 @@ mod tests {
         let mic = item(&v, "0 8 3");
         assert_eq!((mic.kind, mic.value.as_str()), (Kind::Level, "7"));
         assert_eq!(mic.choices, ["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
-        let tot = item(&v, "0 8 1 1");
+        let tot = item(&v, "0 8 1");
         assert_eq!(tot.kind, Kind::Level);
         assert_eq!((tot.choices.first().unwrap().as_str(), tot.choices.last().unwrap().as_str()), ("30 s", "600 s"));
         // LINK-5: never changed over the link.
