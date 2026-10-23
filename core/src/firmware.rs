@@ -437,7 +437,7 @@ mod tests {
     /// btf.py's selftest on a real stock file, when this machine has one (never in the repo): the key is read from
     /// the file at run time, and decrypting with it gives the model tag the bootloader checks at image offset 0x7E0
     /// (inside the encrypted part) and, when the published decrypted file sits beside it, the same bytes below the
-    /// last block. TODO(owner): the key is published in <TODO: owner gives repo link>.
+    /// last block. No key lives in our source: every stock .BTF carries its own in its key block (0x400).
     #[test]
     fn key_expansion_matches_a_real_stock_file_when_present() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../firmware/stock/RT_950Pro_V0.27_260203");
