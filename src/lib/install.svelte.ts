@@ -754,6 +754,12 @@ class Install {
       this.installStep = "done";
       this.resetRestore();
       this.message = "";
+      // Done updating: the same cable becomes Console's usual connection (Live view, channels), not held here.
+      const t = this.t;
+      this.linked = false;
+      this.t = null;
+      this.wire = null;
+      if (t) await radio.handBack(t).catch(() => {});
     } catch (e) {
       this.fail("install", e);
     }

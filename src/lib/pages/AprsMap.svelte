@@ -1,7 +1,8 @@
 <script lang="ts">
   // APRS › Map: the heard stations with a position, and the radio's own, on OpenStreetMap (Leaflet from a pinned CDN
   // version; the tiles attributed on the map). Live with the heard list's events. `?call=` centres a station,
-  // `?at=lat,lon` a place (the Activity Log's positions).
+  // `?at=lat,lon` a place (the Activity Log's positions). Otherwise it centres on you: the radio's own position, or
+  // the browser's location when the radio has none (asked once; refused or unavailable falls back to the stations).
   import { aprs, ago, compass, distance } from "../aprs.svelte";
   import { radio } from "../radio.svelte";
   import { ATTRIBUTION, loadLeaflet, TILES, type Leaflet, type LLayer, type LMap } from "../leaflet";
@@ -47,6 +48,15 @@
     return a && a.length === 2 && a.every(Number.isFinite) ? ([a[0], a[1]] as [number, number]) : null;
   });
   const focus = $derived(route.params.get("call")?.toUpperCase() ?? null);
+  let here = $state<[number, number] | null>(null);
+  $effect(() => {
+    if (aprs.me || here || typeof navigator === "undefined" || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (p) => (here = [p.coords.latitude, p.coords.longitude]),
+      () => {},
+      { timeout: 10_000, maximumAge: 600_000 },
+    );
+  });
   let fitted = "";
 
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -83,16 +93,26 @@
           .bindTooltip(`This radio (${esc(aprs.me.from)})`, { direction: "right" }),
       );
     }
+    if (!aprs.me && here) {
+      layers.push(
+        l
+          .circleMarker(here, { radius: 7, color: "#7a2", weight: 2, fillColor: "#7ce38b", fillOpacity: 0.5, className: "aprs-here" })
+          .addTo(m)
+          .bindTooltip("You (this computer's location)", { direction: "right" }),
+      );
+    }
     if (at) {
       layers.push(l.marker(at, { title: "From the Activity Log" }).addTo(m).bindTooltip(`${at[0].toFixed(4)}, ${at[1].toFixed(4)}`));
     }
     // Fit once per kind of view: the focus (a station, a place) or everything.
-    const key = `${focus ?? ""}|${at?.join(",") ?? ""}|${pts.length > 0}`;
+    const you: [number, number] | null = aprs.me ? [aprs.me.lat, aprs.me.lon] : here;
+    const key = `${focus ?? ""}|${at?.join(",") ?? ""}|${you ? "you" : pts.length > 0}`;
     if (key !== fitted) {
       fitted = key;
       const f = focus ? placed.find((s) => s.call.toUpperCase() === focus) : null;
       if (f) m.setView([f.lat!, f.lon!], 13);
       else if (at) m.setView(at, 13);
+      else if (you) m.setView(you, 11);
       else if (pts.length > 1) m.fitBounds(pts, { padding: [30, 30], maxZoom: 13 });
       else if (pts.length === 1) m.setView(pts[0], 12);
     }
