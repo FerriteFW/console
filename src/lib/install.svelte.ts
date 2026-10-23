@@ -2,7 +2,7 @@
 // BACKUP-7, BACKUP-8, BACKUP-9.3, INST-5, INST-10, INST-11). ferrite's tools/flash.py, ssbpatch.py and
 // fw/tools/backup.py, as one flow:
 //   1. Connect: the cable opened as it is (the radio may run stock, the reader or Ferrite).
-//   2. Back up: the hwtest reader image through the bootloader; the whole SPI flash read with its fdump (500 kbaud,
+//   2. Back up: the reader image (Ferrite's read-only reader, or hwtest's) through the bootloader; the whole SPI flash read with its fdump (500 kbaud,
 //      a CRC per 4 KB frame), checked against the radio's own flashcrc; saved by the owner before anything else.
 //   3. SSB (optional): the patch from the owner's own stock .BTF, found in the browser.
 //   4. Install: the bundled release (SHA-256 checked) or a file, with the patch bundled; refused without a saved
@@ -513,8 +513,8 @@ class Install {
       await this.flash(FirmwareUpdate.reader(this.readerFile.bytes), "the reader");
       this.message = "Waiting for the reader to start…";
       await this.readerPrompt();
-      // The radio's screen says "Backing up your radio" instead of hwtest's diagnostics pages (an older reader
-      // doesn't know `reader`: its pages stay, nothing else changes).
+      // The radio's screen says "Backing up your radio" (BACKUP-9.4; an older hwtest reader doesn't know `reader`:
+      // its diagnostics pages stay, nothing else changes).
       w.clear();
       await w.write("reader\r");
       await w.waitFor(/reader screen on/, 1500, this.held);

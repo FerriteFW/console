@@ -2,7 +2,8 @@
 //! BACKUP-9.3, INST-5, INST-10, INST-11; decision 261). Ported from ferrite's `tools/flash.py`, `tools/ssbpatch.py`
 //! and `fw/tools/fdump_proto.py` / `backup.py` (the behaviour, not the layout).
 //!
-//! - The backup: the hwtest reader image ([`check_reader`]) goes in through the bootloader; its console answers
+//! - The backup: the reader image ([`check_reader`]: ferrite's read-only `reader/`, decision 264, or the older
+//!   hwtest one; same protocol) goes in through the bootloader; its console answers
 //!   `sys` (the radio's ID), `flash` (the chip) and `fdump` ([`Fdump`]: 4 KB frames with a CRC each, resent on a
 //!   NAK, a whole-range CRC at the end, at 500 kbaud); `flashcrc` is the radio's own CRC of the whole chip, which
 //!   must agree. [`check_backup`] is flash.py's `check_backup` plus a CRC-32 per region.
@@ -26,7 +27,7 @@ use serde::Serialize;
 pub const CAL: usize = CALIBRATION.start as usize;
 pub const SECTOR: usize = 0x1000;
 pub const UPDATE: usize = UPDATE_AREA.start as usize;
-/// Text only the hwtest reader image holds (its help line for the binary dump).
+/// Text only a reader image holds (its help line for the binary dump: ferrite's reader and hwtest alike).
 pub const READER_MARK: &[u8] = b"fdump <addr> <len>";
 /// The link's `STOCK_RESTORE` (ferrite decision 261) and its ops.
 pub const STOCK_RESTORE: u8 = 0x60;
@@ -400,7 +401,7 @@ fn image_check(btf: &[u8], limit: usize, want: impl Fn(&[u8]) -> Option<String>)
     (c, img)
 }
 
-/// The hwtest reader image: its own mark, never Ferrite, below the stock marker sector.
+/// A reader image (ferrite's or hwtest's): its own mark, never Ferrite, below the stock marker sector.
 pub fn check_reader(btf: &[u8]) -> ImageCheck {
     image_check(btf, APP_MAX, |img| {
         (!find(img, READER_MARK) || find(img, FERRITE_MARK))
@@ -967,12 +968,18 @@ mod tests {
         assert!(check_stock(&btf).problems.is_empty(), "{:?}", check_stock(&btf).problems);
     }
 
-    /// The hwtest reader as built in ../fw, and a Ferrite build, when this machine has them: each passes as what it is.
+    /// The readers (ferrite's `tools/mkbtf.sh reader`, or another build of it named by FERRITE_READER_BTF, and the
+    /// hwtest one in ../fw) and a Ferrite build, when this machine has them: each passes as what it is.
     #[test]
     fn real_reader_and_ferrite_builds_pass_when_present() {
-        if let Ok(b) = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fw/build/target/hwtest.btf")) {
-            assert!(check_reader(&b).problems.is_empty(), "{:?}", check_reader(&b).problems);
-            assert!(!check_stock(&b).problems.is_empty());
+        let ferrite_reader = std::env::var("FERRITE_READER_BTF")
+            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../ferrite/target/ferrite-reader.btf").into());
+        for path in [ferrite_reader.as_str(), concat!(env!("CARGO_MANIFEST_DIR"), "/../../fw/build/target/hwtest.btf")] {
+            if let Ok(b) = std::fs::read(path) {
+                assert!(check_reader(&b).problems.is_empty(), "{path}: {:?}", check_reader(&b).problems);
+                assert!(!check_stock(&b).problems.is_empty());
+                assert!(reader_update(&b).is_ok());
+            }
         }
         if let Ok(b) = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../ferrite/target/ferrite-tx.btf")) {
             assert!(!check_reader(&b).problems.is_empty());

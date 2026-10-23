@@ -82,7 +82,7 @@ Open `target/release/bundle/macos/Ferrite Console.app` (unsigned: right-click �
 
 Needs the `console-install` firmware (STOCK_RESTORE) for steps 9-14. Keep black's existing backups.
 
-1. `npm run bundle-firmware` (ferrite's `target/ferrite-tx.btf` and `../fw/build/target/hwtest.btf`), `npm run build`, open `#install` in Chrome. The release check uses this default `tx` bundle (`bundle-firmware.mjs` defaults to `ferrite-tx.btf`); a bench radio may override it with the tx-bench image.
+1. `npm run bundle-firmware` (ferrite's `target/ferrite-tx.btf` and `target/ferrite-reader.btf`: `tools/mkbtf.sh tx` and `tools/mkbtf.sh reader`), `npm run build`, open `#install` in Chrome. The release check uses this default `tx` bundle (`bundle-firmware.mjs` defaults to `ferrite-tx.btf`); a bench radio may override it with the tx-bench image.
 2. Connect cable. Back up the radio: the reader loads and the radio's screen says "Ferrite Console / Backing up your radio / Keep the cable in" with a percentage (not hwtest's diagnostics pages); "Reading the flash at 500 kbaud" counts up, then the flashcrc check. Note the time (expect about 4 min).
 3. The Radio ID matches About (MENU 0 9 8). Save backup: Chrome's save dialog opens once; one file lands (no "name (1).bin"); the page says Saved with its name. The file is 4 MB, named `rt950pro-backup-<ID>-<date>.bin` with the radio's ID, and its SHA-256 matches `backups/blackradio/flash.bin` for the regions stock and Ferrite didn't change since.
 4. Before saving: SSB and Install stay locked. After "I have saved it": they unlock.
@@ -98,3 +98,18 @@ Needs the `console-install` firmware (STOCK_RESTORE) for steps 9-14. Keep black'
 13. Pull the cable mid-restore: Console says part is written. Turn black off, hold the two lower side keys, turn on, "Send the stock firmware only": stock boots (its data then is partly Ferrite's: restore again from Ferrite to fix).
 14. Then reinstall Ferrite (tx-bench) from the Install page.
 15. Reload the page and Connect cable again: the card says "Connected: Cable (CH340)" (never a blank name).
+
+## Rust reader against hwtest (black radio, cable, once). Alex only.
+
+Ferrite decision 264: the reader is now ferrite's `reader/` (Rust, read only by construction). fw/hwtest retires once this passes. Both backups must see the same flash: take them back to back, with no Ferrite or stock boot in between (the second backup restarts the reader into the bootloader itself).
+
+1. Build both readers: in ferrite (branch `reader`), `tools/mkbtf.sh reader` (`target/ferrite-reader.btf`, 34,816 bytes); hwtest as before (`../fw/build/target/hwtest.btf`, 119,808 bytes). Here (branch `rust-reader`): `npm run bundle-firmware`, `npm run build`, open `#install` in Chrome, Connect cable.
+2. hwtest first: Advanced › Reader image › Use a file… `hwtest.btf`. Back up the radio. Save it as `hwtest.bin`. Note the read time ("Reading the flash at 500 kbaud" to the flashcrc check) and the check time (flashcrc to Done).
+3. Rust reader: reload the page (the bundled reader is the Rust one; Advanced shows `ferrite-reader.btf (included)`), Connect cable, Back up the radio. Note the same two times. Save it as `rust.bin`.
+4. The screen during step 3: "Ferrite Console / Backup reader / Waiting for Ferrite Console." while it starts, then "Ferrite Console / Backing up your radio / Keep the cable in. Don't turn it off." with a blue bar, "Reading N%", then "Checking N%", then a green bar and "Read and checked". Backlight on, keypad light off.
+5. Byte for byte: `cmp hwtest.bin rust.bin` prints nothing; `shasum -a 256 hwtest.bin rust.bin` and `python3 -c 'import sys,zlib; [print(f, "%08X" % zlib.crc32(open(f,"rb").read())) for f in sys.argv[1:]]' hwtest.bin rust.bin` show the same values, and the CRC is the one the page showed. Both file names carry the same radio ID (the `sys` UID).
+6. Timing: the reads take about the same (about 85 s at 500 kbaud); the Rust reader's check is seconds (120 MHz) where hwtest's was about a minute (8 MHz). Write both times in the results.
+7. Older tools still work with the Rust reader running (same protocol): `../fw/tools/backup.py /dev/cu.usbserial-* out --twice` ends "agree" and its `flash.bin` equals `rust.bin`.
+8. The power switch with the reader idle: off turns the radio off; on starts the reader again (Waiting screen). Then Install Ferrite (tx-bench) from the Install page as usual.
+
+Results: date, ferrite commit, the CRC-32 and SHA-256 of both files, the four times, pass or fail. On a pass, ferrite's `reader` and this `rust-reader` branch merge, and fw/apps/hwtest is retired.

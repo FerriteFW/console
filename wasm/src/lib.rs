@@ -449,7 +449,7 @@ impl FirmwareUpdate {
 
 #[wasm_bindgen]
 impl FirmwareUpdate {
-    /// The Install page's reader image (hwtest), as it is.
+    /// The Install page's reader image (ferrite's reader, or hwtest's), as it is.
     pub fn reader(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
         install::reader_update(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
     }
