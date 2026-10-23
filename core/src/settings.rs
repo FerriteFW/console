@@ -155,7 +155,7 @@ struct TextField {
 }
 
 const CALLSIGN: TextField = TextField {
-    id: "0 8 7 1",
+    id: "0 8 6 1",
     name: "Callsign",
     help: "",
     get: |s| s.callsign.as_bytes(),
@@ -587,7 +587,7 @@ fn in_record(sc: &mut Scratch, rec: &[u8], p: &[u8], name: &str) -> bool {
     })
 }
 
-/// A callsign for walks: CW ID (0 8 7 2) won't step without one (VOX-10).
+/// A callsign for walks: CW ID (0 8 6 2) won't step without one (VOX-10).
 pub(crate) fn with_call(mut s: Settings) -> Settings {
     if s.callsign.is_empty() {
         s.set_callsign(b"N0CALL");
@@ -1026,17 +1026,17 @@ mod tests {
         assert_eq!(tot.kind, Kind::Level);
         assert_eq!((tot.choices.first().unwrap().as_str(), tot.choices.last().unwrap().as_str()), ("30 s", "600 s"));
         // LINK-5: never changed over the link.
-        for id in ["0 9 4", "0 8 9 1", "0 9 3 1", "0 9 2 4", "0 5 9 1"] {
+        for id in ["0 9 4", "0 8 8 4", "0 9 3 1", "0 9 2 3", "0 5 8"] {
             let i = item(&v, id);
             assert_eq!((i.kind, i.note.as_str()), (Kind::Readonly, RADIO_ONLY), "{id}");
         }
         assert_eq!(item(&v, "0 9 4").value, "United States");
         // Typed: the pager frequency.
         assert_eq!(item(&v, "0 4 2 2").kind, Kind::Text);
-        let call = item(&v, "0 8 7 1");
+        let call = item(&v, "0 8 6 1");
         assert_eq!((call.kind, call.value.as_str()), (Kind::Text, "N0CALL"));
         // Not in this record: Watch (slot state), Dry TX (this power-on), APRS's own record.
-        for id in ["0 1 1", "0 8 9 2", "0 5 4 1", "0 5 7 1"] {
+        for id in ["0 1 1", "0 8 8 5", "0 5 5 1", "0 5 4"] {
             assert!(v.groups.iter().flat_map(|g| &g.items).all(|i| i.id != id), "{id}");
         }
         let aprs = &v.groups[4];
@@ -1062,13 +1062,13 @@ mod tests {
         let e = set(&rec, "0 7 1", "Purple").unwrap_err();
         assert!(e.starts_with("Theme: one of ") && e.contains("Night red"), "{e}");
         assert!(set(&rec, "0 9 4", "Canada").unwrap_err().contains(RADIO_ONLY));
-        assert!(set(&rec, "0 9 2 4", "Terminal").unwrap_err().contains(RADIO_ONLY));
+        assert!(set(&rec, "0 9 2 3", "Terminal").unwrap_err().contains(RADIO_ONLY));
         let new = set(&rec, "0 4 2 2", "439.9875").unwrap();
         assert_eq!(settings_of(&new).pocsag_freq, 43_998_750);
         assert!(set(&rec, "0 4 2 2", "nonsense").is_err());
-        let new = set(&rec, "0 8 7 1", "w1aw/7").unwrap();
+        let new = set(&rec, "0 8 6 1", "w1aw/7").unwrap();
         assert_eq!(settings_of(&new).callsign.as_bytes(), b"W1AW/7");
-        assert!(set(&rec, "0 8 7 1", "W1AW-7").is_err());
+        assert!(set(&rec, "0 8 6 1", "W1AW-7").is_err());
         let new = set(&rec, "owner.name", "Alex").unwrap();
         assert_eq!(settings_of(&new).owner[0].as_bytes(), b"Alex");
         assert!(set(&rec, "owner.name", "x".repeat(21).as_str()).is_err());
@@ -1079,9 +1079,9 @@ mod tests {
         let new = set(&record_of(&co), "0 7 1", "Dark").unwrap();
         assert_eq!((settings_of(&new).theme, settings_of(&new).chan_only), (0, true));
         // A value with the degree sign, stepped to on the menu.
-        let new = set(&rec, "0 8 5 2", "180\u{b0}").unwrap();
+        let new = set(&rec, "0 8 8 3", "180\u{b0}").unwrap();
         assert_eq!(settings_of(&new).tail_phase, 2);
-        assert_eq!(item(&view(&new), "0 8 5 2").value, "180\u{b0}");
+        assert_eq!(item(&view(&new), "0 8 8 3").value, "180\u{b0}");
     }
 
     /// A changed setting survives the write through ferrite's link session and reads back; the plan finds no

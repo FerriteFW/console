@@ -1,5 +1,5 @@
-//! APRS settings (LINK-43): the APRS record (`what` 5, 24 bytes: MENU 0 5's frequency, beacon mode, power, path,
-//! digipeater, beacon after voice, SSID and custom path), shown, changed and checked as Radio Settings does the
+//! APRS settings (LINK-43): the APRS record (`what` 5, 25 bytes: MENU 0 5's frequency, beacon mode, power, path,
+//! digipeater, beacon after voice, SSID, custom path and FX.25), shown, changed and checked as Radio Settings does the
 //! settings record: by ferrite's own App and link session, never a copy of the menu.
 //!
 //! The scratch radio holds the radio's settings record (its region decides "the region's" frequency) and the APRS
@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-/// The record's length (LINK-43).
-pub const RECORD_LEN: usize = 24;
+/// The record's length (LINK-43), ferrite's own (25 since FX.25, decision 237).
+pub const RECORD_LEN: usize = ferrite_app::link::APRS_REC;
 /// The backup file's format name.
 pub const BACKUP_FORMAT: &str = "ferrite-console-aprs";
 
@@ -44,6 +44,7 @@ fn probes() -> [Vec<u8>; 2] {
     b[..2].copy_from_slice(&28_960u16.to_le_bytes()); // 144.800 MHz
     b[2..8].copy_from_slice(&[4, 2, 3, 0x33, 1, 9]); // every 5 min, high, custom path, digi on + my call + 3 s, after voice, SSID 9
     b[8..15].copy_from_slice(b"WIDE2-2");
+    b[24] = 32; // FX.25 on TX, 32 check bytes (APRS-45)
     [a, b]
 }
 
@@ -326,17 +327,17 @@ mod tests {
         assert!(v.notes.is_empty(), "{:?}", v.notes);
         let ids: Vec<&str> = v.items.iter().map(|i| i.id.as_str()).collect();
         for id in [
-            "0 5 4 1", "0 5 5 1", "0 5 5 3", "0 5 5 4", "0 5 6 1", "0 5 6 2", "0 5 7 1", "0 5 8 1", "0 5 8 2",
-            "0 5 8 3",
+            "0 5 5 1", "0 5 6 1", "0 5 6 2", "0 5 6 3", "0 5 9 1", "0 5 9 2", "0 5 4", "0 5 7 1", "0 5 7 2",
+            "0 5 7 3",
         ] {
             assert!(ids.contains(&id), "{id} in {ids:?}");
         }
         assert!(!ids.contains(&"0 5 3"), "APRS mode is the settings record's");
-        assert_eq!(item(&v, "0 5 5 4").kind, Kind::Pick);
-        assert!(item(&v, "0 5 4 1").choices[0].starts_with("0 "), "SSIDs from 0: {:?}", item(&v, "0 5 4 1").choices);
-        assert!(item(&v, "0 5 5 4").choices.contains(&"High".to_string()));
-        assert_eq!(item(&v, "0 5 7 1").kind, Kind::Text);
-        assert_eq!(item(&v, "0 5 6 2").kind, Kind::Text);
+        assert_eq!(item(&v, "0 5 6 3").kind, Kind::Pick);
+        assert!(item(&v, "0 5 5 1").choices[0].starts_with("0 "), "SSIDs from 0: {:?}", item(&v, "0 5 5 1").choices);
+        assert!(item(&v, "0 5 6 3").choices.contains(&"High".to_string()));
+        assert_eq!(item(&v, "0 5 4").kind, Kind::Text);
+        assert_eq!(item(&v, "0 5 9 2").kind, Kind::Text);
     }
 
     /// LINK-43: a change is the menu's; a refusal is the radio's; the plan writes through ferrite's link session and
@@ -345,19 +346,19 @@ mod tests {
     fn set_plan_and_write() {
         let srec = record_of(&Settings::DEFAULT);
         let rec = default_record();
-        let r2 = set(&srec, &rec, "0 5 5 4", "High").unwrap();
+        let r2 = set(&srec, &rec, "0 5 6 3", "High").unwrap();
         assert_ne!(r2, rec);
-        assert_eq!(item(&view(&srec, &r2), "0 5 5 4").value, "High");
-        let r3 = set(&srec, &r2, "0 5 4 1", "9 Mobile").or_else(|_| {
+        assert_eq!(item(&view(&srec, &r2), "0 5 6 3").value, "High");
+        let r3 = set(&srec, &r2, "0 5 5 1", "9 Mobile").or_else(|_| {
             let v = view(&srec, &r2);
-            let c = item(&v, "0 5 4 1").choices.iter().find(|c| c.starts_with("9")).cloned().unwrap();
-            set(&srec, &r2, "0 5 4 1", &c)
+            let c = item(&v, "0 5 5 1").choices.iter().find(|c| c.starts_with("9")).cloned().unwrap();
+            set(&srec, &r2, "0 5 5 1", &c)
         });
         let r3 = r3.unwrap();
-        assert!(item(&view(&srec, &r3), "0 5 4 1").value.starts_with('9'));
-        assert!(set(&srec, &r3, "0 5 7 1", "500").is_err(), "outside 64-300 MHz");
-        let r4 = set(&srec, &r3, "0 5 6 2", "WIDE2-2").unwrap();
-        assert!(set(&srec, &r4, "0 5 6 2", "not a path at all").is_err());
+        assert!(item(&view(&srec, &r3), "0 5 5 1").value.starts_with('9'));
+        assert!(set(&srec, &r3, "0 5 4", "500").is_err(), "outside 64-300 MHz");
+        let r4 = set(&srec, &r3, "0 5 9 2", "WIDE2-2").unwrap();
+        assert!(set(&srec, &r4, "0 5 9 2", "not a path at all").is_err());
         let p = plan(&srec, &rec, &r4);
         assert!(p.problems.is_empty(), "{:?}", p.problems);
         assert!(p.changes.len() >= 3, "{:?}", p.changes);
@@ -383,7 +384,7 @@ mod tests {
         let t = backup(&[], &rec, "2026-10-20T12:00:00Z", BTreeMap::new());
         let (back, b) = restore(&t).unwrap();
         assert_eq!(back, rec);
-        assert!(b.settings.keys().any(|k| k.starts_with("0 5 5 4")));
+        assert!(b.settings.keys().any(|k| k.starts_with("0 5 6 3")));
         assert!(restore("{}").is_err());
     }
 }

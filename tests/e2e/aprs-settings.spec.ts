@@ -8,8 +8,8 @@ import { connect, disconnect, expect, onRadio, openConsole, shot, shotsDir, stat
 test.describe.configure({ mode: "serial" });
 
 const long = () => (onRadio() ? 120_000 : 30_000);
-const POWER = "0 5 5 4 Power";
-const FREQ = "0 5 7 1 Frequency";
+const POWER = "0 5 6 3 Power";
+const FREQ = "0 5 4 Frequency";
 
 let page: Page;
 let backup: string | null = null;
@@ -58,7 +58,7 @@ test.afterAll(async () => {
 
 test("read: the APRS record as MENU 0 5 shows it", async ({}, info) => {
   await expect.poll(() => state(page, (f) => !!f.aprsSettings.view), { timeout: long() }).toBe(true);
-  for (const name of ["My station", "Beacon", "Path", "Radio", "Digipeat"]) await expect(page.getByRole("region", { name })).toBeVisible();
+  for (const name of ["My station", "Beacon", "Digipeat", "Advanced"]) await expect(page.getByRole("region", { name })).toBeVisible();
   await expect(page.getByLabel(POWER, { exact: true })).toBeVisible();
   await expect(page.getByLabel(FREQ, { exact: true })).toBeVisible();
   // APRS mode is the settings record's (Radio Settings), not here
@@ -67,15 +67,15 @@ test("read: the APRS record as MENU 0 5 shows it", async ({}, info) => {
 });
 
 test("change: a choice is the menu's, a refused value the radio's reason", async ({}, info) => {
-  const was = await value("0 5 5 4");
+  const was = await value("0 5 6 3");
   const to = was === "High" ? "Mid" : "High";
   await page.getByLabel(POWER, { exact: true }).selectOption(to);
-  await expect.poll(() => value("0 5 5 4")).toBe(to);
-  await expect(page.locator('[data-id="0 5 5 4"]')).toHaveClass(/changed/);
+  await expect.poll(() => value("0 5 6 3")).toBe(to);
+  await expect(page.locator('[data-id="0 5 6 3"]')).toHaveClass(/changed/);
   await page.getByLabel(FREQ, { exact: true }).fill("500");
   await page.getByLabel(FREQ, { exact: true }).press("Enter");
   await page.getByLabel(FREQ, { exact: true }).blur();
-  await expect(page.locator('[data-id="0 5 7 1"] .err')).toBeVisible();
+  await expect(page.locator('[data-id="0 5 4"] .err')).toBeVisible();
   await shot(page, info, "aprs-settings-02-changed");
 });
 
@@ -84,11 +84,11 @@ test("write: backup first, the diff, then the read back; the backup restores", a
   await expect(dialog()).toContainText("Power");
   await shot(page, info, "aprs-settings-03-diff");
   await commitWrite(1);
-  const after = await value("0 5 5 4");
+  const after = await value("0 5 6 3");
   await page.locator('input[type=file][accept^=".json"]').setInputFiles(backup);
   await expect(page.getByText(/^Loaded .*aprs-backup\.json/)).toBeVisible();
   await startWrite();
   await commitWrite(1);
   backup = null;
-  expect(await value("0 5 5 4")).not.toBe(after);
+  expect(await value("0 5 6 3")).not.toBe(after);
 });

@@ -106,13 +106,13 @@ class Aprs {
     }
   }
 
-  /** The radio's place: its GPS fix, else APRS's fixed position, else the radio's (MENU 0 5 4 5, 0 6 9). */
+  /** The radio's place: its GPS fix, else APRS's fixed position, else the radio's (MENU 0 5 5 5, 0 6 9). */
   async position() {
     const link = radio.connectedLink;
     if (!link) return;
     for (const [cmd, from] of [
       ["gps", "GPS"],
-      ["get 0 5 4 5", "APRS fixed position"],
+      ["get 0 5 5 5", "APRS fixed position"],
       ["get 0 6 9", "fixed position"],
     ] as const) {
       try {

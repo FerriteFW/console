@@ -139,7 +139,7 @@
       <div class="good-box" role="region" aria-live="polite" aria-label="Update done">
         <p><strong>Done.</strong> The radio runs <span data-k="after">{firmware.after.firmware}</span>{firmware.after.build ? ` (${firmware.after.build})` : ""}.</p>
         {#if check?.version && check.version !== firmware.after.firmware}
-          <p class="warn">The file said {check.version}: check the radio's About page (MENU 0 9 9).</p>
+          <p class="warn">The file said {check.version}: check the radio's About page (MENU 0 9 8).</p>
         {/if}
         {#if firmware.before}<p class="sub">Before:{firmware.before.firmware}{firmware.before.build ? ` (${firmware.before.build})` : ""}.</p>{/if}
       </div>
