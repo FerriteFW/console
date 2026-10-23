@@ -185,6 +185,10 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   await expect(ins).toContainText("with your SSB patch");
   await ins.getByRole("button", { name: "Install Ferrite" }).click();
   await expect(page.getByRole("region", { name: "Installed" })).toContainText("The radio runs Ferrite v", { timeout: 60_000 });
+  // Done updating: the cable is Console's usual connection again, not held by Install (Alex, Oct 22).
+  await expect(card(page, "Connect")).toContainText("Connected to Ferrite as usual", { timeout: 20_000 });
+  // Back to stock sits apart, folded away, after a finished install.
+  await expect(card(page, "Back to stock").getByRole("button", { name: "Back to stock", exact: true })).toBeHidden();
   await shot(page, info, "72-install-done");
 
   const rs = results();

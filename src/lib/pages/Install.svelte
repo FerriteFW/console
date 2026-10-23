@@ -28,6 +28,10 @@
   );
   const ssbState = $derived(!I.unlocked ? "locked" : I.ssb ? "done" : "optional");
   const installState = $derived(!I.unlocked ? "locked" : I.installStep === "idle" ? (I.installBlock ? "locked" : "ready") : I.installStep);
+  // Back to stock stays folded away until asked for, or until a file is dropped into it (a backup picked by mistake
+  // in the install chain can't start it: it needs its own button anyway).
+  let undoOpen = $state(false);
+  const undoShown = $derived(undoOpen || !!I.restoreBackup || I.restoreStep !== "idle");
   const restoreState = $derived(I.restoreStep === "idle" ? (I.restoreBlock ? "locked" : "ready") : I.restoreStep);
 
   async function picked(kind: "ferrite" | "reader" | "stock" | "backup", e: Event) {
@@ -81,7 +85,7 @@
       <li>For a Radtel RT-950 Pro on the programming cable. Chrome or Edge, or the desktop app.</li>
       <li>Console first backs up the radio's whole flash, calibration included. You keep that file: it's the way back.</li>
       <li>Then it installs Ferrite. Calibration and the bootloader's update area are never written.</li>
-      <li>Back to stock, at the bottom, puts your backup and your stock firmware back.</li>
+      <li>Back to stock is not part of installing: it sits apart, at the bottom, for taking Ferrite off a radio.</li>
     </ul>
   </section>
 
@@ -92,7 +96,9 @@
       <div class="row"><button class="btn" disabled={I.running} onclick={() => I.disconnect()}>Disconnect</button></div>
     {:else}
       <p class="sub">Plug in the cable and turn the radio on. Any firmware is fine: stock, Ferrite, or a radio waiting in its bootloader.</p>
-      {#if radio.phase !== "idle" && radio.phase !== "updating"}
+      {#if radio.phase === "connected" && I.installStep === "done"}
+        <p class="good">Connected to Ferrite as usual: the cable is Console's again.</p>
+      {:else if radio.phase !== "idle" && radio.phase !== "updating"}
         <p class="warn">Console is connected elsewhere: disconnect there first.</p>
       {/if}
       <div class="row">
@@ -212,14 +218,21 @@
     {#if I.installStep === "done"}
       <div class="good-box" role="region" aria-label="Installed">
         <p><strong>Done.</strong> {I.installed ? `The radio runs Ferrite ${I.installed}.` : "The radio restarts into Ferrite. Finish the setup on the radio."}</p>
+        <p>That's the whole install: nothing below is a next step. Keep your backup file safe.</p>
         {#if focus}<p><a href="#/live">Open Ferrite Console</a></p>{/if}
       </div>
     {/if}
   </section>
 
-  <section class="card" aria-label="Back to stock">
+  <div class="split" aria-hidden="true"><span>Undo: take Ferrite off a radio</span></div>
+
+  <section class="card undo" aria-label="Back to stock">
     {@render head("", "Back to stock", restoreState)}
-    <p class="sub">For a radio on Ferrite. Console writes your backup back (never calibration or the update area), then installs your stock firmware.</p>
+    <p class="sub">Not part of installing. Only for a radio on Ferrite that should go back to stock: Console writes your backup back (never calibration or the update area), then installs your stock firmware.</p>
+    {#if !undoShown}
+      <div class="row"><button class="btn quiet" onclick={() => (undoOpen = true)}>Show Back to stock…</button></div>
+    {/if}
+    <div class="undo-body" hidden={!undoShown}>
     <div class="two">
       <label class="drop" ondragover={(e) => e.preventDefault()} ondrop={(e) => dropped("backup", e)}>
         <input type="file" accept=".bin" hidden aria-label="Backup file" onchange={(e) => picked("backup", e)} />
@@ -267,6 +280,7 @@
         <p><strong>Done.</strong> The radio restarts on stock firmware with your stock data.</p>
       </div>
     {/if}
+    </div>
   </section>
 
   <details class="card advanced">
@@ -424,6 +438,26 @@
     gap: 6px;
     align-items: center;
     margin-top: 8px;
+  }
+  .split {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 28px 0 4px;
+    color: var(--sub);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .split::before,
+  .split::after {
+    content: "";
+    flex: 1;
+    border-top: 1px dashed var(--line);
+  }
+  .undo {
+    border-color: var(--amber);
+    border-style: dashed;
   }
   .advanced summary {
     cursor: pointer;
