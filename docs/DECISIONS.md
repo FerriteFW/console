@@ -18,13 +18,14 @@
 - Keypad presses are short or long. KEY down/up exist in `Link.key` for later.
 - The faster cable rate is on by default. A refusal leaves 115200 and says so.
 - The cable tops out at 460800 on the Mac's CH340. At 921600 the radio switches but never answers.
+- Since Oct 23, 2026 the cable runs at 230400 (ferrite decision 266): long transfers at 460800 lost bytes through a USB extension. 230400 is the safe rate for everything.
 
 ## Events and Live View (Oct 20, 2026)
 
 - One subscription per session (LINK-46): Console ORs what each part wants. APRS pages want heard and messages while open.
 - Bluetooth's Live View is the radio's compact updates (mask 4), decoded by ferrite's own `liveview::apply` in wasm.
 - A lost update or a bad check asks for the whole state (SUBSCRIBE without renew). So does 12 s with no update.
-- The cable keeps polling the text readback. Measured on the simulator: one readback is ~760 B. At 460800 the cable has room; the updates gain little there.
+- The cable keeps polling the text readback. Measured on the simulator: one readback is ~760 B. At 230400 the cable has room; the updates gain little there.
 - `?liveview=events` uses the updates on the cable too; `?liveview=poll` polls on Bluetooth.
 - Firmware without SUBSCRIBE (`unknown type`): polling, and the APRS pages say the firmware is too old.
 - Disconnect ends the subscription first, so events don't run on into `term.py` or `flash.py`.

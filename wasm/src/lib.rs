@@ -521,13 +521,17 @@ impl Fdump {
     pub fn new(addr: u32, len: u32) -> Fdump {
         Fdump(install::Fdump::new(addr, len))
     }
+    /// `fdumpz` (the Rust reader, BACKUP-9.6): coded 16 KB chunks.
+    pub fn z(addr: u32, len: u32) -> Fdump {
+        Fdump(install::Fdump::new_z(addr, len))
+    }
     pub fn command(&self, baud: u32) -> String {
         self.0.command(baud)
     }
     pub fn synced(&self) -> bool {
         self.0.synced()
     }
-    /// `{send, nak, done, error, got}`.
+    /// `{send, nak, inflate, done, error, got}`.
     pub fn feed(&mut self, bytes: &[u8]) -> String {
         json(&self.0.feed(bytes))
     }
@@ -540,12 +544,33 @@ impl Fdump {
     pub fn take_data(&mut self) -> Vec<u8> {
         self.0.take_data()
     }
+    /// The DEFLATE bytes a step's `inflate` asks for.
+    pub fn take_inflate(&mut self) -> Vec<u8> {
+        self.0.take_inflate()
+    }
+    /// The inflated chunk (empty when it didn't inflate): a step, as `feed`'s.
+    pub fn inflated(&mut self, out: &[u8]) -> String {
+        json(&self.0.inflated(out))
+    }
+    /// How long a begun frame may still take (ms from its start; 0: none begun).
+    pub fn frame_budget_ms(&self, baud: u32) -> u32 {
+        self.0.frame_budget_ms(baud)
+    }
+    pub fn wire(&self) -> usize {
+        self.0.wire
+    }
     pub fn naks(&self) -> usize {
         self.0.naks
     }
     pub fn dups(&self) -> usize {
         self.0.dups
     }
+}
+
+/// Whether a reader image speaks `fdumpz` (the Rust reader; hwtest's doesn't).
+#[wasm_bindgen]
+pub fn reader_has_fdumpz(btf: &[u8]) -> bool {
+    install::reader_has_fdumpz(btf)
 }
 
 /// The backup's file name for a radio ID and a date (decision 263).

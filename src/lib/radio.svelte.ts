@@ -38,7 +38,7 @@ class Radio {
   /** Readbacks failed in a row. */
   fails = $state(0);
   error = $state("");
-  /** A note for the bar ("rate 460800"). */
+  /** A note for the bar ("230400 baud"). */
   note = $state("");
   /** A key's refusal, shown a few seconds. */
   keyNote = $state("");
@@ -203,7 +203,7 @@ class Radio {
     const link = this.link!;
     this.info = await link.info();
     if (this.t?.setBaud) {
-      // LINK-13.3: the cable at 460800, else 230400, else 115200.
+      // LINK-13.3: the cable at 230400, else 115200 (ferrite decision 266).
       try {
         const rate = await link.raiseBaud();
         this.baud = rate;

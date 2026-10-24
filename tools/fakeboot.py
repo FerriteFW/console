@@ -188,11 +188,15 @@ class FakeBoot:
     def after(self, mode_path):
         """What has the cable after END: the reader's console for the reader image, else None (the simulator)."""
         if READER_MARK in self.image():
-            return FakeReader(read_mode(mode_path), self.log, mode_path)
+            return FakeReader(read_mode(mode_path), self.log, mode_path, z=READER_Z_MARK in self.image())
         return None
 
 
 READER_MARK = b"fdump <addr> <len>"
+# The Rust reader's help line (ferrite decision 264): it has fdumpz (BACKUP-9.6); hwtest's reader doesn't.
+READER_Z_MARK = b"fdumpz <addr> <len>"
+ZCHUNK = 16384
+Z_RAW, Z_ERASED, Z_DEFLATE = 0, 1, 4
 FD_ACK, FD_NAK, FD_CAN = 0x06, 0x15, 0x18
 CAL, UPDATE = (0xF000, 0x10000), (0x300000, 0x400000)
 # Ferrite's layout::WRITABLE (the header to the contacts, the scratch ring).
@@ -214,15 +218,30 @@ def fd_frame(kind, addr, payload):
     return h + payload + struct.pack("<I", zlib.crc32(h + payload))
 
 
-class FakeReader:
-    """hwtest's console and its fdump, fed bytes (no threads, no rates: the bridge's TCP has none)."""
+def zcode(chunk):
+    """The Rust reader's fdumpz chunk (reader.rs zcode_into): erased, raw DEFLATE when it is shorter, else raw."""
+    if chunk == b"\xff" * len(chunk):
+        return bytes([Z_ERASED])
+    c = zlib.compressobj(6, zlib.DEFLATED, -15)
+    d = c.compress(chunk) + c.flush()
+    return bytes([Z_DEFLATE]) + d if len(d) < len(chunk) - 1 else bytes([Z_RAW]) + chunk
 
-    def __init__(self, mode, log=lambda *a: None, mode_path=None):
+
+class FakeReader:
+    """hwtest's console and its fdump, fed bytes (no threads, no rates: the bridge's TCP has none); with `z` (the
+    Rust reader's image), fdumpz too (BACKUP-9.6), unless MODE.json says "no_fdumpz" (answered `?`, as hwtest).
+    "corrupt_every": N spoils every Nth frame once (NAKed); "cut_every": N sends every Nth frame once 100 bytes short
+    (Console asks again once the frame's time is up)."""
+
+    def __init__(self, mode, log=lambda *a: None, mode_path=None, z=False):
         self.mode, self.log, self.mode_path = mode, log, mode_path
+        self.z = z and not mode.get("no_fdumpz")
+        self.kinds = {}  # fdumpz: chunk modes sent, for the tests
         self.flash = bytes(load_flash(mode))
         self.line = b""
         self.reader_screen = False  # `reader`: Console asked for the plain screen
         self.dump = None  # (addr, len, next offset, frames sent, synced, end sent)
+        self.dump_z = False
         self.sync = b""
         self.spoiled = set()
         self.next = None
@@ -263,28 +282,52 @@ class FakeReader:
             self.log("fakereader: reboot into the bootloader")
             self.next = FakeBoot({"deaf_ms": 300, **read_mode(self.mode_path)}, result_path(self.mode_path), self.log)
             return b""
-        if w[0] == "fdump" and len(w) >= 3:
+        if w[0] in ("fdump", "fdumpz") and len(w) >= 3:
+            z = w[0] == "fdumpz"
+            if z and not self.z:
+                return self.console("?  (help)\n")
             addr, n = int(w[1], 0), int(w[2], 0)
             if addr + n > len(self.flash):
                 return self.console("fdump: range outside the chip\n")
             self.dump = [addr, n, 0, False, False]
+            self.dump_z = z
             self.sync = b""
-            self.log(f"fakereader: fdump {addr:06X}+{n:X}")
-            return self.console(f"fdump {addr:06X} {n:X} {w[3] if len(w) > 3 else 500000} ready, HEXT 8 MHz (crystal)\n")
-        return self.console(f"{w[0]}: ?\n")
+            self.log(f"fakereader: {w[0]} {addr:06X}+{n:X}")
+            rate = w[3] if len(w) > 3 else 230400 if z else 500000
+            return self.console(f"fdump {addr:06X} {n:X} {rate} ready, clock 120 MHz\n")
+        return self.console("?  (help)\n")
+
+    def step(self):
+        """The bytes one frame covers."""
+        return ZCHUNK if self.dump_z else 4096
+
+    def write_kinds(self):
+        """MODE.dump.json: how the dump went (fdumpz or not, its chunk modes), for the tests."""
+        if self.mode_path:
+            with open(result_path(self.mode_path).replace(".result.json", ".dump.json"), "w") as f:
+                json.dump({"z": self.dump_z, "kinds": {str(k): v for k, v in self.kinds.items()}}, f)
 
     def frame(self):
         addr, n, off, _, _ = self.dump
         if off >= n:
             end = struct.pack("<IIII", addr, n, zlib.crc32(self.flash[addr:addr + n]), 0)
             return fd_frame(b"E", addr, end)
-        k = min(4096, n - off)
-        f = bytearray(fd_frame(b"B", addr + off, self.flash[addr + off:addr + off + k]))
+        k = min(self.step(), n - off)
+        chunk = self.flash[addr + off:addr + off + k]
+        if self.dump_z:
+            coded = zcode(chunk)
+            self.kinds[coded[0]] = self.kinds.get(coded[0], 0) + 1
+            f = bytearray(fd_frame(b"Z", addr + off, coded))
+        else:
+            f = bytearray(fd_frame(b"B", addr + off, chunk))
         self.frames += 1
-        every = self.mode.get("corrupt_every")
+        every, cut = self.mode.get("corrupt_every"), self.mode.get("cut_every")
         if every and self.frames % every == 0 and off not in self.spoiled:
             self.spoiled.add(off)
             f[len(f) // 2] ^= 0x40
+        elif cut and self.frames % cut == 0 and len(f) > 200 and ("cut", off) not in self.spoiled:
+            self.spoiled.add(("cut", off))
+            del f[len(f) // 2:len(f) // 2 + 100]
         return bytes(f)
 
     def fdump(self, data):
@@ -306,9 +349,10 @@ class FakeReader:
                 if d[2] >= d[1]:
                     crc = zlib.crc32(self.flash[d[0]:d[0] + d[1]])
                     self.dump = None
-                    self.log("fakereader: fdump end")
+                    self.log(f"fakereader: fdump end (chunk modes {self.kinds})")
+                    self.write_kinds()
                     return out + self.console(f"\nfdump end crc32 {crc:08X}, {d[1]} bytes, 0 resends\n> ")
-                d[2] += min(4096, d[1] - d[2])
+                d[2] += min(self.step(), d[1] - d[2])
                 out += self.frame()
         return out
 
@@ -495,6 +539,25 @@ def selftest():
     end = rd.feed(bytes([FD_ACK]))
     assert end[2:3] == b"E"
     assert b"fdump end" in rd.feed(bytes([FD_ACK])) and rd.dump is None
+    # fdumpz: erased, DEFLATE and raw chunks, a spoiled one NAKed; hwtest's reader answers `?`.
+    flash = bytearray(random.Random(1).randbytes(3 * ZCHUNK))
+    flash[:ZCHUNK] = b"\xff" * ZCHUNK
+    flash[ZCHUNK:2 * ZCHUNK] = (b"Ferrite " * ZCHUNK)[:ZCHUNK]
+    rz = FakeReader({"corrupt_every": 3}, z=True)
+    rz.flash = bytes(flash)
+    assert b"ready" in rz.feed(b"fdumpz 0x0 0xC000 230400\r")
+    got, f = b"", rz.feed(b"FDS1")[4:]
+    while f[2:3] == b"Z":
+        if zlib.crc32(f[:-4]) != struct.unpack("<I", f[-4:])[0]:
+            f = rz.feed(bytes([FD_NAK]))
+            continue
+        coded = f[10:-4]
+        got += {Z_ERASED: lambda: b"\xff" * ZCHUNK, Z_RAW: lambda: coded[1:],
+                Z_DEFLATE: lambda: zlib.decompress(coded[1:], -15)}[coded[0]]()
+        f = rz.feed(bytes([FD_ACK]))
+    assert got == flash and rz.kinds == {Z_ERASED: 1, Z_DEFLATE: 1, Z_RAW: 2}, rz.kinds  # the raw one twice: NAKed
+    assert b"fdump end" in rz.feed(bytes([FD_ACK]))
+    assert b"?  (help)" in FakeReader({}).feed(b"fdumpz 0x0 0x1000\r")
     # The restore: protected ranges refused and recorded.
     rs = FakeRestore({})
     assert rs.serve(b"\x01" + struct.pack("<I", 0xF000)) == b"\x04" and rs.errors

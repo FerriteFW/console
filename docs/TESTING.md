@@ -4,7 +4,7 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 
 ## Cable
 
-1. Connect › Cable, pick the CH340. Expect "460800 baud" (or 230400).
+1. Connect › Cable, pick the CH340. Expect "230400 baud".
 2. Radio panel: firmware, build, callsign, unique ID match About (MENU 0 9 9).
 3. The screen matches the radio's home.
 4. MENU opens quick settings; ▲▼ move; BACK returns. Hold MENU: advanced settings. Hold #: key lock.
@@ -58,7 +58,7 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 
 Open `target/release/bundle/macos/Ferrite Console.app` (unsigned: right-click › Open the first time). Close `term.py` first.
 
-1. Connect › Cable: a list pops up under the bar. The CH340 (`usbserial-…`) is first. Pick it: "460800 baud".
+1. Connect › Cable: a list pops up under the bar. The CH340 (`usbserial-…`) is first. Pick it: "230400 baud".
 2. Run the Cable checks above. Unplug: the bar says so. Disconnect: `term.py` answers at 115200.
 3. Connect › Bluetooth: macOS asks for Bluetooth access once. Allow it.
 4. The list shows each radio by its ID, strongest first. Clear is `5F9EEB12-…`, black `E5A6A6FF-…`. Pick one.
@@ -69,7 +69,7 @@ Open `target/release/bundle/macos/Ferrite Console.app` (unsigned: right-click �
 
 1. Have the current image as a fallback, and `flash.py` ready.
 2. Build the new image: `tools/mkbtf.sh tx` in ferrite.
-3. Connect › Cable. Firmware Update › Choose .btf. Version, size, blocks show; "Checks passed".
+3. Connect › Cable. Firmware Update › Choose .btf (or "Use the bundled release (vX)": the image Console ships, SHA-256 checked). Version, size, blocks show; "Checks passed".
 4. Pick a stock `.btf`: refused, "not a Ferrite image".
 5. Update firmware…: the radio's firmware and build show against the file's version. Install.
 6. The radio restarts; the bar says "Firmware Update holds"; blocks count up (about 85 s).
@@ -105,10 +105,10 @@ Ferrite decision 264: the reader is now ferrite's `reader/` (Rust, read only by 
 
 1. Build both readers: in ferrite (branch `reader`), `tools/mkbtf.sh reader` (`target/ferrite-reader.btf`, 34,816 bytes); hwtest as before (`../fw/build/target/hwtest.btf`, 119,808 bytes). Here (branch `rust-reader`): `npm run bundle-firmware`, `npm run build`, open `#install` in Chrome, Connect cable.
 2. hwtest first: Advanced › Reader image › Use a file… `hwtest.btf`. Back up the radio. Save it as `hwtest.bin`. Note the read time ("Reading the flash at 500 kbaud" to the flashcrc check) and the check time (flashcrc to Done).
-3. Rust reader: reload the page (the bundled reader is the Rust one; Advanced shows `ferrite-reader.btf (included)`), Connect cable, Back up the radio. Note the same two times. Save it as `rust.bin`.
+3. Rust reader: reload the page (the bundled reader is the Rust one; Advanced shows `ferrite-reader.btf (included)`), Connect cable, Back up the radio. It reads with `fdumpz` (ferrite BACKUP-9.6): "Reading the flash at 230.4 kbaud", the bar counting the chip's bytes (not the cable's). Note the same two times. Save it as `rust.bin`.
 4. The screen during step 3: "Ferrite Console / Backup reader / Waiting for Ferrite Console." while it starts, then "Ferrite Console / Backing up your radio / Keep the cable in. Don't turn it off." with a blue bar, "Reading N%", then "Checking N%", then a green bar and "Read and checked". Backlight on, keypad light off.
 5. Byte for byte: `cmp hwtest.bin rust.bin` prints nothing; `shasum -a 256 hwtest.bin rust.bin` and `python3 -c 'import sys,zlib; [print(f, "%08X" % zlib.crc32(open(f,"rb").read())) for f in sys.argv[1:]]' hwtest.bin rust.bin` show the same values, and the CRC is the one the page showed. Both file names carry the same radio ID (the `sys` UID).
-6. Timing: the reads take about the same (about 85 s at 500 kbaud); the Rust reader's check is seconds (120 MHz) where hwtest's was about a minute (8 MHz). Write both times in the results.
+6. Timing: hwtest's read about 85 s at 500 kbaud; the Rust reader's `fdumpz` read about 75 s at 230400 (73.6 s on black with fdump_proto.py, decision 265), no bad frames expected; the Rust reader's check is seconds (120 MHz) where hwtest's was about a minute (8 MHz). Write both times in the results.
 7. Older tools still work with the Rust reader running (same protocol): `../fw/tools/backup.py /dev/cu.usbserial-* out --twice` ends "agree" and its `flash.bin` equals `rust.bin`.
 8. The power switch with the reader idle: off turns the radio off; on starts the reader again (Waiting screen). Then Install Ferrite (tx-bench) from the Install page as usual.
 

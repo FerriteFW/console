@@ -28,6 +28,8 @@
     await firmware.start();
   }
 
+  void firmware.loadBundled();
+
   const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`;
 </script>
 
@@ -38,16 +40,18 @@
       <li>For a radio that already runs Ferrite, on the cable.</li>
       <li>Console restarts the radio into its bootloader, sends the new image, and connects again.</li>
       <li>Channels and settings stay. Calibration is never touched.</li>
-      <li>
-        First install from stock firmware: use <code>tools/flash.py</code>. It needs the whole-flash backup first, so it stays
-        a bench job.
-      </li>
+      <li>First install from stock firmware: use <a href="#install">Install</a> (it takes the whole-flash backup first).</li>
     </ul>
   </section>
 
   <section class="card" aria-label="Image file">
     <h2>1. Pick the image</h2>
     <div class="row">
+      {#if firmware.bundled}
+        <button class="btn" disabled={firmware.running} onclick={() => firmware.useBundled()}>
+          Use the bundled release ({firmware.bundled.version})
+        </button>
+      {/if}
       <button class="btn" disabled={firmware.running} onclick={() => fileInput.click()}>Choose .btf…</button>
       <input bind:this={fileInput} type="file" accept=".btf,.BTF" hidden aria-label="Firmware file" onchange={pick} />
       {#if firmware.fileName}<span class="fname">{firmware.fileName}</span>{/if}
@@ -266,8 +270,5 @@
   }
   .good-box p {
     margin: 0 0 4px;
-  }
-  code {
-    font-family: var(--mono, monospace);
   }
 </style>

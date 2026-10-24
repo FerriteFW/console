@@ -277,12 +277,14 @@ export type BackupCheck = {
 };
 export type ImageCheck = { blocks: number; image_len: number; version: string | null; crc32: string; sha256: string; problems: string[] };
 export type SsbFound = { len: number; records: number; sha256: string; known: boolean };
-export type FdStep = { send: number[]; nak: boolean; done: boolean; error: string | null; got: number };
+export type FdStep = { send: number[]; nak: boolean; inflate: boolean; done: boolean; error: string | null; got: number };
 export type RestoreStart = { chip: number; cal_crc32: number; ranges: [number, number][]; uid: string | null };
 export type RestoreSummary = { ranges: [number, number][]; bytes: number; problems: string[]; ops: number; confirm_uid: string | null };
 
 export const sha256Hex = (b: Uint8Array): string => wasm.sha256_hex(b);
 export const backupCheck = (b: Uint8Array): BackupCheck => JSON.parse(wasm.backup_check(b));
+/** The Rust reader speaks fdumpz (BACKUP-9.6); hwtest's reader doesn't. */
+export const readerHasFdumpz = (btf: Uint8Array): boolean => wasm.reader_has_fdumpz(btf);
 export const imageCheck = (kind: "reader" | "stock", btf: Uint8Array): ImageCheck => JSON.parse(wasm.image_check(kind, btf));
 export const readerLine = <T>(kind: "flash" | "sys" | "flashcrc", line: string): T | null => JSON.parse(wasm.reader_line(kind, line));
 export const ssbExtract = (btf: Uint8Array): Uint8Array | undefined => wasm.ssb_extract(btf);
