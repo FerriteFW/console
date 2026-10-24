@@ -1,5 +1,5 @@
-// The Install page (#install) against the bridge's fakes (tools/fakeboot.py): the bootloader, the hwtest reader's
-// console and fdump, and Ferrite's STOCK_RESTORE; the simulator answers HELLO. The backup, saving it, the SSB patch
+// The Install page (#install) against the bridge's fakes (tools/fakeboot.py): the bootloader, the reader's console
+// and its dump (the Rust reader's fdumpz with coded chunks, BACKUP-9.6; hwtest's fdump), and Ferrite's STOCK_RESTORE; the simulator answers HELLO. The backup, saving it, the SSB patch
 // from a synthetic stock file, the install; back to stock; the refusals. Never on a radio: Alex runs the radio checks
 // by hand (docs/TESTING.md).
 import { type Page, type Route } from "@playwright/test";
@@ -40,16 +40,18 @@ test.afterEach(async ({ page }) => {
 const modeFile = () => process.env.FERRITE_E2E_FAKEBOOT ?? "";
 const dir = () => dirname(modeFile());
 const results = () => JSON.parse(readFileSync(join(dir(), "mode.results.json"), "utf8"));
+const dumpResult = () => JSON.parse(readFileSync(join(dir(), "mode.dump.json"), "utf8"));
 const restoreResult = () => JSON.parse(readFileSync(join(dir(), "mode.restore.json"), "utf8"));
 const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 
 function setMode(m: Record<string, unknown>) {
   writeFileSync(modeFile(), JSON.stringify({ deaf_ms: 300, ...m }));
-  for (const f of ["mode.result.json", "mode.results.json", "mode.restore.json"]) if (existsSync(join(dir(), f))) rmSync(join(dir(), f));
+  for (const f of ["mode.result.json", "mode.results.json", "mode.restore.json", "mode.dump.json"]) if (existsSync(join(dir(), f))) rmSync(join(dir(), f));
 }
 
-/** A chip: noise, a non-blank calibration sector, the update area erased (or holding a pending update). 2 MB (the
- * reader takes 2, 4 or 8) keeps the tests light; a pending update needs the 4 MB one. */
+/** A chip: noise, a non-blank calibration sector, a stretch of text (fdumpz's DEFLATE chunks) and one erased
+ * (fdumpz's erased chunks), the update area erased (or holding a pending update). 2 MB (the reader takes 2, 4 or 8)
+ * keeps the tests light; a pending update needs the 4 MB one. */
 function chip(pending = false, mb = pending ? 4 : 2): Buffer {
   const b = Buffer.alloc(mb << 20);
   let s = 0x2545f491;
@@ -59,6 +61,8 @@ function chip(pending = false, mb = pending ? 4 : 2): Buffer {
     s ^= s << 5;
     b[i] = s & 0xff;
   }
+  b.write("CH 042 145.4950 FM 12.5k Ferrite ".repeat(4096), 0x100000, "latin1");
+  b.fill(0xff, 0x1c0000, 0x1e0000);
   if (mb >= 4) b.fill(0xff, 0x300000);
   if (pending) b.writeUInt16BE(0x5aa5, 0x300000);
   return b;
@@ -83,20 +87,22 @@ function image(len: number, mark: string, version = "v9.8.7"): Buffer {
 }
 
 const ferriteBtf = pack(image(24 * 1024 - 1124, "Ferrite terminal"));
-const readerBtf = pack(image(12 * 1024, "fdump <addr> <len> [baud]", "v0.0.1"));
+/** The Rust reader (ferrite decision 264): fdump and fdumpz in its help; hwtest's has fdump only. */
+const readerBtf = pack(image(12 * 1024, "fdump <addr> <len> [baud]\r\nfdumpz <addr> <len> [baud]", "v0.0.1"));
+const hwtestBtf = pack(image(12 * 1024, "fdump <addr> <len> [baud]", "v0.0.1"));
 /** The synthetic stock image of core/tests/fixtures (a run of patch records, nothing of Radtel's). */
 const stockBtf = pack(readFileSync(new URL("../../core/tests/fixtures/ssb-synthetic.bin", import.meta.url)));
 
 /** The bundled release, served to the page (the real one comes from scripts/bundle-firmware.mjs). */
-async function serveRelease(page: Page, badSum = false) {
-  const files: Record<string, Buffer> = { "ferrite-test.btf": ferriteBtf, "reader-test.btf": readerBtf };
+async function serveRelease(page: Page, badSum = false, reader = readerBtf) {
+  const files: Record<string, Buffer> = { "ferrite-test.btf": ferriteBtf, "reader-test.btf": reader };
   await page.route("**/firmware/**", (route: Route) => {
     const name = route.request().url().split("/firmware/")[1].split("?")[0];
     if (name === "manifest.json")
       return route.fulfill({
         json: {
           ferrite: { version: "v9.8.7", file: "ferrite-test.btf", sha256: badSum ? "00".repeat(32) : sha(ferriteBtf) },
-          reader: { version: "hwtest", file: "reader-test.btf", sha256: sha(readerBtf) },
+          reader: { version: "reader", file: "reader-test.btf", sha256: sha(reader) },
         },
       });
     const b = files[name];
@@ -153,7 +159,7 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   const flash = chip();
   const flashPath = join(dir(), "flash.bin");
   writeFileSync(flashPath, flash);
-  setMode({ flash: flashPath, corrupt_every: 97 });
+  setMode({ flash: flashPath, corrupt_every: 37, cut_every: 53 });
   await serveRelease(page);
   await open(page);
   await expect(page.locator('[data-k="release"]')).toHaveText("Ferrite v9.8.7");
@@ -164,6 +170,12 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   const b = card(page, "Back up");
   await expect(b.locator('[data-k="uid"]')).not.toHaveText("not reported");
   await expect(b.locator('[data-k="verified"]')).toContainText("matches the radio's");
+  // The Rust reader's fdumpz: every kind of chunk crossed (erased, DEFLATE inflated by the browser, raw).
+  const dump = dumpResult();
+  expect(dump.z).toBe(true);
+  expect(dump.kinds["1"]).toBeGreaterThan(0);
+  expect(dump.kinds["4"]).toBeGreaterThan(0);
+  expect(dump.kinds["0"]).toBeGreaterThan(0);
   // Nothing else until the file is saved (BACKUP-2).
   await expect(card(page, "Install Ferrite").getByRole("button", { name: "Install Ferrite" })).toHaveCount(0);
   await shot(page, info, "71-install-backup");
@@ -204,10 +216,11 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
 test("install: Chrome's save dialog saves the backup once and reads it back", async ({ page }) => {
   const flashPath = join(dir(), "flash.bin");
   writeFileSync(flashPath, chip());
-  setMode({ flash: flashPath });
-  await serveRelease(page);
+  setMode({ flash: flashPath, corrupt_every: 97 });
+  await serveRelease(page, false, hwtestBtf); // hwtest's reader: plain fdump
   await open(page, true);
   await backUp(page);
+  expect(dumpResult().z).toBe(false);
   const b = card(page, "Back up");
   let downloads = 0;
   page.on("download", () => downloads++);
@@ -221,12 +234,13 @@ test("install: Chrome's save dialog saves the backup once and reads it back", as
 test("install: a pending phone update is refused after the backup; a bad checksum isn't used", async ({ page }) => {
   const flashPath = join(dir(), "flash-pending.bin");
   writeFileSync(flashPath, chip(true));
-  setMode({ flash: flashPath });
+  setMode({ flash: flashPath, no_fdumpz: true }); // a reader that answers `?` to fdumpz: plain fdump instead
   await serveRelease(page, true);
   await open(page);
   await expect(card(page, "Install Ferrite")).toContainText("doesn't match its checksum");
   await backUp(page);
   await expect(card(page, "Back up")).toContainText("A stock phone or Bluetooth update is waiting");
+  expect(dumpResult().z).toBe(false);
   const [dl] = await Promise.all([page.waitForEvent("download"), card(page, "Back up").getByRole("button", { name: "Save backup…" }).click()]);
   await dl.path();
   // Once: the button is gone, only "Download again" downloads again (a second file was finding 2 of Oct 22).

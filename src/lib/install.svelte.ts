@@ -2,8 +2,9 @@
 // BACKUP-7, BACKUP-8, BACKUP-9.3, INST-5, INST-10, INST-11). ferrite's tools/flash.py, ssbpatch.py and
 // fw/tools/backup.py, as one flow:
 //   1. Connect: the cable opened as it is (the radio may run stock, the reader or Ferrite).
-//   2. Back up: the hwtest reader image through the bootloader; the whole SPI flash read with its fdump (500 kbaud,
-//      a CRC per 4 KB frame), checked against the radio's own flashcrc; saved by the owner before anything else.
+//   2. Back up: the reader image (Ferrite's read-only reader, or hwtest's) through the bootloader; the whole SPI flash read
+//      with the Rust reader's fdumpz (230400 baud, coded 16 KB chunks with a CRC each, BACKUP-9.6) or hwtest's fdump
+//      (500 kbaud down, 4 KB frames), checked against the radio's own flashcrc; saved by the owner before anything else.
 //   3. SSB (optional): the patch from the owner's own stock .BTF, found in the browser.
 //   4. Install: the bundled release (SHA-256 checked) or a file, with the patch bundled; refused without a saved
 //      backup or over a pending phone update.
@@ -21,6 +22,7 @@ import {
   loadCore,
   nameUid,
   P,
+  readerHasFdumpz,
   readerLine,
   RestorePlan,
   restoreIdCheck,
@@ -43,6 +45,8 @@ import { sleep, type Transport } from "./transport/types";
 
 /** The reader's fdump rates, fastest first (fdump_proto.py's RATES: the radio's 8 MHz UART makes these exact). */
 const READER_RATES = [500_000, 250_000, 115_200];
+/** The Rust reader's fdumpz rate (BACKUP-9.6, ferrite decision 265): one fixed, safe rate for long transfers. */
+const FDUMPZ_BAUD = 230_400;
 const NAK = 0x15;
 const CAN = 0x18;
 /** How long probes go out for the bootloader (flash.py's --wait is 30 s; a power cycle by hand takes longer). */
@@ -59,6 +63,18 @@ export type Release = { version: string; file: string; sha256: string };
 type Manifest = { ferrite?: Release; reader?: Release };
 
 class Abort extends Error {}
+/** The reader answered `?` to fdumpz (hwtest's): plain fdump instead. */
+class NoFdumpz extends Error {}
+
+/** One fdumpz DEFLATE chunk (raw DEFLATE, RFC 1951) inflated by the browser; empty when it doesn't inflate. */
+async function inflateRaw(b: Uint8Array): Promise<Uint8Array> {
+  try {
+    const s = new Blob([b as BlobPart]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(s).arrayBuffer());
+  } catch {
+    return new Uint8Array(0);
+  }
+}
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const latin1 = (b: Uint8Array) => {
@@ -513,8 +529,8 @@ class Install {
       await this.flash(FirmwareUpdate.reader(this.readerFile.bytes), "the reader");
       this.message = "Waiting for the reader to start…";
       await this.readerPrompt();
-      // The radio's screen says "Backing up your radio" instead of hwtest's diagnostics pages (an older reader
-      // doesn't know `reader`: its pages stay, nothing else changes).
+      // The radio's screen says "Backing up your radio" (BACKUP-9.4; an older hwtest reader doesn't know `reader`:
+      // its diagnostics pages stay, nothing else changes).
       w.clear();
       await w.write("reader\r");
       await w.waitFor(/reader screen on/, 1500, this.held);
@@ -571,12 +587,30 @@ class Install {
     throw new Error("The reader didn't start. Turn the radio off and on, then start the backup again.");
   }
 
-  /** The whole chip with fdump, from the fastest rate down (flashdump.py's read_range). */
+  /** The whole chip: the Rust reader's fdumpz at 230400 (BACKUP-9.6, ferrite decision 265) when the reader image
+   * has it, else (hwtest's reader, or a reader that answers `?`) fdump from the fastest rate down (flashdump.py's
+   * read_range). */
   private async readChip(size: number): Promise<Uint8Array> {
     let last: Error | null = null;
+    if (this.readerFile && readerHasFdumpz(this.readerFile.bytes)) {
+      const rate = this.t!.setBaud ? FDUMPZ_BAUD : READER_RATES[READER_RATES.length - 1];
+      for (let tries = 0; tries < 2; tries++) {
+        try {
+          return await this.fdump(size, rate, true);
+        } catch (e) {
+          if (e instanceof Abort) throw e;
+          last = e as Error;
+          if (e instanceof NoFdumpz) break;
+          if (/no answer to fdump|outside/.test(last.message)) throw this.readFailed(last);
+          await this.wire!.write("\r");
+          await sleep(500);
+        }
+      }
+      if (!(last instanceof NoFdumpz)) throw this.readFailed(last);
+    }
     for (const rate of this.t!.setBaud ? READER_RATES : [READER_RATES[READER_RATES.length - 1]]) {
       try {
-        return await this.fdump(size, rate);
+        return await this.fdump(size, rate, false);
       } catch (e) {
         if (e instanceof Abort) throw e;
         last = e as Error;
@@ -585,26 +619,44 @@ class Install {
         await sleep(500);
       }
     }
-    throw new Error(`Reading the flash failed: ${last?.message ?? "?"}. Start the backup again.`);
+    throw this.readFailed(last);
   }
 
-  private async fdump(len: number, rate: number): Promise<Uint8Array> {
+  private readFailed(last: Error | null) {
+    return new Error(`Reading the flash failed: ${last?.message ?? "?"}. Start the backup again.`);
+  }
+
+  /** One fdump, or fdumpz (`z`: coded 16 KB chunks, DEFLATE ones inflated by the browser). A frame short of
+   * bytes is asked again once its own time is up (fdump_proto.py's quick re-ask), not after the radio's 2 s. */
+  private async fdump(len: number, rate: number, z: boolean): Promise<Uint8Array> {
     const t = this.t!;
     const w = this.wire!;
-    const fd = new Fdump(0, len);
+    const fd = z ? Fdump.z(0, len) : new Fdump(0, len);
     const queue: FdStep[] = [];
+    let started = false;
     this.done = 0;
     this.total = len;
     this.message = `Reading the flash at ${rate / 1000} kbaud…`;
     try {
       w.clear();
       await w.write(fd.command(rate));
-      const ready = await w.waitFor(/fdump(?:: [^\r\n]*|[ ][0-9A-F]{6} [0-9A-F]+ \d+ ready[^\r\n]*)/, 5000, this.held);
+      const ready = await w.waitFor(
+        /fdump(?:: [^\r\n]*|[ ][0-9A-F]{6} [0-9A-F]+ \d+ ready[^\r\n]*)|\?  \(help\)|fdumpz: \?/,
+        5000,
+        this.held,
+      );
       if (!ready) throw new Error("no answer to fdump");
       if (ready[0].startsWith("fdump: ")) throw new Error(ready[0]);
+      if (!ready[0].startsWith("fdump ")) throw new NoFdumpz("the reader has no fdumpz");
+      started = true;
       if (t.setBaud) await t.setBaud(rate);
       await sleep(50);
-      w.sink = (b) => queue.push(JSON.parse(fd.feed(b)));
+      let heard = performance.now();
+      w.sink = (b) => {
+        heard = performance.now();
+        const st = JSON.parse(fd.feed(b)) as FdStep;
+        if (st.send.length || st.nak || st.inflate || st.done || st.error) queue.push(st);
+      };
       const syncEnd = performance.now() + 3000;
       while (!fd.synced()) {
         this.held();
@@ -613,17 +665,25 @@ class Install {
         await w.idle(100);
       }
       let last = performance.now();
+      let begun = 0; // when the frame now coming in began (0: none)
       for (;;) {
         this.held();
         let st = queue.shift();
         if (!st) {
-          if (performance.now() - last < 3500) {
-            await w.idle(100);
+          const now = performance.now();
+          const budget = fd.frame_budget_ms(rate);
+          if (!budget) begun = 0;
+          else if (!begun) begun = now;
+          const late = budget > 0 && now - begun > budget;
+          if (!late && now - Math.max(last, heard) < 3500) {
+            await w.idle(budget ? 50 : 100);
             continue;
           }
           st = JSON.parse(fd.timeout()) as FdStep;
         }
+        begun = 0;
         last = performance.now();
+        if (st.inflate) st = JSON.parse(fd.inflated(await inflateRaw(fd.take_inflate()))) as FdStep;
         if (st.error) throw new Error(st.error);
         if (st.send.length) await t.write(new Uint8Array(st.send));
         if (st.nak) {
@@ -637,15 +697,17 @@ class Install {
       }
       return fd.take_data();
     } catch (e) {
-      await t.write(new Uint8Array([CAN, CAN, CAN, CAN])).catch(() => {});
+      if (started) await t.write(new Uint8Array([CAN, CAN, CAN, CAN])).catch(() => {});
       throw e;
     } finally {
       w.sink = null;
       fd.free();
-      await sleep(50);
-      if (t.setBaud) await t.setBaud(P.timing.cable_baud).catch(() => {});
-      await sleep(50);
-      await w.waitFor(/fdump (end|stopped)[^\r\n]*/, 3000, () => {});
+      if (started) {
+        await sleep(50);
+        if (t.setBaud) await t.setBaud(P.timing.cable_baud).catch(() => {});
+        await sleep(50);
+        await w.waitFor(/fdump (end|stopped)[^\r\n]*/, 3000, () => {});
+      }
     }
   }
 

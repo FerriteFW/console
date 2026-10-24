@@ -11,6 +11,7 @@ import {
   bootResultText,
   firmwareCheck,
   loadCore,
+  sha256Hex,
   statusText,
   type BootStep,
   type FirmwareCheck,
@@ -68,6 +69,36 @@ class Firmware {
 
   get pct() {
     return this.blocks ? Math.floor((this.done * 100) / this.blocks) : 0;
+  }
+
+  /** The Ferrite release bundled with Console (public/firmware/manifest.json, scripts/bundle-firmware.mjs). */
+  bundled = $state<{ version: string; file: string; sha256: string } | null>(null);
+
+  /** The manifest, once: what the page offers besides a file (Ferrite to the next Ferrite from the browser). */
+  async loadBundled() {
+    if (this.bundled) return;
+    try {
+      const r = await fetch("firmware/manifest.json", { cache: "no-cache" });
+      if (r.ok) this.bundled = (await r.json()).ferrite ?? null;
+    } catch {
+      // no bundled release in this copy of Console: a file only
+    }
+  }
+
+  /** UPD-15: the bundled image, used only when its SHA-256 is the manifest's; then checked as a picked file. */
+  async useBundled() {
+    const r = this.bundled;
+    if (this.running || !r) return;
+    try {
+      const res = await fetch(`firmware/${r.file}`, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`${r.file}: ${res.status}`);
+      const b = new Uint8Array(await res.arrayBuffer());
+      await loadCore();
+      if (sha256Hex(b) !== r.sha256.toLowerCase()) throw new Error(`${r.file} doesn't match its checksum: Console won't use it`);
+      await this.pick(new File([b as BlobPart], r.file));
+    } catch (e) {
+      this.error = `The bundled release didn't load (${(e as Error).message}). Choose a file instead.`;
+    }
   }
 
   /** A picked file, checked by the core. */

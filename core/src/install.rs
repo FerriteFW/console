@@ -2,7 +2,8 @@
 //! BACKUP-9.3, INST-5, INST-10, INST-11; decision 261). Ported from ferrite's `tools/flash.py`, `tools/ssbpatch.py`
 //! and `fw/tools/fdump_proto.py` / `backup.py` (the behaviour, not the layout).
 //!
-//! - The backup: the hwtest reader image ([`check_reader`]) goes in through the bootloader; its console answers
+//! - The backup: the reader image ([`check_reader`]: ferrite's read-only `reader/`, decision 264, or the older
+//!   hwtest one; same protocol) goes in through the bootloader; its console answers
 //!   `sys` (the radio's ID), `flash` (the chip) and `fdump` ([`Fdump`]: 4 KB frames with a CRC each, resent on a
 //!   NAK, a whole-range CRC at the end, at 500 kbaud); `flashcrc` is the radio's own CRC of the whole chip, which
 //!   must agree. [`check_backup`] is flash.py's `check_backup` plus a CRC-32 per region.
@@ -26,7 +27,7 @@ use serde::Serialize;
 pub const CAL: usize = CALIBRATION.start as usize;
 pub const SECTOR: usize = 0x1000;
 pub const UPDATE: usize = UPDATE_AREA.start as usize;
-/// Text only the hwtest reader image holds (its help line for the binary dump).
+/// Text only a reader image holds (its help line for the binary dump: ferrite's reader and hwtest alike).
 pub const READER_MARK: &[u8] = b"fdump <addr> <len>";
 /// The link's `STOCK_RESTORE` (ferrite decision 261) and its ops.
 pub const STOCK_RESTORE: u8 = 0x60;
@@ -195,7 +196,7 @@ pub fn parse_flashcrc(line: &str) -> Option<(u32, u32)> {
     Some((crc, kb * 1024))
 }
 
-// ---- fdump: hwtest's binary dump (src/core/fdump.h; fdump_proto.py) ----
+// ---- fdump: hwtest's binary dump (src/core/fdump.h; fdump_proto.py), and fdumpz (BACKUP-9.6) ----
 
 pub const FD_ACK: u8 = 0x06;
 pub const FD_NAK: u8 = 0x15;
@@ -203,6 +204,15 @@ pub const FD_CAN: u8 = 0x18;
 const FD_HDR: usize = 10;
 const FD_BLOCK: usize = 4096;
 const FD_TRIES: usize = 10;
+/// `fdumpz`'s chunk (ferrite's `reader::ZCHUNK`): 16 KB of the range per frame, coded.
+pub const FD_ZCHUNK: usize = 16384;
+/// `fdumpz`'s rate (ferrite decision 265): the one safe rate for long transfers over the cable.
+pub const FDUMPZ_BAUD: u32 = 230_400;
+/// The help line only the Rust reader holds: it has `fdumpz`.
+pub const READER_Z_MARK: &[u8] = b"fdumpz <addr> <len>";
+const Z_RAW: u8 = 0;
+const Z_ERASED: u8 = 1;
+const Z_DEFLATE: u8 = 4;
 
 /// What [`Fdump::feed`] asks of the caller.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -211,24 +221,32 @@ pub struct FdStep {
     pub send: Vec<u8>,
     /// A bad or lost frame: wait ~20 ms, drop what came meanwhile ([`Fdump::resume`]), then send a NAK.
     pub nak: bool,
+    /// `fdumpz`: a DEFLATE chunk waits ([`Fdump::take_inflate`]); inflate it (raw DEFLATE) and hand the result to
+    /// [`Fdump::inflated`], which ACKs it.
+    pub inflate: bool,
     pub done: bool,
     pub error: Option<String>,
-    /// Bytes received so far.
+    /// Bytes of the range received so far (decoded: the chip's bytes, not the cable's).
     pub got: usize,
 }
 
-/// The host's side of one `fdump`, sans I/O: `FDS1` until `FDOK`, then each frame checked and answered.
+/// The host's side of one `fdump` or `fdumpz`, sans I/O: `FDS1` until `FDOK`, then each frame checked and answered.
 pub struct Fdump {
     addr: u32,
     len: u32,
+    z: bool,
     data: Vec<u8>,
     buf: Vec<u8>,
+    /// `fdumpz`: the DEFLATE bytes of the chunk being inflated by the caller, and the bytes it must give.
+    inflate: Option<(Vec<u8>, usize)>,
     synced: bool,
     skipping: bool,
     finished: bool,
     pub naks: usize,
     pub dups: usize,
     pub radio_resends: u32,
+    /// Bytes that crossed the cable in good frames.
+    pub wire: usize,
 }
 
 fn le32(b: &[u8]) -> u32 {
@@ -240,20 +258,29 @@ impl Fdump {
         Fdump {
             addr,
             len,
+            z: false,
             data: Vec::with_capacity(len as usize),
             buf: Vec::new(),
+            inflate: None,
             synced: false,
             skipping: false,
             finished: false,
             naks: 0,
             dups: 0,
             radio_resends: 0,
+            wire: 0,
         }
+    }
+
+    /// `fdumpz` (the Rust reader, BACKUP-9.6): 16 KB chunks coded as raw, erased or raw DEFLATE.
+    pub fn new_z(addr: u32, len: u32) -> Self {
+        Fdump { z: true, ..Fdump::new(addr, len) }
     }
 
     /// The console command (at 115200); the radio answers "fdump ... ready" and switches to `baud`.
     pub fn command(&self, baud: u32) -> String {
-        format!("fdump 0x{:X} 0x{:X} {baud}\r", self.addr, self.len)
+        let name = if self.z { "fdumpz" } else { "fdump" };
+        format!("{name} 0x{:X} 0x{:X} {baud}\r", self.addr, self.len)
     }
 
     pub fn synced(&self) -> bool {
@@ -264,16 +291,38 @@ impl Fdump {
         core::mem::take(&mut self.data)
     }
 
+    /// The DEFLATE bytes a step's `inflate` asks for (empty when none wait).
+    pub fn take_inflate(&mut self) -> Vec<u8> {
+        self.inflate.as_mut().map(|(b, _)| core::mem::take(b)).unwrap_or_default()
+    }
+
     /// After a NAK's pause: what came meanwhile is dropped.
     pub fn resume(&mut self) {
         self.buf.clear();
         self.skipping = false;
     }
 
+    /// How long a frame begun in what has come so far may still take, in ms from when it began (0: none begun):
+    /// its bytes at `baud` plus 0.3 s, and 0.3 s for the header (fdump_proto.py's `_next_zframe`). A frame short of
+    /// bytes (lost on the cable) is asked again after this instead of after the radio's own 2 s.
+    pub fn frame_budget_ms(&self, baud: u32) -> u32 {
+        if !self.synced || self.skipping || self.finished || self.inflate.is_some() {
+            return 0;
+        }
+        let Some(i) = self.buf.windows(2).position(|w| w == b"FD") else { return 0 };
+        let b = &self.buf[i..];
+        if b.len() < FD_HDR {
+            return 300 + 300 + (FD_HDR as u32 * 10_000) / baud.max(1);
+        }
+        let n = u16::from_le_bytes([b[8], b[9]]) as u32;
+        600 + ((FD_HDR as u32 + n + 4) * 10_000) / baud.max(1)
+    }
+
     fn bad(&mut self) -> FdStep {
         self.naks += 1;
         self.buf.clear();
         self.skipping = true;
+        self.inflate = None;
         if self.naks > FD_TRIES * (self.len as usize / FD_BLOCK + 1) {
             return FdStep { error: Some("too many bad frames".into()), got: self.data.len(), ..Default::default() };
         }
@@ -285,12 +334,29 @@ impl Fdump {
         self.bad()
     }
 
-    pub fn feed(&mut self, bytes: &[u8]) -> FdStep {
+    /// The caller's inflated DEFLATE chunk (empty when it didn't inflate): ACKed when it is the chunk's whole
+    /// length, then what came meanwhile is read on.
+    pub fn inflated(&mut self, out: &[u8]) -> FdStep {
         let mut step = FdStep { got: self.data.len(), ..Default::default() };
+        let Some((_, want)) = self.inflate.take() else { return step };
+        if out.len() != want {
+            step.error = Some(format!("chunk at {:06X} doesn't decode", self.addr as usize + self.data.len()));
+            return step;
+        }
+        self.data.extend_from_slice(out);
+        step.send.push(FD_ACK);
+        self.parse(step)
+    }
+
+    pub fn feed(&mut self, bytes: &[u8]) -> FdStep {
+        let step = FdStep { got: self.data.len(), ..Default::default() };
         if self.skipping || self.finished {
             return step;
         }
         self.buf.extend_from_slice(bytes);
+        if self.inflate.is_some() {
+            return step;
+        }
         if !self.synced {
             match self.buf.windows(4).position(|w| w == b"FDOK") {
                 Some(i) => {
@@ -304,6 +370,11 @@ impl Fdump {
                 }
             }
         }
+        self.parse(step)
+    }
+
+    fn parse(&mut self, mut step: FdStep) -> FdStep {
+        let (data_kind, most) = if self.z { (b'Z', FD_ZCHUNK + 1) } else { (b'B', FD_BLOCK) };
         loop {
             let Some(i) = self.buf.windows(2).position(|w| w == b"FD") else {
                 let keep = if self.buf.last() == Some(&b'F') { self.buf.len() - 1 } else { self.buf.len() };
@@ -317,7 +388,7 @@ impl Fdump {
             let (kind, zero) = (self.buf[2], self.buf[3]);
             let a = le32(&self.buf[4..8]);
             let n = u16::from_le_bytes([self.buf[8], self.buf[9]]) as usize;
-            if !(kind == b'B' || kind == b'E') || zero != 0 || n > FD_BLOCK {
+            if !(kind == data_kind || kind == b'E') || zero != 0 || n > most {
                 return self.bad();
             }
             if self.buf.len() < FD_HDR + n + 4 {
@@ -329,20 +400,45 @@ impl Fdump {
             }
             let payload = self.buf[FD_HDR..FD_HDR + n].to_vec();
             self.buf.drain(..FD_HDR + n + 4);
-            step.send.push(FD_ACK);
-            if kind == b'B' {
+            self.wire += FD_HDR + n + 4;
+            if kind == data_kind {
                 let here = self.addr + self.data.len() as u32;
-                if a == here {
-                    self.data.extend_from_slice(&payload);
-                } else if a < here {
+                if a < here {
                     self.dups += 1; // our ACK was lost: the radio sent it again
-                } else {
+                    step.send.push(FD_ACK);
+                    continue;
+                }
+                if a != here {
                     step.error = Some(format!("block at {a:06X}, expected {here:06X}"));
                     return step;
                 }
+                if !self.z {
+                    self.data.extend_from_slice(&payload);
+                    step.send.push(FD_ACK);
+                    step.got = self.data.len();
+                    continue;
+                }
+                let want = FD_ZCHUNK.min(self.len as usize - self.data.len());
+                let chunk = match (payload.first(), payload.len() - 1) {
+                    (Some(&Z_ERASED), 0) => Some(vec![0xFF; want]),
+                    (Some(&Z_RAW), k) if k == want => Some(payload[1..].to_vec()),
+                    (Some(&Z_DEFLATE), k) if k > 0 => {
+                        self.inflate = Some((payload[1..].to_vec(), want));
+                        step.inflate = true;
+                        return step;
+                    }
+                    _ => None,
+                };
+                let Some(chunk) = chunk else {
+                    step.error = Some(format!("chunk at {a:06X} doesn't decode"));
+                    return step;
+                };
+                self.data.extend_from_slice(&chunk);
+                step.send.push(FD_ACK);
                 step.got = self.data.len();
                 continue;
             }
+            step.send.push(FD_ACK);
             if payload.len() < 16 {
                 step.error = Some("short end frame".into());
                 return step;
@@ -400,13 +496,18 @@ fn image_check(btf: &[u8], limit: usize, want: impl Fn(&[u8]) -> Option<String>)
     (c, img)
 }
 
-/// The hwtest reader image: its own mark, never Ferrite, below the stock marker sector.
+/// A reader image (ferrite's or hwtest's): its own mark, never Ferrite, below the stock marker sector.
 pub fn check_reader(btf: &[u8]) -> ImageCheck {
     image_check(btf, APP_MAX, |img| {
         (!find(img, READER_MARK) || find(img, FERRITE_MARK))
             .then(|| "not the reader image (no fdump command in it)".into())
     })
     .0
+}
+
+/// Whether a reader image speaks `fdumpz` (the Rust reader, BACKUP-9.6; hwtest's doesn't): its help line.
+pub fn reader_has_fdumpz(btf: &[u8]) -> bool {
+    unpack(btf).map(|(img, _)| find(&img, READER_Z_MARK)).unwrap_or(false)
 }
 
 /// A stock `.BTF` for the way back: the bootloader's own limit, and not Ferrite or the reader.
@@ -885,6 +986,62 @@ mod tests {
         assert!(fd.feed(&fd_frame(b'B', 4096, &[1; 16])).error.unwrap().contains("expected"));
     }
 
+    /// BACKUP-9.6: fdumpz's chunks (erased, raw, DEFLATE handed out and back), a spoiled frame NAKed, a repeat
+    /// ACKed and dropped, the whole-range CRC over the decoded bytes; `got` counts the chip's bytes.
+    #[test]
+    fn fdumpz_decodes_chunks() {
+        let len = 2 * FD_ZCHUNK + 100;
+        let mut flash = vec![0xFFu8; len];
+        let mut s = 3u64;
+        for b in &mut flash[FD_ZCHUNK..] {
+            *b = rng(&mut s);
+        }
+        let mut fd = Fdump::new_z(0x1000, len as u32);
+        assert_eq!(fd.command(FDUMPZ_BAUD), format!("fdumpz 0x1000 0x{len:X} 230400\r"));
+        fd.feed(b"FDOK");
+        assert_eq!(fd.frame_budget_ms(230_400), 0);
+        let s = fd.feed(&fd_frame(b'Z', 0x1000, &[Z_ERASED]));
+        assert_eq!((s.send.clone(), s.got), (vec![FD_ACK], FD_ZCHUNK));
+        // A repeat (our ACK lost): ACKed, not kept.
+        assert_eq!(fd.feed(&fd_frame(b'Z', 0x1000, &[Z_ERASED])).send, vec![FD_ACK]);
+        assert_eq!(fd.dups, 1);
+        let mut raw = vec![Z_RAW];
+        raw.extend_from_slice(&flash[FD_ZCHUNK..2 * FD_ZCHUNK]);
+        let mut bad = fd_frame(b'Z', 0x1000 + FD_ZCHUNK as u32, &raw);
+        // Half a frame: its budget is its bytes at the rate plus 0.6 s.
+        fd.feed(&bad[..100]);
+        assert_eq!(fd.frame_budget_ms(230_400), 600 + ((10 + FD_ZCHUNK as u32 + 1 + 4) * 10_000) / 230_400);
+        bad[500] ^= 1;
+        assert!(fd.feed(&bad[100..]).nak);
+        fd.resume();
+        bad[500] ^= 1;
+        assert_eq!(fd.feed(&bad).got, 2 * FD_ZCHUNK);
+        // The last chunk, as DEFLATE: the bytes go out to be inflated, the result comes back.
+        let s = fd.feed(&fd_frame(b'Z', 0x1000 + 2 * FD_ZCHUNK as u32, &[Z_DEFLATE, 0xAA, 0xBB]));
+        assert!(s.inflate && s.send.is_empty());
+        assert_eq!(fd.take_inflate(), vec![0xAA, 0xBB]);
+        assert!(fd.inflated(&[0; 99]).error.unwrap().contains("doesn't decode"));
+        let mut end = vec![];
+        for x in [0x1000u32, len as u32, firmware::crc32(&flash), 2] {
+            end.extend_from_slice(&x.to_le_bytes());
+        }
+        let mut fd2 = Fdump::new_z(0, 100);
+        fd2.feed(b"FDOK");
+        assert!(fd2.feed(&fd_frame(b'Z', 0, &[Z_RAW, 1, 2])).error.unwrap().contains("doesn't decode"));
+        assert!(fd2.feed(&fd_frame(b'B', 0, &[1; 100])).nak, "fdump's frames aren't fdumpz's");
+        // The run again to the end: the inflated chunk ACKed, then the end frame's CRC over the decoded data.
+        let mut fd = Fdump::new_z(0x1000, len as u32);
+        fd.feed(b"FDOK");
+        fd.feed(&fd_frame(b'Z', 0x1000, &[Z_ERASED]));
+        fd.feed(&fd_frame(b'Z', 0x1000 + FD_ZCHUNK as u32, &raw));
+        assert!(fd.feed(&fd_frame(b'Z', 0x1000 + 2 * FD_ZCHUNK as u32, &[Z_DEFLATE, 9])).inflate);
+        assert_eq!(fd.inflated(&flash[2 * FD_ZCHUNK..]).send, vec![FD_ACK]);
+        let s = fd.feed(&fd_frame(b'E', 0x1000, &end));
+        assert!(s.done, "{s:?}");
+        assert_eq!(fd.radio_resends, 2);
+        assert_eq!(fd.take_data(), flash);
+    }
+
     /// The images the page flashes: the reader, a stock file, Ferrite; each refused as the others.
     #[test]
     fn image_kinds() {
@@ -892,6 +1049,8 @@ mod tests {
         let stock = pack(&image(40_000, b"V0.29"));
         let fer = pack(&image(30_000, FERRITE_MARK));
         assert!(check_reader(&reader).problems.is_empty());
+        assert!(!reader_has_fdumpz(&reader));
+        assert!(reader_has_fdumpz(&pack(&image(20_000, b"fdump <addr> <len> [baud]\r\nfdumpz <addr> <len> [baud]"))));
         assert!(!check_reader(&stock).problems.is_empty());
         assert!(!check_reader(&fer).problems.is_empty());
         assert!(check_stock(&stock).problems.is_empty());
@@ -967,12 +1126,18 @@ mod tests {
         assert!(check_stock(&btf).problems.is_empty(), "{:?}", check_stock(&btf).problems);
     }
 
-    /// The hwtest reader as built in ../fw, and a Ferrite build, when this machine has them: each passes as what it is.
+    /// The readers (ferrite's `tools/mkbtf.sh reader`, or another build of it named by FERRITE_READER_BTF, and the
+    /// hwtest one in ../fw) and a Ferrite build, when this machine has them: each passes as what it is.
     #[test]
     fn real_reader_and_ferrite_builds_pass_when_present() {
-        if let Ok(b) = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fw/build/target/hwtest.btf")) {
-            assert!(check_reader(&b).problems.is_empty(), "{:?}", check_reader(&b).problems);
-            assert!(!check_stock(&b).problems.is_empty());
+        let ferrite_reader = std::env::var("FERRITE_READER_BTF")
+            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../ferrite/target/ferrite-reader.btf").into());
+        for path in [ferrite_reader.as_str(), concat!(env!("CARGO_MANIFEST_DIR"), "/../../fw/build/target/hwtest.btf")] {
+            if let Ok(b) = std::fs::read(path) {
+                assert!(check_reader(&b).problems.is_empty(), "{path}: {:?}", check_reader(&b).problems);
+                assert!(!check_stock(&b).problems.is_empty());
+                assert!(reader_update(&b).is_ok());
+            }
         }
         if let Ok(b) = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../ferrite/target/ferrite-tx.btf")) {
             assert!(!check_reader(&b).problems.is_empty());

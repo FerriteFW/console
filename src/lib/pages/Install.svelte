@@ -294,7 +294,7 @@
       </div>
       <div>
         <h3>Reader image</h3>
-        <p class="sub">The hwtest image that reads the flash for the backup. It has no write command.</p>
+        <p class="sub">The image that reads the flash for the backup. It can't write: it has no write code at all.</p>
         <label class="btn">Use a file…<input type="file" accept=".btf,.BTF" hidden aria-label="Reader file" onchange={(e) => picked("reader", e)} /></label>
         {#if I.readerFile}<p class="sub">{I.readerFile.name} ({I.readerSource === "bundled" ? "included" : "file"})</p>{/if}
         {#if I.readerCheck?.problems.length}<ul class="warn">{#each I.readerCheck.problems as p, i (i)}<li>{p}</li>{/each}</ul>{/if}

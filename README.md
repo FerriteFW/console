@@ -57,7 +57,7 @@ npm run e2e:run     # the same without the build
 - The desktop app connects natively: the cable through `serialport`, Bluetooth through `btleplug`.
 - The desktop app picks the port or radio in its own list. Radios show by device ID.
 - PIN prompt when the radio's Bluetooth PIN lock is on.
-- Cable at 460800 or 230400 baud; back to 115200 on disconnect.
+- Cable at 230400 baud (115200 if the radio keeps its rate); back to 115200 on disconnect.
 - Radio panel: firmware, build, callsign, unique ID.
 - Live View: the radio's screen at 1x, 1.5x or 2x. The cable polls the UI readback; Bluetooth takes the radio's compact updates.
 - Remote keys: the drawn keypad, the knob, the keyboard. Never PTT.

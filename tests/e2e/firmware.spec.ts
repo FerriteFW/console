@@ -74,6 +74,26 @@ test("firmware: a whole update through the fake bootloader, then connected again
   expect(r.sha256).toBe(sha(btf));
 });
 
+test("firmware: the bundled release, checked by its SHA-256 (Ferrite to the next from the browser)", async ({ page }) => {
+  setMode({});
+  const btf = testBtf(24);
+  let served = btf;
+  await page.route("**/firmware/**", (route) => {
+    const name = route.request().url().split("/firmware/")[1].split("?")[0];
+    if (name === "manifest.json") return route.fulfill({ json: { ferrite: { version: "v9.8.7", file: "ferrite-rel.btf", sha256: sha(btf) } } });
+    return name === "ferrite-rel.btf" ? route.fulfill({ body: served, contentType: "application/octet-stream" }) : route.fulfill({ status: 404 });
+  });
+  await openConsole(page, "firmware");
+  await connect(page);
+  await page.getByRole("button", { name: "Use the bundled release (v9.8.7)" }).click();
+  await expect(page.getByRole("region", { name: "File check" })).toContainText("Checks passed");
+  await expect(fact(page, "version")).toHaveText("v9.8.7");
+  await expect(page.getByRole("button", { name: "Update firmware…" })).toBeVisible();
+  served = testBtf(25); // the file on the server isn't the one the manifest names
+  await page.getByRole("button", { name: "Use the bundled release (v9.8.7)" }).click();
+  await expect(page.getByRole("alert", { name: "Update error" })).toContainText("doesn't match its checksum");
+});
+
 test("firmware: files the checks refuse can't be installed", async ({ page }, info) => {
   await openConsole(page, "firmware");
   await connect(page);
