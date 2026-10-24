@@ -4238,7 +4238,6 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 [[package]]
 name = "uafsk"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=f9fba90e3d2201bf28fabe0f714e6b98c39192ab#f9fba90e3d2201bf28fabe0f714e6b98c39192ab"
 dependencies = [
  "udsp",
  "ufx25",
@@ -4247,7 +4246,6 @@ dependencies = [
 [[package]]
 name = "uaprs"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=f9fba90e3d2201bf28fabe0f714e6b98c39192ab#f9fba90e3d2201bf28fabe0f714e6b98c39192ab"
 dependencies = [
  "udsp",
 ]
@@ -4266,7 +4264,6 @@ dependencies = [
 [[package]]
 name = "udsc"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=f9fba90e3d2201bf28fabe0f714e6b98c39192ab#f9fba90e3d2201bf28fabe0f714e6b98c39192ab"
 dependencies = [
  "uafsk",
 ]
@@ -4274,7 +4271,6 @@ dependencies = [
 [[package]]
 name = "udsp"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=f9fba90e3d2201bf28fabe0f714e6b98c39192ab#f9fba90e3d2201bf28fabe0f714e6b98c39192ab"
 
 [[package]]
 name = "ufmt"
@@ -4306,7 +4302,6 @@ checksum = "e87a2ed6b42ec5e28cc3b94c09982969e9227600b2e3dcbc1db927a84c06bd69"
 [[package]]
 name = "ufx25"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=f9fba90e3d2201bf28fabe0f714e6b98c39192ab#f9fba90e3d2201bf28fabe0f714e6b98c39192ab"
 dependencies = [
  "udsp",
 ]
@@ -4335,7 +4330,6 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 [[package]]
 name = "upocsag"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=f9fba90e3d2201bf28fabe0f714e6b98c39192ab#f9fba90e3d2201bf28fabe0f714e6b98c39192ab"
 
 [[package]]
 name = "url"
