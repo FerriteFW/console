@@ -1,5 +1,6 @@
-// Live View completeness (LINK-19.4, decision 289): every text the firmware draws on a screen shows in Console's Live
-// View drawn from that screen's readback. The screens and their texts come from ferrite's simulator
+// Live View completeness (LINK-19.4, LINK-19.5, decisions 289 and 291): every text the firmware draws on a screen shows
+// in Console's Live View drawn from that screen's readback with the screen as drawn (`readback_texts`, as a radio that
+// says caps TEXTS sends it). The screens and their texts come from ferrite's simulator
 // (sim/tests/liveview_corpus.rs writes ../ferrite/target/liveview/corpus.json; built here when missing or older than
 // this run). A screen the radio changes and Console's look-alike doesn't follow fails here, with the missing texts.
 import { test, expect } from "@playwright/test";
@@ -7,12 +8,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-type Entry = { name: string; texts: string[]; readback: string };
+type Entry = { name: string; texts: string[]; readback: string; readback_texts?: string };
 
 const FERRITE = join(import.meta.dirname, "..", "..", "..", "ferrite");
 const CORPUS = join(FERRITE, "target", "liveview", "corpus.json");
-/** The gaps known when the test came in (decision 289), screen -> texts: each to be closed, none to be added.
- * `FERRITE_LIVEVIEW_BASELINE=write` rewrites it from this run. */
+/** Known gaps, screen -> texts: none since the screen as drawn (LINK-19.5, decision 291), so the file is gone and any
+ * gap fails. `FERRITE_LIVEVIEW_BASELINE=write` writes one from this run, for a gap to be allowed while it's fixed. */
 const BASELINE = join(import.meta.dirname, "liveview-gaps.json");
 
 /** Texts compared without case, spaces or the separators the two draw differently. */
@@ -43,7 +44,7 @@ test("live view shows every text the radio draws, on every screen", async ({ pag
   const all: Record<string, string[]> = {};
   const misses: string[] = [];
   for (const e of corpus) {
-    await page.evaluate((t) => (window as unknown as { __readback: (t: string) => Promise<void> }).__readback(t), e.readback);
+    await page.evaluate((t) => (window as unknown as { __readback: (t: string) => Promise<void> }).__readback(t), e.readback_texts ?? e.readback);
     const dom = norm(await page.locator("[data-readback-screen]").textContent() ?? "");
     const missing = [...new Set(e.texts.filter(meaningful).filter((t) => !shown(t, dom)))];
     if (missing.length) all[e.name] = missing;

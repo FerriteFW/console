@@ -39,7 +39,14 @@ export type Ui = {
   help: Note | null;
   hints: [string, string][];
   other: UiLine[];
+  /** LINK-19.5: the screen as drawn (texts and coloured fills, in drawing order) when asked for; none on home. */
+  items?: ScreenItem[];
 };
+/** LINK-19.5: a text in its line box (font id, RGB565 colours; bg null on the screen's own background) or a fill. */
+export type ScreenItem =
+  | { k: "t"; x: number; y: number; w: number; h: number; font: number; fg: number; bg: number | null; s: string }
+  | { k: "r"; x: number; y: number; w: number; h: number; c: number }
+  | { k: "o"; x: number; y: number; w: number; h: number; c: number };
 export type Timing = {
   open_settle_ms: number;
   quiet_ms: number;
@@ -333,7 +340,8 @@ export const parseMsgs = (rest: Uint8Array): { count: number; messages: Message[
 export const parseEvent = (payload: Uint8Array): AprsEvent | null => JSON.parse(wasm.parse_event(payload));
 /** MSG_SEND's payload; throws Console's copy of the radio's rules (the radio checks again). */
 export const msgSendPayload = (to: string, text: string): Uint8Array => wasm.msg_send_payload(to, text);
-export const subscribePayload = (mask: number, gap: number, renew: boolean): Uint8Array => wasm.subscribe_payload(mask, gap, renew);
+export const subscribePayload = (mask: number, gap: number, renew: boolean, texts = false): Uint8Array =>
+  wasm.subscribe_payload(mask, gap, renew, texts);
 
 // The event log (core/src/log.rs, LINK-42).
 

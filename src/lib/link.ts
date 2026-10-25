@@ -62,6 +62,8 @@ export const CAP_LZ = 4;
 export const CAP_DELETE_MANY = 8;
 /** LINK-13.4: receive audio over this port (the cable). */
 export const CAP_AUDIO = 16;
+/** LINK-19.5: the readback with the screen as drawn (`UI` what=3, the Live View's TEXTS flag). */
+export const CAP_TEXTS = 32;
 const STREAM = 0x19;
 const STREAM_MORE = 0x1a;
 
@@ -343,8 +345,9 @@ export class Link {
     });
   }
 
-  /** What the screen shows (LINK-19's readback): 0 the state. */
-  uiText(what = 0) {
+  /** What the screen shows (LINK-19's readback): 0 the state; 3 with the screen as drawn (LINK-19.5), the default
+   * where the radio has it. */
+  uiText(what = this.caps & CAP_TEXTS ? 3 : 0) {
     return this.text(P.msg.UI, new Uint8Array([what]));
   }
 
@@ -646,7 +649,9 @@ export class Link {
 
   /** LINK-46: SUBSCRIBE (mask 0 ends it); `renew` keeps it as it is (a keepalive). The dictionary version. */
   async subscribe(mask: number, renew = false): Promise<number> {
-    const rest = await this.ok(P.msg.SUBSCRIBE, subscribePayload(mask, 0, renew));
+    // LINK-19.5: the Live View with the screen as drawn, where the radio has it (every screen then shows whole)
+    const texts = (mask & 4) !== 0 && (this.caps & CAP_TEXTS) !== 0;
+    const rest = await this.ok(P.msg.SUBSCRIBE, subscribePayload(mask, 0, renew, texts));
     return rest[1] ?? 0;
   }
 

@@ -190,8 +190,9 @@ pub fn msg_send_payload(to: &str, text: &str) -> Result<Vec<u8>, String> {
 
 /// `SUBSCRIBE`'s payload (LINK-46): the mask, the UI's least gap (100 ms units; 0 the radio's default), and the
 /// renew flag (a keepalive, changing nothing).
-pub fn subscribe_payload(mask: u8, gap: u8, renew: bool) -> Vec<u8> {
-    vec![mask, gap, if renew { ev::RENEW } else { 0 }]
+/// `texts`: the Live View with the screen as drawn (LINK-19.5), from a radio that says so in `HELLO`.
+pub fn subscribe_payload(mask: u8, gap: u8, renew: bool, texts: bool) -> Vec<u8> {
+    vec![mask, gap, if renew { ev::RENEW } else { 0 } | if texts { ev::TEXTS } else { 0 }]
 }
 
 #[cfg(test)]

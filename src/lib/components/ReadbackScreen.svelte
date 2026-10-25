@@ -2,7 +2,7 @@
   // The radio's 240 x 320 portrait screen, drawn from the UI readback (LINK-19): a close look-alike of ferrite's
   // screens (home's cards, lists, help, toasts, the hint bar), not pixel-identical. The pixel mirror (SCREEN) gets
   // its own source (PixelScreen.svelte); this one stays as the fallback and for Bluetooth.
-  import type { Kv, Ui, UiLine } from "../core";
+  import type { Kv, ScreenItem, Ui, UiLine } from "../core";
 
   let { ui }: { ui: Ui } = $props();
 
@@ -51,6 +51,37 @@
   const entrySmall = $derived(entryParts[1]);
   const otherLines = $derived(ui.other.filter((l) => l.kind !== "state" && l.kind !== "audio" && l.kind !== "entry"));
 
+  // LINK-19.5: a screen sent as drawn (its texts and fills, absolute coordinates) is placed as the radio drew it.
+  const items = $derived(ui.items ?? []);
+  /** The radio's fonts by id (uistate.rs `font_id`): size in px, weight, family. */
+  const FONTS: [number, number, string][] = [
+    [12, 500, "mono"], [12, 700, "mono"], [15, 700, "mono"], [22, 700, "mono"], [26, 700, "mono"],
+    [17, 700, "digits"], [26, 700, "digits"], [28, 700, "digits"], [46, 700, "digits"], [40, 600, "brand"],
+  ];
+  const family = (f: string) =>
+    f === "digits" ? '"Ferrite Mono Tight", "JetBrains Mono", monospace' : f === "brand" ? '"Barlow", sans-serif' : '"JetBrains Mono", monospace';
+  const css565 = (c: number) => `rgb(${((c >> 11) & 31) * 255 / 31 | 0},${((c >> 5) & 63) * 255 / 63 | 0},${(c & 31) * 255 / 31 | 0})`;
+  function itemStyle(it: ScreenItem): string {
+    const box = `left:${it.x}px;top:${it.y - BAR}px;width:${it.w}px;height:${it.h}px;`;
+    if (it.k === "r") return box + `background:${css565(it.c)};`;
+    if (it.k === "o") return box + `background:${css565(it.c)};border-radius:50%;transform:scale(0.6);`;
+    const [size, weight, fam] = FONTS[it.font] ?? FONTS[0];
+    const bg = it.bg === null ? "" : `background:${css565(it.bg)};`;
+    return box + bg + `color:${css565(it.fg)};font:${weight} ${size}px/${it.h}px ${family(fam)};`;
+  }
+
+  /** A text squeezed to the width the radio measured, when Console's font runs wider (never stretched). */
+  function fit(el: HTMLElement, w: number) {
+    const go = (w: number) => {
+      el.style.transform = "";
+      const natural = el.scrollWidth;
+      el.style.transformOrigin = "left center";
+      el.style.transform = natural > w + 1 ? `scaleX(${w / natural})` : "";
+    };
+    go(w);
+    return { update: go };
+  }
+
   function lineText(l: UiLine) {
     const kv = Object.entries(l.kv)
       .map(([k, v]) => `${k}=${v}`)
@@ -74,14 +105,20 @@
     const heard = `${n(c.heard)} heard`;
     if (c.hour === undefined) return heard; // a radio from before the hourly count
     const hour = `${n(c.hour)} /hr`;
+    if (!both && c.turn !== undefined) return n(c.turn) ? hour : heard; // the one the radio's small card shows now
     return both ? `${heard} · ${hour}` : turn ? hour : heard;
   }
   function aprsLine(c: Kv) {
     if (c.holder === "kiss") return `Sent ${n(c.sent)} · Heard ${n(c.frames)}`;
     if (c.holder === "beacon") return s(c.line);
+    if (c.turn !== undefined) return s(c.last) || "Nothing heard yet"; // as drawn: the last heard since power-on
     return s(c.last) ? `Last ${s(c.last)}` : "Nothing heard yet";
   }
   const aprsPower = (c: Kv) => (c.state === "Muted" ? `Muted · ${s(c.power)}` : s(c.power));
+  /** A card's header: "VHF shared" when a watched slot shares C's chip (APRS-17). */
+  const headText = (c: Kv) => s(c.head) + (n(c.shared) ? " shared" : "");
+  /** The state word, or the tone hint in its place ("Heard 88.5", TSRCH-13). */
+  const stateText = (c: Kv) => s(c.hint) || s(c.state);
   const stateColour = (st: string) =>
     st === "TX" ? "var(--red)" : st.startsWith("RX") || st === "MON" ? "var(--green)" : st === "heard" ? "var(--amber)" : "var(--sub)";
 </script>
@@ -106,7 +143,13 @@
   </div>
 
   <div class="body" style:height={`${H - BAR - HINTS}px`}>
-    {#if hasCards}
+    {#if items.length}
+      <div class="items">
+        {#each items as it, i (i)}
+          {#if it.k === "t"}<span class="it tx" style={itemStyle(it)} use:fit={it.w}>{it.s}</span>{:else}<span class="it" style={itemStyle(it)}></span>{/if}
+        {/each}
+      </div>
+    {:else if hasCards}
       <div class="cards">
         {#each cards as c (c.slot)}
           {@const slot = s(c.slot)}
@@ -116,8 +159,8 @@
             <div class="card active">
               <div class="head">
                 <span class="badge on" style:background={slotColour[slot]}>{slot}</span>
-                <span class="htext">{s(c.head)}</span>
-                {#if st && st !== "idle"}<span class="state" style:color={stateColour(st)}>{st}</span>{/if}
+                <span class="htext">{headText(c)}</span>
+                {#if st && st !== "idle"}<span class="state" style:color={stateColour(st)}>{stateText(c)}</span>{/if}
               </div>
               {#if c.kind === "aprs"}
                 <div class="freq">{big}<small>{small}</small></div>
@@ -125,11 +168,13 @@
                 <div class="aprsrow"><span class="l">{s(c.beacon)}</span><span class="r b">{aprsRight(c, true)}</span></div>
               {:else}
                 {#if s(c.name)}<div class="cname">{s(c.name)}</div>{/if}
-                <div class="freq" class:withname={!!s(c.name)}>{big}<small>{small}</small></div>
                 {#if c.kind === "broadcast"}
                   {@const b = ui.bcast[slot]}
+                  <div class="freq">{Number(s(c.freq)).toFixed(1)}<small> MHz</small></div>
+                  {#if b}<div class="aprsrow"><span class="l">{n(b.stereo) ? "STEREO" : ""}</span><span class="r">SNR {n(b.snr)} dB</span></div>{/if}
                   <div class="aprs sub">{b ? s(b.rds) || "No RDS" : ""}</div>
                 {:else}
+                  <div class="freq" class:withname={!!s(c.name)}>{big}<small>{small}</small></div>
                   <div class="chips">
                     {#each [c.mode, c.tone, c.shift, c.power] as chip, i (i)}
                       {#if s(chip)}<span class="chip">{s(chip)}</span>{/if}
@@ -148,8 +193,8 @@
             <div class="card">
               <div class="head">
                 <span class="badge" style:border-color={slotColour[slot]} style:color={slotColour[slot]}>{slot}</span>
-                <span class="htext">{s(c.head)}</span>
-                <span class="state" style:color={stateColour(st)}>{st}</span>
+                <span class="htext">{headText(c)}</span>
+                <span class="state" style:color={stateColour(st)}>{stateText(c)}</span>
               </div>
               <div class="line2">
                 {#if s(c.name)}
@@ -305,6 +350,19 @@
   .body {
     position: relative;
     overflow: hidden;
+  }
+  .items {
+    position: absolute;
+    inset: 0;
+  }
+  .tx {
+    width: auto !important;
+  }
+  .it {
+    position: absolute;
+    white-space: pre;
+    overflow: visible;
+    letter-spacing: 0;
   }
   .cards {
     display: flex;

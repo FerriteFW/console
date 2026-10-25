@@ -721,8 +721,8 @@ pub fn msg_send_payload(to: &str, text: &str) -> Result<Vec<u8>, JsError> {
 }
 
 #[wasm_bindgen]
-pub fn subscribe_payload(mask: u8, gap: u8, renew: bool) -> Vec<u8> {
-    aprs::subscribe_payload(mask, gap, renew)
+pub fn subscribe_payload(mask: u8, gap: u8, renew: bool, texts: bool) -> Vec<u8> {
+    aprs::subscribe_payload(mask, gap, renew, texts)
 }
 
 // The event log (`ferrite_console_core::log`, LINK-42).

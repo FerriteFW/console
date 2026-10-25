@@ -149,6 +149,45 @@ pub struct Ui {
     pub hints: Vec<(String, String)>,
     /// Every other line, in order.
     pub other: Vec<Line>,
+    /// LINK-19.5: the screen as drawn (its `t` lines' texts and fills, in drawing order), when the session asked
+    /// for them; Home sends none (its cards are structured).
+    pub items: Vec<Item>,
+}
+
+/// LINK-19.5: one thing on the screen: a text (its line box, font, colours) or a coloured fill.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "k")]
+pub enum Item {
+    #[serde(rename = "t")]
+    /// `bg`: None on the screen's own background.
+    Text { x: i32, y: i32, w: i32, h: i32, font: u8, fg: u16, bg: Option<u16>, s: String },
+    #[serde(rename = "r")]
+    Rect { x: i32, y: i32, w: i32, h: i32, c: u16 },
+    /// An icon (a dot, a symbol) in its colour: drawn as a round mark of its size.
+    #[serde(rename = "o")]
+    Icon { x: i32, y: i32, w: i32, h: i32, c: u16 },
+}
+
+/// A `t` line's items: `x,y,w,h,font,fg,bg,` then the quoted text (two args), or `x,y,w,h,colour` (one).
+fn items(args: &[String], out: &mut Vec<Item>) {
+    let num = |s: &str| s.parse::<i32>().ok();
+    let hex = |s: &str| u16::from_str_radix(s, 16).ok();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let f: Vec<&str> = a.trim_end_matches(',').split(',').collect();
+        if a.ends_with(',') && f.len() == 7 {
+            let s = it.next().cloned().unwrap_or_default();
+            if let (Some(x), Some(y), Some(w), Some(h), Some(font), Some(fg)) =
+                (num(f[0]), num(f[1]), num(f[2]), num(f[3]), f[4].parse::<u8>().ok(), hex(f[5]))
+            {
+                out.push(Item::Text { x, y, w, h, font, fg, bg: hex(f[6]), s });
+            }
+        } else if f.len() == 5 || f.len() == 6 && f[5] == "o" {
+            if let (Some(x), Some(y), Some(w), Some(h), Some(c)) = (num(f[0]), num(f[1]), num(f[2]), num(f[3]), hex(f[4])) {
+                out.push(if f.len() == 6 { Item::Icon { x, y, w, h, c } } else { Item::Rect { x, y, w, h, c } });
+            }
+        }
+    }
 }
 
 /// `ui`'s text (all its chunks joined).
@@ -205,11 +244,29 @@ pub fn parse(text: &str) -> Ui {
             }
             "qmenu" => ui.qmenu.push(l.args),
             "hints" => ui.hints = l.args.as_chunks::<2>().0.iter().map(|[k, v]| (k.clone(), v.clone())).collect(),
+            "t" => items(&l.args, &mut ui.items),
             "" => {}
             _ => ui.other.push(l),
         }
     }
     ui
+}
+
+#[cfg(test)]
+mod items_tests {
+    use super::*;
+
+    /// LINK-19.5: a `t` line's texts and fills, a quoted text with a comma and a quote in it.
+    #[test]
+    fn t_lines_parse() {
+        let ui = parse("screen Group \"Settings group\" title=\"Scan\"\nt 6,30,228,20,1e2b 14,32,40,17,0,e73c,0841,\"Band, \\\"x\\\"\" 0,0,240,1,ffff 3,4,5,6,1,ffff,-,\"A\" 7,8,6,6,fd20,o\n");
+        assert_eq!(ui.items.len(), 5);
+        assert_eq!(ui.items[4], Item::Icon { x: 7, y: 8, w: 6, h: 6, c: 0xfd20 });
+        assert_eq!(ui.items[3], Item::Text { x: 3, y: 4, w: 5, h: 6, font: 1, fg: 0xffff, bg: None, s: "A".into() });
+        assert_eq!(ui.items[0], Item::Rect { x: 6, y: 30, w: 228, h: 20, c: 0x1e2b });
+        assert_eq!(ui.items[1], Item::Text { x: 14, y: 32, w: 40, h: 17, font: 0, fg: 0xe73c, bg: Some(0x0841), s: "Band, \"x\"".into() });
+        assert!(ui.other.is_empty());
+    }
 }
 
 #[cfg(test)]
