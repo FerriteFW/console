@@ -3,10 +3,11 @@
   import { firmware } from "../firmware.svelte";
   import type { TransportKind } from "../transport";
   import { bridgeEnabled, bridgeUrl } from "../transport/bridge";
+  import { DEV_TOOLS } from "../devtools";
   import { isTauri } from "../transport/native";
   import NativePicker from "./NativePicker.svelte";
 
-  // The development bridge (tools/bridge.py): only in `npm run dev` or with ?bridge in the URL.
+  // The development bridge (tools/bridge.py) and the demo radio: developer builds only (devtools.ts).
   const bridge = bridgeEnabled();
 
   const avail = $derived(radio.available());
@@ -37,7 +38,7 @@
   const buttons: { kind: TransportKind; name: string }[] = [
     { kind: "cable", name: "Cable" },
     { kind: "bluetooth", name: "Bluetooth" },
-    { kind: "demo", name: "Demo radio" },
+    ...(DEV_TOOLS ? [{ kind: "demo" as TransportKind, name: "Demo radio" }] : []),
   ];
 
   function sendPin(e: SubmitEvent) {

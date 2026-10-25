@@ -11,11 +11,12 @@
     "build": "npm run wasm && vite build",
     "preview": "vite preview",
     "test": "cargo test -p ferrite-console-core",
-    "e2e": "npm run build && playwright test",
+    "e2e": "npm run wasm && VITE_DEV_TOOLS=1 vite build && playwright test",
     "e2e:run": "playwright test",
     "e2e:xeon": "tools/e2e-xeon.sh",
     "tauri": "tauri",
-    "bundle-firmware": "node scripts/bundle-firmware.mjs"
+    "bundle-firmware": "node scripts/bundle-firmware.mjs",
+    "build:dev": "npm run wasm && VITE_DEV_TOOLS=1 vite build"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

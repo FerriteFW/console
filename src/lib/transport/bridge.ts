@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
+import { DEV_TOOLS } from "../devtools";
 // The development bridge (tools/bridge.py): the link's bytes over a local WebSocket to a serial port or the
-// simulator's TCP cable, so scripts can drive Console without the browser's port chooser. Development only: the
-// Bridge button shows in `npm run dev` or with `?bridge` in the URL (`?bridge=ws://127.0.0.1:PORT` for another port).
+// simulator's TCP cable, so scripts can drive Console without the browser's port chooser. Developer builds only
+// (devtools.ts: `npm run dev`, `npm run build:dev`, the e2e build); `?bridge=ws://127.0.0.1:PORT` picks another port.
 //
 // Binary frames are the bytes; text frames are JSON. The bridge says {"bridge":1,"target":"serial"|"tcp","name",
 // "baud"} first; {"baud":N} asks it to set the serial port's rate (LINK-11) and it answers {"baud":N,"ok":...}.
@@ -11,7 +12,7 @@ export const BRIDGE_URL = "ws://127.0.0.1:8765";
 
 /** Whether this page offers the bridge: the dev server, or `?bridge` in the URL. */
 export function bridgeEnabled(): boolean {
-  return import.meta.env.DEV || new URLSearchParams(location.search).has("bridge");
+  return DEV_TOOLS;
 }
 
 /** The bridge's address: `?bridge=ws://...` or the default. */

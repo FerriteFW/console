@@ -2,6 +2,7 @@
   // The shell: sidebar (sections grouped as UV Studio groups its own: Viewer, Tools, Console), the connection bar,
   // and the page. Pages by hash (#/live, #/about, ...) so a reload stays put.
   import ConnectionBar from "./lib/components/ConnectionBar.svelte";
+  import { DEV_TOOLS } from "./lib/devtools";
   import Wordmark from "./lib/components/Wordmark.svelte";
   import LiveView from "./lib/pages/LiveView.svelte";
   import About from "./lib/pages/About.svelte";
@@ -83,7 +84,7 @@
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
   (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts };
-  if (params.has("demo")) {
+  if (DEV_TOOLS && params.has("demo")) {
     void radio.connect("demo").then(async () => {
       for (const k of (params.get("press") ?? "").split(",").filter(Boolean)) {
         await new Promise((r) => setTimeout(r, 300));

@@ -32,7 +32,7 @@ npm run tauri build                            # the .app and a .dmg in target/r
 ```
 
 - `?demo` connects the demo radio. `?demo&press=MENU,DOWN` presses keys. `?theme=light` picks the theme.
-- `?bridge` shows the Bridge button outside `npm run dev`.
+- The demo radio, the Bridge button and the readback harness are developer tools: in `npm run dev` and `npm run build:dev` (the e2e tests' build), never in a release build (`npm run build`, the desktop app).
 
 ## Test
 
