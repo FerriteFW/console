@@ -58,7 +58,7 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "AUDIO" | "AUDIO_DATA", number>;
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS", number>;
   event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
   knobMax: number;
@@ -82,6 +82,8 @@ export type Session = wasm.Session;
 export const DemoRadio = wasm.DemoRadio;
 export type DemoRadio = wasm.DemoRadio;
 
+/** LINK-13.4: one receive-audio block's samples (8 kHz, 16-bit); empty for a keep-alive. */
+export const audioDecode = (p: Uint8Array): Int16Array => wasm.audio_decode(p);
 export const statusText = (s: number, rest: Uint8Array = new Uint8Array()) => wasm.status_text(s, rest);
 export const helloPayload = (name: string) => wasm.hello_payload(name);
 export const authPayload = (pin: string) => wasm.auth_payload(pin);

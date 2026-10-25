@@ -170,6 +170,11 @@ impl Session {
                 continue;
             }
             if let Ok(mut f) = link::parse(&mut raw) {
+                // LINK-13.4: receive audio is pushed plain, outside compression's window and count (LINK-51)
+                if f.ty == link::msg::AUDIO_DATA {
+                    out.push(Answer { ty: f.ty, seq: f.seq, status: 0, rest: f.payload.to_vec(), event: true });
+                    continue;
+                }
                 let mut plain = [0u8; MAX_WIRE];
                 if let Some(z) = self.lz.as_mut().filter(|_| f.ty != link::msg::HELLO | ANSWER) {
                     if f.ty & 0x7F == Z {
@@ -224,6 +229,20 @@ mod tests {
         let mut w = [0u8; MAX_WIRE];
         let n = link::build(ty | ANSWER, seq, &p, &mut w).unwrap();
         w[..n].to_vec()
+    }
+
+    /// LINK-13.4, LINK-51: receive audio comes plain and stays out of compression's window and count, so a
+    /// compressed session reads it as an event and its next coded frame still lines up.
+    #[test]
+    fn audio_frames_pass_compression_by() {
+        let mut s = Session::new();
+        s.set_lz(true);
+        let mut w = [0u8; MAX_WIRE];
+        let n = link::build(msg::AUDIO_DATA, 0, &[1, 0, 1, 1, 0, 0, 0, 0x37, 0x73], &mut w).unwrap();
+        let a = s.feed(&w[..n]);
+        assert_eq!((a.len(), a[0].ty, a[0].event, a[0].rest.len()), (1, msg::AUDIO_DATA, true, 9));
+        let z = s.lz.as_ref().unwrap();
+        assert_eq!((z.down_n, z.broken), (0, false), "not counted");
     }
 
     /// LINK-1: requests decode with ferrite's codec, seq counting up from 1 and wrapping.

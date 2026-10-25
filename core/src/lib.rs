@@ -28,6 +28,7 @@
 
 pub mod answers;
 pub mod aprs;
+pub mod audio;
 pub mod aprs_settings;
 pub mod channels;
 pub mod chirp;

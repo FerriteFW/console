@@ -60,6 +60,8 @@ export const CAP_STREAM = 1;
 export const CAP_WINDOW = 2;
 export const CAP_LZ = 4;
 export const CAP_DELETE_MANY = 8;
+/** LINK-13.4: receive audio over this port (the cable). */
+export const CAP_AUDIO = 16;
 const STREAM = 0x19;
 const STREAM_MORE = 0x1a;
 
@@ -79,6 +81,8 @@ export class Link {
   /** Events (LINK-46): frames the radio sends unasked, never matched to a request: the frame's seq (the session's
    * event counter) and the payload (the kind, then its bytes). */
   onEvent: (seq: number, payload: Uint8Array) => void = () => {};
+  /** LINK-13.4: receive audio blocks (`AUDIO_DATA` payloads) while listening. */
+  onAudio: (payload: Uint8Array) => void = () => {};
 
   constructor(readonly t: Transport) {
     t.onData = (bytes) => {
@@ -89,6 +93,10 @@ export class Link {
       }
       const answers: Answer[] = JSON.parse(this.session.feed(bytes));
       for (const a of answers) {
+        if (a.event && a.ty === P.msg.AUDIO_DATA) {
+          this.onAudio(new Uint8Array(a.rest));
+          continue;
+        }
         if (a.event) {
           this.onEvent(a.seq, new Uint8Array(a.rest));
           continue;

@@ -8,6 +8,7 @@
   import RadioInfo from "../components/RadioInfo.svelte";
   import KeyboardHelp from "../components/KeyboardHelp.svelte";
   import { radio } from "../radio.svelte";
+  import { listen } from "../listen.svelte";
   import { presser, turn } from "../press.svelte";
   import { sequencer } from "../sequence.svelte";
   import { copyPng, download, pngName, screenPng } from "../snapshot";
@@ -113,6 +114,18 @@
   function onblur() {
     for (const k of Object.keys(presser.shown)) presser.cancel(k);
   }
+  // LINK-13.5: listening ends with the connection (and is never on by itself at the next one).
+  $effect(() => {
+    if (!radio.connectedLink && listen.on) void listen.stop();
+  });
+  $effect(() => {
+    void listen.volume;
+    void listen.muted;
+    listen.apply();
+  });
+  const listenTitle = $derived(
+    !connected ? "Connect to listen" : radio.kind !== "cable" ? "Receive audio needs the cable: Bluetooth is too slow for it" : !listen.available ? "This firmware doesn't send receive audio" : listen.on ? "Stop listening" : "Hear what the radio receives, on this computer (8 kHz, while a squelch is open)",
+  );
 </script>
 
 <svelte:window {onkeydown} {onkeyup} {onblur} bind:innerWidth bind:innerHeight />
@@ -129,6 +142,15 @@
     </label>
     <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
     <label title="Pause reading the screen (keys still work)"><input type="checkbox" bind:checked={radio.live} /> Live</label>
+    <span class="listen">
+      <button class="btn quiet" class:on={listen.on} aria-pressed={listen.on} disabled={!listen.available || listen.starting} title={listenTitle} onclick={() => (listen.on ? listen.stop() : listen.start())}>{listen.on ? "Listening" : "Listen"}</button>
+      {#if listen.on}
+        <input type="range" min="0" max="1" step="0.05" bind:value={listen.volume} aria-label="Volume" title="Volume" />
+        <label title="Mute this computer (the radio keeps sending)"><input type="checkbox" bind:checked={listen.muted} /> Mute</label>
+        <span class="meta">{listen.slot ? `Hearing ${listen.slot}` : "Nothing heard"}</span>
+      {/if}
+      {#if listen.error}<span class="meta err">{listen.error}</span>{/if}
+    </span>
     {#if connected}
       <span class="meta" title={radio.liveByEvents ? `Live View from the radio's updates (LINK-47): ${radio.liveUpdates} so far, ${radio.liveResyncs} whole-state asks` : "Each readback's time"}>{radio.liveByEvents ? `${radio.liveRate} B/s` : `${radio.uiMs} ms`}{radio.ui?.screen ? ` · ${radio.ui.screen.id}` : ""}</span>
     {/if}
@@ -239,6 +261,21 @@
   }
   .spacer {
     flex: 1;
+  }
+  .listen {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .listen .on {
+    color: var(--blue);
+    border-color: var(--blue);
+  }
+  .listen input[type="range"] {
+    width: 90px;
+  }
+  .err {
+    color: var(--red);
   }
   .group {
     display: inline-flex;
