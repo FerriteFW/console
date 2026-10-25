@@ -115,8 +115,9 @@
     return s(c.last) ? `Last ${s(c.last)}` : "Nothing heard yet";
   }
   const aprsPower = (c: Kv) => (c.state === "Muted" ? `Muted · ${s(c.power)}` : s(c.power));
-  /** A card's header: "VHF shared" when a watched slot shares C's chip (APRS-17). */
-  const headText = (c: Kv) => s(c.head) + (n(c.shared) ? " shared" : "");
+  /** A card's header: who wins C's VHF chip when a watched slot shares it (APRS-17, WATCH-17.3): 1 APRS first,
+   *  2 Voice first. */
+  const headText = (c: Kv) => s(c.head) + (n(c.shared) === 1 ? "  VHF: APRS" : n(c.shared) === 2 ? "  VHF: voice" : "");
   /** The state word, or the tone hint in its place ("Heard 88.5", TSRCH-13). */
   const stateText = (c: Kv) => s(c.hint) || s(c.state);
   const stateColour = (st: string) =>
