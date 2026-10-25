@@ -194,6 +194,14 @@ class Aprs {
     return now ? "Queued: it goes at the radio's next APRS turn." : "Queued: it waits until APRS mode is on (MENU 0 5 3).";
   }
 
+  /** LINK-49 (APRS-13.1): stop sending one of ours that is still being tried; it stays, cancelled. */
+  async stop(to: string, text: string): Promise<void> {
+    const link = radio.connectedLink;
+    if (!link) throw new Error("Connect to a radio first.");
+    await link.msgStop(to, text);
+    if (!(radio.subMask & 2)) await this.refresh();
+  }
+
   /** The heard station named `call`, if any. */
   station(call: string) {
     return this.stations.find((s) => s.call.toUpperCase() === call.toUpperCase());

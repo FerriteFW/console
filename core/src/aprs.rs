@@ -41,7 +41,7 @@ impl<'a> Rd<'a> {
 /// The symbols a station record names (LINK-44).
 pub const SYMBOLS: [&str; 8] = ["Car", "Home", "Digi", "Weather", "Handheld", "iGate", "Truck", "Boat"];
 /// A message's states (LINK-44).
-pub const STATES: [&str; 7] = ["unread", "read", "pending", "acked", "retrying", "failed", "rejected"];
+pub const STATES: [&str; 8] = ["unread", "read", "pending", "acked", "retrying", "failed", "rejected", "cancelled"];
 
 /// A station heard (LINK-44).
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -258,6 +258,19 @@ pub(crate) mod tests {
         let m = parse_msgs(&rest).unwrap();
         assert!(!m.messages.is_empty());
         assert!(m.messages.iter().any(|m| m.inbound) && m.messages.iter().any(|m| !m.inbound));
+    }
+
+    /// APRS-13.1, LINK-49: a cancelled message (state 7) reads as "cancelled"; MSG_STOP's payload is MSG_SEND's.
+    #[test]
+    fn cancelled_state_reads() {
+        let mut b = std::vec![0u8, 7, 0];
+        b.extend_from_slice(&5u32.to_le_bytes());
+        b.extend_from_slice(b"\x06VE3KPW\x03QSL");
+        let mut rest = 2u16.to_le_bytes().to_vec();
+        rest.extend_from_slice(&b);
+        let m = parse_msgs(&rest).unwrap();
+        assert_eq!(m.messages[0].state, "cancelled");
+        assert_eq!(STATES[7], "cancelled");
     }
 
     /// LINK-45: Console refuses what the radio would, before sending.

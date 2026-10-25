@@ -87,7 +87,7 @@ pub fn protocol() -> String {
         "msg": { "HELLO": msg::HELLO, "INFO": msg::INFO, "AUTH": msg::AUTH, "READ": msg::READ, "WRITE": msg::WRITE,
                  "DELETE": msg::DELETE, "BEGIN": msg::BEGIN, "END": msg::END, "SLOT": msg::SLOT, "BAUD": msg::BAUD,
                  "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY,
-                 "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND },
+                 "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS },
         "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "HEARD": event::HEARD,
                    "MSG": event::MSG, "MSG_STATE": event::MSG_STATE, "UI": event::UI, "QUIET_MS": event::QUIET_MS, "DICT": liveview::DICT },

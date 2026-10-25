@@ -2,7 +2,7 @@
   // APRS › Messages: the radio's messages in and out (APRS-13; MSGS, LINK-44) as conversations, one per station,
   // kept current by events (LINK-46). Compose queues one on the radio (MSG_SEND, LINK-45), which sends it by its own
   // rules: now if APRS mode is on, else when it is turned on. States follow from the radio (pending, retrying,
-  // acked, failed).
+  // acked, failed, rejected, cancelled); one still being tried can be stopped (LINK-49, APRS-13.1).
   import { ago, aprs, when, type MsgRow } from "../aprs.svelte";
   import { radio } from "../radio.svelte";
   import { route } from "../route.svelte";
@@ -49,6 +49,17 @@
     return m.state;
   }
   const stateTag = (m: MsgRow) => ({ acked: "green", failed: "red", rejected: "red", retrying: "amber", pending: "amber", unread: "blue" })[m.state as string] ?? "";
+
+  /** APRS-13.1: stop one of ours that is still being tried. */
+  async function stop(m: MsgRow) {
+    note = sendError = "";
+    try {
+      await aprs.stop(m.peer, m.text);
+      note = "Stopped: it stays, cancelled.";
+    } catch (err) {
+      sendError = (err as Error).message;
+    }
+  }
 
   async function send(e: SubmitEvent) {
     e.preventDefault();
@@ -107,6 +118,9 @@
               <div class="meta">
                 <span title={when(m.at)}>{ago(m.at, now)}</span>
                 {#if stateText(m)}<span class={`tag ${stateTag(m)}`}>{stateText(m)}</span>{/if}
+                {#if !m.inbound && (m.state === "pending" || m.state === "retrying")}
+                  <button class="stop" disabled={!connected} onclick={() => stop(m)} title="No more tries; it stays, cancelled">Stop sending</button>
+                {/if}
               </div>
             </li>
           {/each}
@@ -232,6 +246,20 @@
     margin-top: 4px;
     font-size: 11px;
     color: var(--sub);
+  }
+  .stop {
+    margin-left: auto;
+    font: inherit;
+    font-size: 11px;
+    color: var(--sub);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 6px;
+    cursor: pointer;
+  }
+  .stop:hover:not(:disabled) {
+    color: var(--text);
   }
   .compose {
     display: grid;

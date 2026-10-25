@@ -58,7 +58,7 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP", number>;
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS", number>;
   event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
   knobMax: number;
@@ -318,7 +318,7 @@ export type Station = {
   path: string;
   comment: string;
 };
-export type MsgState = "unread" | "read" | "pending" | "acked" | "retrying" | "failed" | "rejected";
+export type MsgState = "unread" | "read" | "pending" | "acked" | "retrying" | "failed" | "rejected" | "cancelled";
 export type Message = { inbound: boolean; state: MsgState; state_n: number; tries: number; ago_s: number; peer: string; text: string };
 export type AprsEvent =
   | { kind: "heard"; count: number; station: Station }

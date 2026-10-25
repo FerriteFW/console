@@ -448,6 +448,14 @@ export class Link {
   }
 
   /**
+   * LINK-49 (APRS-13.1): one of ours still being tried stops, kept as cancelled. Firmware from before it answers
+   * `unknown type`.
+   */
+  async msgStop(to: string, text: string): Promise<void> {
+    await this.ok(P.msg.MSG_STOP, msgSendPayload(to, text));
+  }
+
+  /**
    * LINK-42: the event log, newest first, every page (below `before`; 0xFFFFFFFF from the newest). `progress` with
    * the records so far.
    */
