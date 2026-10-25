@@ -30,8 +30,9 @@
 - Firmware without SUBSCRIBE (`unknown type`): polling, and the APRS pages say the firmware is too old.
 - Disconnect ends the subscription first, so events don't run on into `term.py` or `flash.py`.
 
-## Activity Log and APRS
+## Event Log and APRS
 
+- The radio's event log is the Event Log here too (was Activity Log; renamed Oct 24, 2026, one name for one thing).
 - Times come from each record's age at the read (the radio's clock may have no date). Shown in local time.
 - The APRS group sits in Tools: Messages, Heard stations, Map, APRS Settings. It grows there.
 - MSG_SEND is the radio's own compose: it goes by the radio's TX rules. Console says whether it goes now or waits for APRS mode.

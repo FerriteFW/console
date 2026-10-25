@@ -1,7 +1,7 @@
 <script lang="ts">
   // APRS › Map: the heard stations with a position, and the radio's own, on OpenStreetMap (Leaflet from a pinned CDN
   // version; the tiles attributed on the map). Live with the heard list's events. `?call=` centres a station,
-  // `?at=lat,lon` a place (the Activity Log's positions). Otherwise it centres on you: the radio's own position, or
+  // `?at=lat,lon` a place (the Event Log's positions). Otherwise it centres on you: the radio's own position, or
   // the browser's location when the radio has none (asked once; refused or unavailable falls back to the stations).
   import { aprs, ago, compass, distance } from "../aprs.svelte";
   import { radio } from "../radio.svelte";
@@ -102,7 +102,7 @@
       );
     }
     if (at) {
-      layers.push(l.marker(at, { title: "From the Activity Log" }).addTo(m).bindTooltip(`${at[0].toFixed(4)}, ${at[1].toFixed(4)}`));
+      layers.push(l.marker(at, { title: "From the Event Log" }).addTo(m).bindTooltip(`${at[0].toFixed(4)}, ${at[1].toFixed(4)}`));
     }
     // Fit once per kind of view: the focus (a station, a place) or everything.
     const you: [number, number] | null = aprs.me ? [aprs.me.lat, aprs.me.lon] : here;

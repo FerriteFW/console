@@ -1,4 +1,4 @@
-// The Activity Log through the bridge (LOG_READ, LINK-42): every record read, newest first, dated from its age,
+// The Event Log through the bridge (LOG_READ, LINK-42): every record read, newest first, dated from its age,
 // filtered by source, a position linking to the map, and the CSV export.
 import { readFileSync } from "node:fs";
 import { connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
@@ -7,7 +7,7 @@ test.afterEach(async ({ page }) => disconnect(page));
 
 const events = (page: import("@playwright/test").Page) => page.getByRole("table", { name: "Events" }).locator("tbody tr[data-seq]");
 
-test("activity log: the radio's records, newest first, by source, to CSV", async ({ page }, info) => {
+test("event log: the radio's records, newest first, by source, to CSV", async ({ page }, info) => {
   await page.route(/tile\.openstreetmap\.org/, (r) => r.abort());
   await openConsole(page, "activity");
   await connect(page);
@@ -36,7 +36,7 @@ test("activity log: the radio's records, newest first, by source, to CSV", async
 
   // CSV: a header and one line a row shown
   const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export CSV" }).click()]);
-  expect(dl.suggestedFilename()).toMatch(/^ferrite-.*-activity\.csv$/);
+  expect(dl.suggestedFilename()).toMatch(/^ferrite-.*-event-log\.csv$/);
   const csv = readFileSync(await dl.path(), "utf8").trim().split(/\r?\n/);
   expect(csv[0]).toMatch(/^time,seq,source,slot,frequency_mhz,name,text/);
   expect(csv.length).toBe(rows.length + 1);

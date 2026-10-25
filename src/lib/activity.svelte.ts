@@ -45,7 +45,7 @@ class Activity {
     const times = rows.map((r) => new Date(r.at).toLocaleString());
     const strip = rows.map(({ at: _at, ...r }) => r);
     const who = (radio.info?.callsign || "radio").replace(/[^A-Za-z0-9-]/g, "");
-    download(`ferrite-${who}-${stamp()}-activity.csv`, logCsv(strip, times), "text/csv");
+    download(`ferrite-${who}-${stamp()}-event-log.csv`, logCsv(strip, times), "text/csv");
   }
 }
 

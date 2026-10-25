@@ -163,7 +163,7 @@ kbd {
   outline-offset: 2px;
 }
 
-/* Shared by the Activity Log and the APRS pages: a page column, its toolbar, a status line, banners, a table. */
+/* Shared by the Event Log and the APRS pages: a page column, its toolbar, a status line, banners, a table. */
 .pg {
   display: flex;
   flex-direction: column;

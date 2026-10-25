@@ -37,7 +37,7 @@
       name: "Viewer",
       pages: [
         { id: "live", name: "Live View" },
-        { id: "activity", name: "Activity Log" },
+        { id: "activity", name: "Event Log" },
       ],
     },
     {

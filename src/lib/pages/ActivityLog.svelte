@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Activity Log: what the radio's event log holds (INBOX-6: APRS, pager, SAME, DSC, AIS, DTMF, Selcall, GPS),
+  // Event Log: what the radio's event log holds (INBOX-6: APRS, pager, SAME, DSC, AIS, DTMF, Selcall, GPS),
   // newest first, read over the link (LOG_READ, LINK-42). Times are the PC's: the radio gives each record's age.
   // Reading marks nothing read on the radio.
   import { activity, type LogRow } from "../activity.svelte";
@@ -31,7 +31,7 @@
 </script>
 
 <div class="pg">
-  <div class="pg-bar" role="toolbar" aria-label="Activity Log">
+  <div class="pg-bar" role="toolbar" aria-label="Event Log">
     <div class="grp">
       <button class="btn" disabled={!connected || !!activity.busy} onclick={() => activity.refresh()}>Refresh</button>
       <button class="btn" disabled={!rows.length} onclick={() => activity.csv(rows)} title="The rows shown, as a CSV file">Export CSV</button>

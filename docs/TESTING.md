@@ -22,9 +22,9 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 5. Out of range or Bluetooth off: the bar says disconnected.
 6. Cable and Bluetooth in two tabs: both run. The newest Live View subscription wins on the radio (LINK-47).
 
-## Activity Log and APRS (cable or Bluetooth)
+## Event Log and APRS (cable or Bluetooth)
 
-1. Activity Log: the rows match the radio's log screen. Times look right (local time). Source filter, CSV export.
+1. Event Log: the rows match the radio's log screen. Times look right (local time). Source filter, CSV export.
 2. Heard stations: the list matches the radio's heard list. Distances look right for the radio's GPS fix.
 3. Leave it open while a station is heard: it moves to the top without Refresh.
 4. Map: stations and the radio (green) on OpenStreetMap.
