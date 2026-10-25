@@ -5,7 +5,7 @@ import init, * as wasm from "../core-wasm/core.js";
 export type Answer = { ty: number; seq: number; status: number; rest: number[]; event?: boolean };
 
 export type Build = { byte: number; name: string; bench: boolean; dry: boolean };
-export type Hello = { protocol: number; max_payload: number; may_go_on: boolean; firmware: string; build: Build | null };
+export type Hello = { protocol: number; max_payload: number; may_go_on: boolean; firmware: string; build: Build | null; caps: number };
 export type Info = {
   firmware: string;
   channels: number;

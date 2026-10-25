@@ -127,6 +127,15 @@ async fn transport_set_baud(app: State<'_, App>, rate: u32) -> Result<(), String
     }
 }
 
+/// LINK-15.1: Bluetooth's speed unlock (FF31; only that shape is ever written: `ble::is_unlock`).
+#[tauri::command]
+async fn transport_unlock(app: State<'_, App>, token: Vec<u8>) -> Result<(), String> {
+    match app.open.lock().await.as_ref() {
+        Some(Open::Ble(b)) => b.unlock(&token).await,
+        _ => Err("Only Bluetooth has a speed unlock.".into()),
+    }
+}
+
 #[tauri::command]
 async fn transport_close(app: State<'_, App>) -> Result<(), String> {
     app.shut().await;
@@ -179,6 +188,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             serial_ports,
             ble_scan_start,
+            transport_unlock,
             ble_devices,
             ble_scan_stop,
             transport_open,

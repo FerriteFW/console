@@ -20,6 +20,8 @@ export interface Transport {
   baud?: number;
   /** The cable only: reopen the port at another rate (LINK-11). */
   setBaud?(rate: number): Promise<void>;
+  /** Bluetooth only: the module's speed unlock (LINK-15.1, FF31's one allowed write). True if it was written. */
+  unlock?(): Promise<boolean>;
 }
 
 /** Where transports come from on this platform. */

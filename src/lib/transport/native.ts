@@ -1,6 +1,6 @@
 // Native transports for the Tauri apps. The desktop webviews (WKWebView on macOS, WebKitGTK on Linux) have no Web
 // Serial or Web Bluetooth, so the shell (src-tauri/src) moves the bytes: the cable through the `serialport` crate,
-// Bluetooth through `btleplug` (FFE0/FFE1 only, never FF31). The user picks a port or a radio in the app's own
+// Bluetooth through `btleplug` (FFE0/FFE1; FF31 only for the speed unlock, LINK-15.1, which the shell checks). The user picks a port or a radio in the app's own
 // picker (picker.svelte.ts); received bytes and the close reason come back on a Tauri channel.
 import { picker, type PickItem } from "../picker.svelte";
 import type { Transport, TransportKind } from "./types";
@@ -45,6 +45,7 @@ export class NativeTransport implements Transport {
   label = "";
   baud?: number;
   setBaud?: (rate: number) => Promise<void>;
+  unlock?: () => Promise<boolean>;
   onData: (b: Uint8Array) => void = () => {};
   onClose: (why: string) => void = () => {};
   private closing = false;
@@ -57,6 +58,20 @@ export class NativeTransport implements Transport {
         const { invoke } = await api();
         await invoke("transport_set_baud", { rate });
         this.baud = rate;
+      };
+    } else {
+      // LINK-15.1: the module's speed unlock (the shell writes only this shape to FF31)
+      this.unlock = async () => {
+        const token = new Uint8Array(20);
+        token.set([0x3f, 0x3f, 0x3f, 0x3f, 0x02]);
+        crypto.getRandomValues(token.subarray(5));
+        try {
+          const { invoke } = await api();
+          await invoke("transport_unlock", { token: Array.from(token) });
+          return true;
+        } catch {
+          return false;
+        }
       };
     }
   }

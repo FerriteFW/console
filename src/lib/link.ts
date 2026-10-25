@@ -44,11 +44,31 @@ export class RadioError extends Error {
 
 export class TimeoutError extends Error {}
 
+/** LINK-50: a stream's frame didn't come (lost on the way, or none in time); `got` is what came before it. */
+export class StreamGap extends Error {
+  constructor(readonly got: Uint8Array[]) {
+    super(`A stream frame was lost after ${got.length}.`);
+  }
+}
+
 type Waiter = { ty: number; seq: number; resolve: (a: Answer) => void };
+/** LINK-50: frames of one STREAM, numbered from its request's seq. */
+type StreamWaiter = { seq: number; frames: Uint8Array[]; done: (gap: boolean) => void; poke: () => void };
+
+/** LINK-35.2: HELLO's caps bits. */
+export const CAP_STREAM = 1;
+export const CAP_WINDOW = 2;
+const STREAM = 0x19;
+const STREAM_MORE = 0x1a;
 
 export class Link {
   private session = new Session();
-  private waiter: Waiter | null = null;
+  private waiters = new Map<number, Waiter>();
+  private streamW: StreamWaiter | null = null;
+  /** LINK-15.1: the module's `!!!!` answer to the speed unlock is dropped, not fed to the session. */
+  private dropUnlock = false;
+  /** LINK-35.2: what the radio does beyond protocol 2 (HELLO). */
+  caps = 0;
   private chain: Promise<unknown> = Promise.resolve();
   private holdUntil = 0;
   private closed = false;
@@ -61,15 +81,35 @@ export class Link {
   constructor(readonly t: Transport) {
     t.onData = (bytes) => {
       if (this.closed) return;
+      if (this.dropUnlock && bytes.length >= 4 && bytes[0] === 0x21 && bytes[1] === 0x21 && bytes[2] === 0x21 && bytes[3] === 0x21) {
+        this.dropUnlock = false;
+        return;
+      }
       const answers: Answer[] = JSON.parse(this.session.feed(bytes));
       for (const a of answers) {
         if (a.event) {
           this.onEvent(a.seq, new Uint8Array(a.rest));
           continue;
         }
-        const w = this.waiter;
-        if (w && a.ty === (w.ty | 0x80) && a.seq === w.seq) {
-          this.waiter = null;
+        const s = this.streamW;
+        if (s && (a.ty === (STREAM | 0x80) || a.ty === (STREAM_MORE | 0x80))) {
+          if (a.seq !== (s.seq + s.frames.length) % 256) {
+            s.done(true); // a frame lost on the way
+            continue;
+          }
+          if (a.status !== 0) {
+            s.frames.push(new Uint8Array([0xff, a.status, ...a.rest]));
+            s.done(false);
+            continue;
+          }
+          s.frames.push(new Uint8Array(a.rest));
+          s.poke();
+          if (a.ty === (STREAM | 0x80)) s.done(false);
+          continue;
+        }
+        const w = this.waiters.get(a.seq);
+        if (w && a.ty === (w.ty | 0x80)) {
+          this.waiters.delete(a.seq);
           w.resolve(a);
         } else this.stray++;
       }
@@ -87,9 +127,9 @@ export class Link {
   /** No more requests; whatever is in flight fails with "not connected". */
   close() {
     this.closed = true;
-    const w = this.waiter;
-    this.waiter = null;
-    w?.resolve({ ty: 0, seq: 0, status: 0xff, rest: [] });
+    for (const w of this.waiters.values()) w.resolve({ ty: 0, seq: 0, status: 0xff, rest: [] });
+    this.waiters.clear();
+    this.streamW?.done(true);
   }
 
   /** Runs `fn` when every request before it is done: one request on the link at a time. */
@@ -120,14 +160,14 @@ export class Link {
     for (;;) {
       const seq = this.session.next_seq();
       const got = new Promise<Answer | null>((resolve) => {
-        this.waiter = { ty, seq, resolve };
+        this.waiters.set(seq, { ty, seq, resolve });
         setTimeout(() => resolve(null), timeoutMs);
       });
       await this.t.write(this.session.request(ty, payload, performance.now()));
       const a = await got;
       if (this.closed) throw new Error("not connected");
       if (a) return { status: a.status, rest: new Uint8Array(a.rest) };
-      this.waiter = null;
+      this.waiters.delete(seq);
       // A frame sent just after a restart or 10 s of quiet can go to the terminal (TERM-2): a read-only request is
       // sent once more after a 0x00. Never a KEY, CMD, MORE or write: those would act twice or skip a chunk.
       if (!resynced && (ty === HELLO || ty === INFO || ty === UI)) {
@@ -161,7 +201,77 @@ export class Link {
   async hello(): Promise<Hello> {
     const h = parseHello(await this.ok(P.msg.HELLO, helloPayload(CLIENT_NAME)));
     if (!h) throw new Error("The radio's HELLO answer didn't parse.");
+    this.caps = h.caps ?? 0;
     return h;
+  }
+
+  /**
+   * LINK-15.1 (ferrite decision 285): over Bluetooth, the radio asked to 115200, the module unlocked (FF31's one
+   * allowed write, by the transport), a HELLO to prove it. A radio from before refuses BAUD on Bluetooth and stays at
+   * 9600; if the unlock or the HELLO fails, the radio goes back to 9600 by itself (3 s without a HELLO, or a framing
+   * error) and the HELLO is asked again there. The rate in use.
+   */
+  bleFast(): Promise<number> {
+    const t = this.t;
+    if (!t.unlock) return Promise.resolve(0);
+    const { BAUD, HELLO } = P.msg;
+    return this.exclusive(async () => {
+      const { status } = await this.askRaw(BAUD, baudPayload(115200));
+      if (status !== 0) return 9600;
+      await sleep(150); // the answer has left; the radio switches once its ring is empty
+      this.dropUnlock = true;
+      const unlocked = await t.unlock!().catch(() => false);
+      await sleep(400);
+      this.dropUnlock = false;
+      for (let i = 0; i < 3; i++) {
+        try {
+          await this.askRaw(HELLO, helloPayload(CLIENT_NAME), undefined, false);
+          return unlocked ? 115200 : 9600;
+        } catch {
+          await sleep(500);
+        }
+      }
+      await this.okRaw(HELLO, helloPayload(CLIENT_NAME));
+      return 9600;
+    });
+  }
+
+  /**
+   * LINK-50: one STREAM of `ty`'s request (callers hold `exclusive`): its answers' payloads after the status, in
+   * order. A frame missing throws StreamGap with what came; a refusal throws RadioError.
+   */
+  private async streamRaw(ty: number, payload: Uint8Array): Promise<Uint8Array[]> {
+    if (this.closed) throw new Error("not connected");
+    const seq = this.session.next_seq();
+    const frames: Uint8Array[] = [];
+    const gap = await new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => w.done(true), this.timeout());
+      };
+      const w: StreamWaiter = {
+        seq,
+        frames,
+        done: (g) => {
+          clearTimeout(timer);
+          if (this.streamW === w) this.streamW = null;
+          resolve(g);
+        },
+        poke: arm,
+      };
+      this.streamW = w;
+      arm();
+      void this.t.write(this.session.request(STREAM, new Uint8Array([ty, ...payload]), performance.now()));
+    });
+    this.session.skip(Math.max(frames.length, 1) + 1); // past the frames' seqs, and any still on the way
+    const last = frames[frames.length - 1];
+    if (last && last[0] === 0xff && !gap) throw new RadioError(STREAM, last[1], last.slice(2));
+    if (gap) {
+      await sleep(300); // what's still on its way goes with the gap
+      throw new StreamGap(frames);
+    }
+    return frames;
   }
 
   /** LINK-30: the radio's PIN on Bluetooth while its PIN lock is on. */
@@ -178,6 +288,17 @@ export class Link {
   /** A text answer (UI, CMD), paged with MORE, inside one `exclusive` so nothing else cuts in between pages. */
   text(ty: number, payload: Uint8Array): Promise<string> {
     return this.exclusive(async () => {
+      if (ty === P.msg.UI && this.caps & CAP_STREAM) {
+        // LINK-50: the pages back to back; a lost one asks the whole readback again
+        for (let i = 0; i < 3; i++) {
+          try {
+            const frames = await this.streamRaw(ty, payload);
+            return frames.map((f) => parseTextChunk(f)?.text ?? "").join("");
+          } catch (e) {
+            if (!(e instanceof StreamGap)) throw e;
+          }
+        }
+      }
       let out = "";
       let rest = await this.okRaw(ty, payload);
       for (;;) {
@@ -341,6 +462,62 @@ export class Link {
   }
 
   /**
+   * LINK-41.1: the WRITE_MANY frames from ops[i] on (as long as ops go whole), two in flight: the radio takes the
+   * next from its receive ring as it answers each, so its store never waits for a round trip. Answers come in
+   * order. Anything but `ok` lets what's in flight finish, then goes on one frame at a time from the first op not
+   * applied (a `busy` asked again there, a refusal thrown). The index after the last op written.
+   */
+  private async writeManyWindowed(ops: PlanOp[], i: number, progress: (done: number) => void): Promise<number> {
+    const frames: { at: number; run: number; body: Uint8Array }[] = [];
+    for (let k = i; ; ) {
+      const run = manyRun(ops, k);
+      if (run === 0) break;
+      const recs = ops.slice(k, k + run).map((o) => wholeRecord(o)!);
+      const body = new Uint8Array(1 + recs.reduce((n, r) => n + r.entry.length, 0));
+      body[0] = recs[0].what;
+      let o = 1;
+      for (const r of recs) {
+        body.set(r.entry, o);
+        o += r.entry.length;
+      }
+      frames.push({ at: k, run, body });
+      k += run;
+    }
+    const send = (f: (typeof frames)[number]) => {
+      const seq = this.session.next_seq();
+      const got = new Promise<Answer | null>((resolve) => {
+        this.waiters.set(seq, { ty: P.msg.WRITE_MANY, seq, resolve });
+        setTimeout(() => resolve(null), this.timeout() * 2);
+      });
+      void this.t.write(this.session.request(P.msg.WRITE_MANY, f.body, performance.now()));
+      return { f, got };
+    };
+    const flight: ReturnType<typeof send>[] = [];
+    let k = 0;
+    let stop: { at: number } | null = null;
+    while (k < frames.length || flight.length) {
+      while (!stop && k < frames.length && flight.length < 2) flight.push(send(frames[k++]));
+      const { f, got } = flight.shift()!;
+      const a = await got;
+      if (this.closed) throw new Error("not connected");
+      if (stop) continue; // after a refusal: only draining what's in flight
+      if (!a) throw new TimeoutError(`No answer from the radio in ${((this.timeout() * 2) / 1000).toFixed(0)} s.`);
+      const applied = a.status === 0 ? f.run : a.rest.length ? a.rest[0] : 0;
+      progress(f.at + applied);
+      if (a.status !== 0) stop = { at: f.at + applied };
+    }
+    if (!stop) return frames.length ? frames[frames.length - 1].at + frames[frames.length - 1].run : i;
+    // the rest one frame at a time, from the first op the radio didn't apply (busy asked again, a refusal thrown)
+    let at = stop.at;
+    while (at < frames[frames.length - 1].at + frames[frames.length - 1].run) {
+      const run = manyRun(ops, at);
+      await this.writeMany(ops, at, run, progress);
+      at += run;
+    }
+    return at;
+  }
+
+  /**
    * APRS contacts written (APRS-42, record 6): each a callsign (10 bytes), a name (12) and flags (bit 0 deletes),
    * added or renamed by callsign. Nine to a WRITE_MANY frame; `busy` is sent again; a refusal throws with its reason.
    */
@@ -377,6 +554,41 @@ export class Link {
     return this.exclusive(async () => {
       const out = new Map<number, Uint8Array>();
       let at = first;
+      const take = (a: Uint8Array) => {
+        const d = new DataView(a.buffer, a.byteOffset, a.byteLength);
+        let o = 2;
+        while (o + 3 <= a.length) {
+          const i = d.getUint16(o, true);
+          const n = a[o + 2];
+          out.set(i, a.slice(o + 3, o + 3 + n));
+          o += 3 + n;
+        }
+        return d.getUint16(0, true);
+      };
+      if (this.caps & CAP_STREAM) {
+        // LINK-50: one request, the answers back to back; after a lost frame, again from the last one that came
+        for (let tries = 0; tries < 8 && at < end; tries++) {
+          const p = new Uint8Array(5);
+          const v = new DataView(p.buffer);
+          p[0] = what;
+          v.setUint16(1, at, true);
+          v.setUint16(3, Math.min(end - at, 0xffff), true);
+          let frames: Uint8Array[];
+          let whole = true;
+          try {
+            frames = await this.streamRaw(P.msg.READ_MANY, p);
+          } catch (e) {
+            if (!(e instanceof StreamGap)) throw e;
+            [frames, whole] = [e.got, false];
+          }
+          for (const f of frames) {
+            at = Math.max(at, take(f));
+            progress?.(at);
+          }
+          if (whole) return out;
+        }
+        throw new StreamGap([]);
+      }
       while (at < end) {
         const p = new Uint8Array(5);
         const v = new DataView(p.buffer);
@@ -412,6 +624,22 @@ export class Link {
     return this.exclusive(async () => {
       const stations: Station[] = [];
       let count = 0;
+      if (this.caps & CAP_STREAM) {
+        for (let tries = 0; tries < 6; tries++) {
+          try {
+            for (const f of await this.streamRaw(P.msg.HEARD, new Uint8Array([0]))) {
+              const h = parseHeard(f);
+              if (!h) throw new Error("A HEARD answer didn't parse.");
+              count = h.count;
+              stations.push(...h.stations);
+            }
+            return { count, stations };
+          } catch (e) {
+            if (!(e instanceof StreamGap)) throw e;
+            stations.length = 0;
+          }
+        }
+      }
       for (;;) {
         const h = parseHeard(await this.okRaw(P.msg.HEARD, new Uint8Array([Math.min(stations.length, 255)])));
         if (!h) throw new Error("A HEARD answer didn't parse.");
@@ -427,6 +655,22 @@ export class Link {
     return this.exclusive(async () => {
       const messages: Message[] = [];
       let count = 0;
+      if (this.caps & CAP_STREAM) {
+        for (let tries = 0; tries < 6; tries++) {
+          try {
+            for (const f of await this.streamRaw(P.msg.MSGS, new Uint8Array([0, 0]))) {
+              const m = parseMsgs(f);
+              if (!m) throw new Error("A MSGS answer didn't parse.");
+              count = m.count;
+              messages.push(...m.messages);
+            }
+            return { count, messages };
+          } catch (e) {
+            if (!(e instanceof StreamGap)) throw e;
+            messages.length = 0;
+          }
+        }
+      }
       for (;;) {
         const p = new Uint8Array([messages.length & 0xff, messages.length >> 8]);
         const m = parseMsgs(await this.okRaw(P.msg.MSGS, p));
@@ -465,6 +709,28 @@ export class Link {
       let before = 0xffffffff;
       let next = 0;
       let held = 0;
+      if (this.caps & CAP_STREAM) {
+        // LINK-50: newest first, back to back; after a lost frame, again from below the last record that came
+        for (let tries = 0; tries < 8; tries++) {
+          let frames: Uint8Array[];
+          let whole = true;
+          try {
+            frames = await this.streamRaw(P.msg.LOG_READ, logReadPayload(before));
+          } catch (e) {
+            if (!(e instanceof StreamGap)) throw e;
+            [frames, whole] = [e.got, false];
+          }
+          for (const f of frames) {
+            const p = parseLogPage(f);
+            if (!p) throw new Error("A LOG_READ answer didn't parse.");
+            if (!records.length && before === 0xffffffff) [next, held] = [p.next, p.held];
+            records.push(...p.records);
+            if (p.records.length) before = p.records[p.records.length - 1].seq;
+          }
+          progress?.(records.length);
+          if (whole) return { next, held, records };
+        }
+      }
       for (let pages = 0; pages < 500; pages++) {
         const p = parseLogPage(await this.okRaw(P.msg.LOG_READ, logReadPayload(before)));
         if (!p) throw new Error("A LOG_READ answer didn't parse.");
@@ -492,6 +758,10 @@ export class Link {
           // LINK-41: channel and zone writes go as WRITE_MANY, several to a frame; deletes and the settings record
           // (bigger than a frame) as before.
           const run = manyRun(ops, i);
+          if (run > 0 && this.caps & CAP_WINDOW) {
+            i = await this.writeManyWindowed(ops, i, progress);
+            continue;
+          }
           if (run > 0) {
             await this.writeMany(ops, i, run, progress);
             i += run;

@@ -202,6 +202,11 @@ class Radio {
   private async afterAuth(gen: number) {
     const link = this.link!;
     this.info = await link.info();
+    if (this.t?.unlock) {
+      // LINK-15.1: Bluetooth at 115200 when the radio and its module take it (ferrite decision 285)
+      const rate = await link.bleFast().catch(() => 0);
+      if (rate) this.note = rate > 9600 ? "Bluetooth at 115200" : "Bluetooth at 9600";
+    }
     if (this.t?.setBaud) {
       // LINK-13.3: the cable at 230400, else 115200 (ferrite decision 266).
       try {

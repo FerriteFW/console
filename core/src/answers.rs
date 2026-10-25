@@ -91,6 +91,8 @@ pub struct Hello {
     pub firmware: String,
     /// None before Oct 13, 2026's firmware.
     pub build: Option<Build>,
+    /// LINK-35.2: what the radio does beyond protocol 2 (1 `STREAM`, 2 two `WRITE_MANY` frames in flight); 0 before.
+    pub caps: u8,
 }
 
 impl Hello {
@@ -106,6 +108,7 @@ impl Hello {
             may_go_on: may != 0,
             firmware,
             build: after.first().map(|&b| Build::of(b)),
+            caps: after.get(1).copied().unwrap_or(0),
         })
     }
 }

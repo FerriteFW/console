@@ -1,7 +1,8 @@
 //! The radio's Bluetooth (the BT513 module) through `btleplug`: service FFE0, characteristic FFE1 (notify, write
 //! without response), 20-byte writes 25 ms apart (LINK-25). The radio is picked by the platform's device ID, never
-//! by name (every radio advertises "walkie-talkie"). Only FFE1 is ever written: FF31, the module's own control
-//! characteristic, is never touched, and no AT command is ever sent.
+//! by name (every radio advertises "walkie-talkie"). FFE1 carries the link; FF31, the module's own control
+//! characteristic, takes one write only: the per-connection speed unlock (LINK-15.1, `3F 3F 3F 3F 02` and 15 random
+//! bytes, approved Oct 14, 2026), refused here in any other shape. No AT command is ever sent.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -23,6 +24,12 @@ use crate::Event;
 
 pub const SERVICE: Uuid = uuid_from_u16(0xffe0);
 pub const DATA: Uuid = uuid_from_u16(0xffe1);
+pub const CONTROL: Uuid = uuid_from_u16(0xff31);
+
+/// LINK-15.1: the only FF31 write: `3F 3F 3F 3F`, selector `02` (115200), 15 bytes the caller drew at random.
+pub fn is_unlock(token: &[u8]) -> bool {
+    token.len() == 20 && token[..5] == [0x3F, 0x3F, 0x3F, 0x3F, 0x02]
+}
 /// The name the BT513 advertises (every radio the same).
 pub const RADIO_NAME: &str = "walkie-talkie";
 
@@ -207,6 +214,22 @@ impl BleLink {
         Ok(())
     }
 
+    /// LINK-15.1: the module's speed unlock on FF31, written with response (FF31 ignores a write without). Its
+    /// `!!!!` answer comes on FFE1 like any data; the page drops it.
+    pub async fn unlock(&self, token: &[u8]) -> Result<(), String> {
+        if !is_unlock(token) {
+            return Err("Only the speed unlock is ever written to FF31.".into());
+        }
+        let c = self
+            .p
+            .characteristics()
+            .into_iter()
+            .find(|c| c.service_uuid == SERVICE && c.uuid == CONTROL)
+            .ok_or_else(|| "This radio's Bluetooth has no FF31.".to_string())?;
+        let _held = self.write_lock.lock().await;
+        self.p.write(&c, token, WriteType::WithResponse).await.map_err(|e| format!("Bluetooth write failed: {e}"))
+    }
+
     pub async fn close(self) {
         self.closing.store(true, Ordering::Relaxed);
         let _ = self.p.unsubscribe(&self.ch).await;
@@ -233,6 +256,13 @@ mod tests {
         assert!(is_radio(Some("walkie-talkie"), &[]));
         assert!(!is_radio(Some("AirPods"), &[uuid_from_u16(0x180f)]));
         assert!(!is_radio(None, &[uuid_from_u16(0xff31)]));
+        // LINK-15.1: FF31 takes only the speed unlock
+        let mut t = [0x3Fu8; 20];
+        t[4] = 2;
+        assert!(is_unlock(&t));
+        t[4] = 3;
+        assert!(!is_unlock(&t), "another selector");
+        assert!(!is_unlock(b"AT+BAUD?\r\n"));
     }
 
     #[test]

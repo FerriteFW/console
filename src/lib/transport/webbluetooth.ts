@@ -1,11 +1,12 @@
 // The radio's Bluetooth (the BT513 module) through Chrome's Web Bluetooth: service FFE0, characteristic FFE1 (write
 // without response, notify), 20-byte writes 25 ms apart (ferrite_link.py's BlePort; LINK-25). FF31, the module's
-// own control characteristic, is never asked for, so this page can't touch it.
+// own control characteristic, takes one write only: the speed unlock (LINK-15.1, approved Oct 14, 2026).
 import { P } from "../core";
 import { sleep, type Transport } from "./types";
 
 const SERVICE = 0xffe0;
 const DATA = 0xffe1;
+const CONTROL = 0xff31;
 
 type Characteristic = {
   value: DataView | null;
@@ -40,7 +41,26 @@ export class WebBluetoothTransport implements Transport {
   private constructor(
     private device: Device,
     private ch: Characteristic,
+    private service: { getCharacteristic(c: number): Promise<Characteristic> },
   ) {}
+
+  /**
+   * LINK-15.1: the module's per-connection speed unlock, the only FF31 write: `3F 3F 3F 3F`, selector `02` (115200),
+   * 15 random bytes, written with response (FF31 ignores a write without). Its `!!!!` answer comes on FFE1; Link
+   * drops it.
+   */
+  async unlock(): Promise<boolean> {
+    try {
+      const c = await this.service.getCharacteristic(CONTROL);
+      const token = new Uint8Array(20);
+      token.set([0x3f, 0x3f, 0x3f, 0x3f, 0x02]);
+      crypto.getRandomValues(token.subarray(5));
+      await c.writeValue(token);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   static async request(): Promise<WebBluetoothTransport> {
     const bt = webBluetooth();
@@ -48,8 +68,9 @@ export class WebBluetoothTransport implements Transport {
     // The BT513 advertises FFE0 (as tools/webble does it); the chooser lists it as "walkie-talkie".
     const device = await bt.requestDevice({ filters: [{ services: [SERVICE] }] });
     const server = await device.gatt.connect();
-    const ch = await (await server.getPrimaryService(SERVICE)).getCharacteristic(DATA);
-    const t = new WebBluetoothTransport(device, ch);
+    const service = await server.getPrimaryService(SERVICE);
+    const ch = await service.getCharacteristic(DATA);
+    const t = new WebBluetoothTransport(device, ch, service);
     t.label = `Bluetooth: ${device.name || "radio"}`;
     ch.addEventListener("characteristicvaluechanged", (e) => {
       const v = (e.target as unknown as Characteristic).value;

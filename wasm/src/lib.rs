@@ -39,6 +39,11 @@ impl Session {
         self.0.next_seq()
     }
 
+    /// LINK-50: past a stream's frames' seqs.
+    pub fn skip(&mut self, n: u8) {
+        self.0.skip(n)
+    }
+
     /// A request's wire bytes; its seq is the `next_seq()` read before.
     pub fn request(&mut self, ty: u8, payload: &[u8], now_ms: f64) -> Result<Vec<u8>, JsError> {
         self.0.request(ty, payload, now_ms).map(|r| r.wire).map_err(|_| JsError::new("payload too long"))

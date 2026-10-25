@@ -83,6 +83,11 @@ impl Session {
         self.take_cable(now_ms)
     }
 
+    /// LINK-50: a stream's frames took the seqs after its request's; the next request goes past them.
+    pub fn skip(&mut self, n: u8) {
+        self.seq = self.seq.wrapping_add(n);
+    }
+
     /// The seq the next request takes.
     pub fn next_seq(&self) -> u8 {
         self.seq.wrapping_add(1)
