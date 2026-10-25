@@ -18,7 +18,7 @@
 
   const bar = $derived(ui.bar);
   const title = $derived(ui.screen?.title || (ui.screen?.id === "Home" ? s(bar.call) : ui.screen?.name) || "");
-  const clock = $derived(s(bar.clock) === "-" || !bar.clock ? s(bar.call) : s(bar.clock));
+  const clock = $derived(s(bar.clock) === "-" || !bar.clock ? s(bar.call) : s(bar.clock) + (n(bar.utc) === 1 ? "Z" : ""));
   const battery = $derived(n(bar.battery));
   const dark = $derived(n(ui.state.dark) === 1);
   const cards = $derived(ui.cards);
@@ -39,7 +39,17 @@
     return ui.rows.slice(Math.max(0, start), Math.max(0, start) + fit);
   });
 
-  const otherLines = $derived(ui.other.filter((l) => l.kind !== "state"));
+  // Lines that describe the radio, not something on its screen: `state`, and `audio` (LINK-13: the stream's counters).
+  // Frequency entry (LINK-19.4): the digits, the slot and what they are for; its rows and help come as rows and help.
+  const entry = $derived(ui.other.find((l) => l.kind === "entry") ?? null);
+  const entryParts = $derived.by(() => {
+    const t = entry?.args[0] ?? "";
+    const p = t.indexOf(".");
+    return p >= 0 && t.length > p + 4 ? [t.slice(0, p + 4), t.slice(p + 4)] : [t, ""];
+  });
+  const entryBig = $derived(entryParts[0]);
+  const entrySmall = $derived(entryParts[1]);
+  const otherLines = $derived(ui.other.filter((l) => l.kind !== "state" && l.kind !== "audio" && l.kind !== "entry"));
 
   function lineText(l: UiLine) {
     const kv = Object.entries(l.kv)
@@ -84,7 +94,8 @@
     <span class="icons">
       {#if n(bar.dry)}<span class="tagdry" title="Dry TX on: the PA held at 0">DRY</span>{/if}
       {#if n(bar.lock)}<span title="Keys locked">🔒︎</span>{/if}
-      {#if n(bar.scan)}<span title="Scanning">⟳</span>{/if}
+      {#if n(bar.scan)}<span class="tag" title="Scanning">SCN</span>{/if}
+      {#if n(bar.watch) >= 2}<span class="tag" title="Watch">{n(bar.watch) >= 3 ? "TW" : "DW"}</span>{/if}
       {#if n(bar.inbox)}<span title="Messages">✉{n(bar.inbox) > 1 ? n(bar.inbox) : ""}</span>{/if}
       {#if bar.gps && bar.gps !== "off"}<span class:dim={bar.gps !== "fix"} title="GPS {bar.gps}">⌖</span>{/if}
       {#if n(bar.bt_on)}<span class="bt" class:on={n(bar.bt) === 1} title={n(bar.bt) ? "Bluetooth connected" : "Bluetooth on"}>ᛒ</span>{/if}
@@ -147,7 +158,7 @@
                   <span class="freq2">{big}<small>{small}</small></span><span class="f2 b">{aprsRight(c, false)}</span>
                 {:else}
                   <span class="freq2">{big}<small>{small}</small></span>
-                  {#if n(c.rx)}<span class="f2" style:color="var(--green)">{s(c.s)}</span>{/if}
+                  {#if n(c.hits)}<span class="f2">{n(c.hits)} hits</span>{:else if n(c.rx)}<span class="f2" style:color="var(--green)">{s(c.s)}</span>{/if}
                 {/if}
               </div>
               {#if c.kind === "slot"}
@@ -160,6 +171,12 @@
         {/each}
       </div>
     {:else}
+      {#if entry}
+        <div class="entry">
+          <div class="ehead"><span class="badge on" style:background={slotColour[s(entry.kv.slot)] ?? "var(--blue)"}>{s(entry.kv.slot)}</span><span>{s(entry.kv.what)}</span></div>
+          <div class="edigits">{entryBig}<small>{entrySmall}</small><span class="ecursor"></span></div>
+        </div>
+      {/if}
       {#if rowsShown.length}
         <div class="rows">
           {#each rowsShown as r, i (i)}
@@ -177,6 +194,9 @@
             <div>{lineText(l)}</div>
           {/each}
         </div>
+      {/if}
+      {#if entry && s(entry.kv.note)}
+        <div class="enote">{s(entry.kv.note)}</div>
       {/if}
       {#if ui.help}
         <div class="help">{ui.help.body}</div>
@@ -423,6 +443,42 @@
   .aprs {
     color: var(--text);
     font-size: 11px;
+  }
+  .tag {
+    font: 700 10px/1 var(--mono, monospace);
+    color: var(--blue);
+  }
+  .entry {
+    padding: 4px 8px 6px;
+    border-bottom: 1px solid var(--line);
+  }
+  .ehead {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--sub);
+  }
+  .edigits {
+    font: 700 46px/1.1 "Ferrite Mono Tight", "JetBrains Mono", monospace;
+    margin-top: 10px;
+    display: flex;
+    align-items: baseline;
+  }
+  .edigits small {
+    font-size: 28px;
+  }
+  .ecursor {
+    display: inline-block;
+    width: 16px;
+    height: 4px;
+    background: var(--blue);
+    margin-left: 3px;
+  }
+  .enote {
+    padding: 4px 8px;
+    color: var(--amber);
+    font-size: 12px;
   }
   .aprsrow {
     display: flex;
