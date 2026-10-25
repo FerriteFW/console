@@ -34,6 +34,16 @@
 
   const connected = $derived(radio.phase === "connected");
   const asleep = $derived(connected && Number(radio.ui?.state?.dark) === 1);
+  // LINK-13.4, decision 290: what Listen hears: a slot, the broadcast ("Broadcast · 101.1 · ROCK 101"), or HF mode.
+  const hearing = $derived.by(() => {
+    if (listen.kind === "hf") return "Hearing HF";
+    if (!listen.slot) return "Nothing heard";
+    if (listen.kind !== "bcast") return `Hearing ${listen.slot}`;
+    const card = radio.ui?.cards.find((c) => c.slot === listen.slot);
+    const mhz = card ? String(card.freq ?? "").replace(/0+$/, "").replace(/\.$/, "") : "";
+    const name = String(radio.ui?.bcast?.[listen.slot]?.rds ?? "").trim().slice(0, 24);
+    return ["Broadcast", mhz, name].filter(Boolean).join(" · ");
+  });
   // Narrow windows (a phone): the radio shrinks to fit, the side keys and bezel (~150 px) included.
   // The radio fits the window both ways: drawn at 1.5x it is about 490 x 920 px with the keypad (the screen alone
   // 256 x 336); the sidebar, header and toolbar take about 300 px across and 230 px down.
@@ -124,7 +134,7 @@
     listen.apply();
   });
   const listenTitle = $derived(
-    !connected ? "Connect to listen" : radio.kind !== "cable" ? "Receive audio needs the cable: Bluetooth is too slow for it" : !listen.available ? "This firmware doesn't send receive audio" : listen.on ? "Stop listening" : "Hear what the radio receives, on this computer (8 kHz, while a squelch is open)",
+    !connected ? "Connect to listen" : radio.kind !== "cable" ? "Receive audio needs the cable: Bluetooth is too slow for it" : !listen.available ? "This firmware doesn't send receive audio" : listen.on ? "Stop listening" : "Hear what the radio receives, on this computer (8 kHz: a slot while its squelch is open, else the broadcast or HF)",
   );
 </script>
 
@@ -147,7 +157,7 @@
       {#if listen.on}
         <input type="range" min="0" max="1" step="0.05" bind:value={listen.volume} aria-label="Volume" title="Volume" />
         <label title="Mute this computer (the radio keeps sending)"><input type="checkbox" bind:checked={listen.muted} /> Mute</label>
-        <span class="meta">{listen.slot ? `Hearing ${listen.slot}` : "Nothing heard"}</span>
+        <span class="meta">{hearing}</span>
       {/if}
       {#if listen.error}<span class="meta err">{listen.error}</span>{/if}
     </span>

@@ -50,6 +50,8 @@ class Listen {
   muted = $state(false);
   /** The slot heard in the last block (A, B, C), or "" while nothing is heard. */
   slot = $state("");
+  /** What the last block was (LINK-13.4, decision 290): a slot's receiver, the broadcast on `slot`, or HF mode. */
+  kind = $state<"slot" | "bcast" | "hf">("slot");
   error = $state("");
   private link: Link | null = null;
   private ctx: AudioContext | null = null;
@@ -127,6 +129,7 @@ class Listen {
       return;
     }
     this.slot = p[2] < 3 ? "ABC"[p[2]] : "";
+    this.kind = p[3] & 2 ? "bcast" : p[3] & 4 ? "hf" : "slot";
     this.quietAt = performance.now();
     const s = audioDecode(p);
     const f = new Float32Array(s.length);
