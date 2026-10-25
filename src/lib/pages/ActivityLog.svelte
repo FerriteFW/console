@@ -79,8 +79,8 @@
         <tbody>
           {#each rows as r (r.seq)}
             <tr data-seq={r.seq}>
-              <td class="nowrap" title={ago(r.at, now)}>
-                {when(r.at)}
+              <td class="nowrap" title={r.at === null ? "Stored before a restart, without GPS time: the radio doesn't know when" : ago(r.at, now)}>
+                {r.at === null ? "Before restart" : when(r.at)}
                 {#if r.unread}<span class="tag blue" title="Unread on the radio">new</span>{/if}
               </td>
               <td class="nowrap"><span class="tag">{r.source}</span></td>

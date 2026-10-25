@@ -6,7 +6,7 @@ import { RadioError } from "./link";
 import { radio } from "./radio.svelte";
 
 export type HeardRow = Station & { at: number };
-export type MsgRow = Message & { at: number; id: number };
+export type MsgRow = Message & { at: number | null; id: number };
 export type Thread = { peer: string; last: MsgRow; unread: number; messages: MsgRow[] };
 export type Place = { lat: number; lon: number; from: string };
 
@@ -25,8 +25,18 @@ export function distance(a: { lat: number; lon: number }, b: { lat: number; lon:
 
 export const compass = (deg: number) => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8];
 
-/** "3 min ago", "2 h ago", from a time in ms. */
-export function ago(at: number, now = Date.now()): string {
+/** INBOX-6.1: the radio's `ago_s` for a record whose time it doesn't know (stored before a restart without GPS time). */
+export const AGO_UNKNOWN = 0xffffffff;
+
+/** A record's time in ms from its age at `now`, or null when the radio doesn't know it (INBOX-6.1). */
+export const atOf = (ago_s: number, now: number): number | null => (ago_s === AGO_UNKNOWN ? null : now - ago_s * 1000);
+
+/** For sorting: an unknown time (null) as the oldest. */
+export const atKey = (at: number | null) => at ?? 0;
+
+/** "3 min ago", "2 h ago", from a time in ms; "Before restart" when unknown (INBOX-6.1). */
+export function ago(at: number | null, now = Date.now()): string {
+  if (at === null) return "Before restart";
   const s = Math.max(0, Math.round((now - at) / 1000));
   if (s < 60) return `${s} s ago`;
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
@@ -34,9 +44,11 @@ export function ago(at: number, now = Date.now()): string {
   return `${Math.round(s / 86400)} d ago`;
 }
 
-/** A local date and time, to the second. */
-export const when = (at: number) =>
-  new Date(at).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+/** A local date and time, to the second; "Unknown time" when the radio doesn't know it (INBOX-6.1). */
+export const when = (at: number | null) =>
+  at === null
+    ? "Unknown time"
+    : new Date(at).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 let nextId = 1;
 
@@ -93,7 +105,7 @@ class Aprs {
       this.heardCount = h.count;
       this.stations = h.stations.map((s) => ({ ...s, at: now - s.ago_s * 1000 }));
       const m = await link.msgs();
-      this.messages = m.messages.map((x) => ({ ...x, at: now - x.ago_s * 1000, id: nextId++ }));
+      this.messages = m.messages.map((x) => ({ ...x, at: atOf(x.ago_s, now), id: nextId++ }));
       this.loaded = true;
       this.readAt = now;
       this.events = 0;
@@ -140,7 +152,7 @@ class Aprs {
       this.heardCount = ev.count;
       this.events++;
     } else if (ev.kind === "message") {
-      this.messages = [{ ...ev.message, at: now - ev.message.ago_s * 1000, id: nextId++ }, ...this.messages];
+      this.messages = [{ ...ev.message, at: atOf(ev.message.ago_s, now), id: nextId++ }, ...this.messages];
       this.events++;
     } else if (ev.kind === "message_state") {
       const m = ev.message;
@@ -164,10 +176,10 @@ class Aprs {
     }
     return [...by.entries()]
       .map(([peer, ms]) => {
-        const sorted = [...ms].sort((a, b) => a.at - b.at || b.id - a.id);
+        const sorted = [...ms].sort((a, b) => atKey(a.at) - atKey(b.at) || b.id - a.id);
         return { peer, last: sorted[sorted.length - 1], unread: ms.filter((m) => m.inbound && m.state === "unread").length, messages: sorted };
       })
-      .sort((a, b) => b.last.at - a.last.at);
+      .sort((a, b) => atKey(b.last.at) - atKey(a.last.at));
   }
 
   /**

@@ -102,7 +102,7 @@
         <h2>{open.peer}</h2>
         <ol class="bubbles">
           {#each open.messages as m (m.id)}
-            <li class:out={!m.inbound} class:fresh={now - m.at < 10_000} data-state={m.state}>
+            <li class:out={!m.inbound} class:fresh={m.at !== null && now - m.at < 10_000} data-state={m.state}>
               <div class="text">{m.text}</div>
               <div class="meta">
                 <span title={when(m.at)}>{ago(m.at, now)}</span>

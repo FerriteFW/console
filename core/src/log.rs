@@ -5,6 +5,11 @@ use crate::aprs::Rd;
 use ferrite_core::link::{LOG_FIXED, LOG_POS, LOG_UNREAD};
 use serde::{Deserialize, Serialize};
 
+/// INBOX-6.1: the `ago_s` of a record whose time the radio doesn't know (stored before a restart without GPS
+/// time): `ferrite_app::data::AGO_UNKNOWN`, sent as it is. The page shows "Before restart"; the CSV leaves the time
+/// blank.
+pub const AGO_UNKNOWN: u32 = u32::MAX;
+
 /// The sources a record names (LINK-42).
 pub const SOURCES: [&str; 8] = ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"];
 
@@ -166,7 +171,6 @@ mod tests {
             all.extend(q.records);
         }
         assert_eq!(all.len(), p.held as usize);
-        assert!(all.iter().any(|r| r.lat.is_some()));
         assert!(all.iter().any(|r| r.source == "Pager" && r.detail.starts_with("capcode")));
         let c = csv(&all[..1], &["2026-10-20 12:00".into()]);
         assert!(c.starts_with("time,seq") && c.lines().count() == 2);
@@ -195,5 +199,28 @@ mod tests {
         let c = csv(&[r], &["t".into()]);
         assert!(c.contains("\"Net, \"\"8 pm\"\"\""), "{c}");
         assert!(c.contains("45.50000,-75.25000,1"));
+    }
+
+    /// INBOX-6.1: a record whose time the radio doesn't know comes through as AGO_UNKNOWN, not as an age; its
+    /// position too (the sample log has none since decision 276).
+    #[test]
+    fn unknown_age_passes_through() {
+        let mut p = vec![];
+        p.extend(5u32.to_le_bytes()); // next
+        p.extend(1u16.to_le_bytes()); // held
+        p.push(1); // records
+        p.extend(4u32.to_le_bytes()); // seq
+        p.extend(AGO_UNKNOWN.to_le_bytes());
+        p.extend([0, 2, LOG_POS]); // APRS, slot C, a position
+        p.extend(14_439_000u32.to_le_bytes());
+        p.extend(0u32.to_le_bytes());
+        p.extend([0; 4]); // x, y
+        p.extend(454_000_000i32.to_le_bytes());
+        p.extend((-757_000_000i32).to_le_bytes());
+        p.extend([2, b'V', b'A', 0]); // name "VA", empty text
+        let page = parse_page(&p).unwrap();
+        assert_eq!(page.records[0].ago_s, AGO_UNKNOWN);
+        assert_eq!((page.records[0].lat, page.records[0].lon), (Some(45.4), Some(-75.7)));
+        assert!(csv(&page.records, &["".into()]).lines().nth(1).unwrap().starts_with(",4,APRS"));
     }
 }
