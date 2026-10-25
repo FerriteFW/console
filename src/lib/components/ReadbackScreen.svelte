@@ -49,6 +49,29 @@
   }
 
   const isActive = (c: Kv) => n(c.active) === 1;
+
+  // APRS-17: the APRS card as home draws it (ferrite screens/home.rs `aprs_card`). The right fact: APRS mode's
+  // counts (APRS-17.2: both on the large card, in turn every 5 s on the small one), KISS's port, the beacon's
+  // countdown; the bottom line: the last station, KISS's counts, the beacon's interval; the power at its right.
+  let turn = $state(false);
+  $effect(() => {
+    const t = setInterval(() => (turn = !turn), 5000);
+    return () => clearInterval(t);
+  });
+  function aprsRight(c: Kv, both: boolean) {
+    if (c.holder === "kiss") return s(c.port);
+    if (c.holder === "beacon") return s(c.next);
+    const heard = `${n(c.heard)} heard`;
+    if (c.hour === undefined) return heard; // a radio from before the hourly count
+    const hour = `${n(c.hour)} /hr`;
+    return both ? `${heard} · ${hour}` : turn ? hour : heard;
+  }
+  function aprsLine(c: Kv) {
+    if (c.holder === "kiss") return `Sent ${n(c.sent)} · Heard ${n(c.frames)}`;
+    if (c.holder === "beacon") return s(c.line);
+    return s(c.last) ? `Last ${s(c.last)}` : "Nothing heard yet";
+  }
+  const aprsPower = (c: Kv) => (c.state === "Muted" ? `Muted · ${s(c.power)}` : s(c.power));
   const stateColour = (st: string) =>
     st === "TX" ? "var(--red)" : st.startsWith("RX") || st === "MON" ? "var(--green)" : st === "heard" ? "var(--amber)" : "var(--sub)";
 </script>
@@ -86,8 +109,9 @@
                 {#if st && st !== "idle"}<span class="state" style:color={stateColour(st)}>{st}</span>{/if}
               </div>
               {#if c.kind === "aprs"}
-                <div class="aprs">{s(c.last) || "Nothing heard yet"}</div>
-                <div class="aprs sub">{s(c.beacon)}</div>
+                <div class="freq">{big}<small>{small}</small></div>
+                <div class="aprsrow"><span class="l">{aprsLine(c)}</span><span class="r" class:warn={c.state === "Muted"}>{aprsPower(c)}</span></div>
+                <div class="aprsrow"><span class="l">{s(c.beacon)}</span><span class="r b">{aprsRight(c, true)}</span></div>
               {:else}
                 {#if s(c.name)}<div class="cname">{s(c.name)}</div>{/if}
                 <div class="freq" class:withname={!!s(c.name)}>{big}<small>{small}</small></div>
@@ -102,12 +126,12 @@
                   </div>
                 {/if}
               {/if}
-              <div class="meter">
+              {#if c.kind !== "aprs"}<div class="meter">
                 {#each Array.from({ length: 20 }, (_, i) => i) as i (i)}
                   <span class="seg" class:lit={i < n(c.meter)} class:over={i >= 17 && i < n(c.meter)}></span>
                 {/each}
                 <span class="s">{s(c.s)}</span>
-              </div>
+              </div>{/if}
             </div>
           {:else}
             <div class="card">
@@ -119,6 +143,8 @@
               <div class="line2">
                 {#if s(c.name)}
                   <span class="cname2">{s(c.name)}</span><span class="f2">{s(c.freq).replace(/0+$/, "").replace(/\.$/, ".0")}</span>
+                {:else if c.kind === "aprs"}
+                  <span class="freq2">{big}<small>{small}</small></span><span class="f2 b">{aprsRight(c, false)}</span>
                 {:else}
                   <span class="freq2">{big}<small>{small}</small></span>
                   {#if n(c.rx)}<span class="f2" style:color="var(--green)">{s(c.s)}</span>{/if}
@@ -127,7 +153,7 @@
               {#if c.kind === "slot"}
                 <div class="chips2">{[c.mode, c.tone, c.shift].map(s).filter(Boolean).join(" ")}</div>
               {:else if c.kind === "aprs"}
-                <div class="chips2">{s(c.last)}</div>
+                <div class="aprsrow sm"><span class="l">{aprsLine(c)}</span><span class="r" class:warn={c.state === "Muted"}>{aprsPower(c)}</span></div>
               {/if}
             </div>
           {/if}
@@ -397,6 +423,29 @@
   .aprs {
     color: var(--text);
     font-size: 11px;
+  }
+  .aprsrow {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--sub);
+    margin-top: 3px;
+    white-space: nowrap;
+  }
+  .aprsrow.sm {
+    font-size: 10px;
+  }
+  .aprsrow .l {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .aprsrow .r.warn {
+    color: var(--amber);
+  }
+  .b {
+    font-weight: 700;
+    color: var(--text);
   }
   .aprs.sub {
     color: var(--sub);
