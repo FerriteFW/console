@@ -5,7 +5,7 @@ import { parsePlace, type AprsEvent, type Message, type Station } from "./core";
 import { RadioError } from "./link";
 import { radio } from "./radio.svelte";
 
-export type HeardRow = Station & { at: number };
+export type HeardRow = Station & { at: number | null };
 export type MsgRow = Message & { at: number | null; id: number };
 export type Thread = { peer: string; last: MsgRow; unread: number; messages: MsgRow[] };
 export type Place = { lat: number; lon: number; from: string };
@@ -103,7 +103,7 @@ class Aprs {
       const now = Date.now();
       const h = await link.heard();
       this.heardCount = h.count;
-      this.stations = h.stations.map((s) => ({ ...s, at: now - s.ago_s * 1000 }));
+      this.stations = h.stations.map((s) => ({ ...s, at: atOf(s.ago_s, now) })); // APRS-4: restored rows may have no time
       const m = await link.msgs();
       this.messages = m.messages.map((x) => ({ ...x, at: atOf(x.ago_s, now), id: nextId++ }));
       this.loaded = true;
@@ -147,7 +147,7 @@ class Aprs {
     if (!ev || !this.loaded) return;
     const now = Date.now();
     if (ev.kind === "heard") {
-      const s: HeardRow = { ...ev.station, at: now - ev.station.ago_s * 1000 };
+      const s: HeardRow = { ...ev.station, at: atOf(ev.station.ago_s, now) };
       this.stations = [s, ...this.stations.filter((x) => x.call !== s.call)];
       this.heardCount = ev.count;
       this.events++;

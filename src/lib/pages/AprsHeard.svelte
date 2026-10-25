@@ -68,7 +68,7 @@
         </thead>
         <tbody>
           {#each rows as s (s.call)}
-            <tr data-call={s.call} class:fresh={now - s.at < 10_000}>
+            <tr data-call={s.call} class:fresh={s.at !== null && now - s.at < 10_000}>
               <td class="nowrap">
                 {#if s.lat !== null}<a href={mapHref({ call: s.call })} title="On the map">{s.call}</a>{:else}{s.call}{/if}
                 <a class="msg" href={href("aprs-messages", { to: s.call })} title={`Message ${s.call}`} aria-label={`Message ${s.call}`}>✉</a>
