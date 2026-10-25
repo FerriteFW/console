@@ -33,7 +33,7 @@ pub fn status_text(status: u8, rest: &[u8]) -> String {
 /// `HELLO`'s payload: the protocol version, 8 bytes reserved (zeros), then the client's name.
 pub fn hello_payload(name: &str) -> Vec<u8> {
     let mut p = vec![PROTOCOL];
-    p.extend_from_slice(&[0; 8]);
+    p.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0, 0]); // LINK-51: asks for compression (a radio from before ignores it)
     p.extend_from_slice(name.as_bytes());
     p
 }
@@ -226,7 +226,7 @@ mod tests {
     fn hello_payload_and_answer() {
         let p = hello_payload("Ferrite Console");
         assert_eq!(p[0], 2);
-        assert_eq!(&p[1..9], &[0; 8]);
+        assert_eq!(&p[1..9], &[1, 0, 0, 0, 0, 0, 0, 0], "LINK-51: compression asked for");
         assert_eq!(&p[9..], b"Ferrite Console");
         let mut a = vec![2, 240, 1];
         a.extend(lp("0.1.0-abc"));

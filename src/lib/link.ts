@@ -58,6 +58,8 @@ type StreamWaiter = { seq: number; frames: Uint8Array[]; done: (gap: boolean) =>
 /** LINK-35.2: HELLO's caps bits. */
 export const CAP_STREAM = 1;
 export const CAP_WINDOW = 2;
+export const CAP_LZ = 4;
+export const CAP_DELETE_MANY = 8;
 const STREAM = 0x19;
 const STREAM_MORE = 0x1a;
 
@@ -170,6 +172,11 @@ export class Link {
       this.waiters.delete(seq);
       // A frame sent just after a restart or 10 s of quiet can go to the terminal (TERM-2): a read-only request is
       // sent once more after a 0x00. Never a KEY, CMD, MORE or write: those would act twice or skip a chunk.
+      if (!resynced && this.caps & CAP_LZ && ty !== HELLO) {
+        resynced = true; // LINK-51: the windows may be apart: start them over, then ask again
+        await this.resync();
+        continue;
+      }
       if (!resynced && (ty === HELLO || ty === INFO || ty === UI)) {
         resynced = true;
         await this.t.write(this.session.take_cable(performance.now()));
@@ -199,10 +206,24 @@ export class Link {
   }
 
   async hello(): Promise<Hello> {
-    const h = parseHello(await this.ok(P.msg.HELLO, helloPayload(CLIENT_NAME)));
+    return this.noteHello(await this.ok(P.msg.HELLO, helloPayload(CLIENT_NAME)));
+  }
+
+  /** LINK-35.2, LINK-51: a HELLO answer's caps; compression on from here when it granted it (both windows new). */
+  private noteHello(rest: Uint8Array): Hello {
+    const h = parseHello(rest);
     if (!h) throw new Error("The radio's HELLO answer didn't parse.");
     this.caps = h.caps ?? 0;
+    this.session.set_lz((this.caps & CAP_LZ) !== 0);
     return h;
+  }
+
+  /** LINK-51: after a lost frame while compressed, a HELLO starts both ends' windows over. */
+  private async resync() {
+    if (!(this.caps & CAP_LZ)) return;
+    await sleep(300);
+    const { status, rest } = await this.askRaw(P.msg.HELLO, helloPayload(CLIENT_NAME), undefined, false);
+    if (status === 0) this.noteHello(rest);
   }
 
   /**
@@ -225,13 +246,14 @@ export class Link {
       this.dropUnlock = false;
       for (let i = 0; i < 3; i++) {
         try {
-          await this.askRaw(HELLO, helloPayload(CLIENT_NAME), undefined, false);
+          const { rest } = await this.askRaw(HELLO, helloPayload(CLIENT_NAME), undefined, false);
+          this.noteHello(rest);
           return unlocked ? 115200 : 9600;
         } catch {
           await sleep(500);
         }
       }
-      await this.okRaw(HELLO, helloPayload(CLIENT_NAME));
+      this.noteHello(await this.okRaw(HELLO, helloPayload(CLIENT_NAME)));
       return 9600;
     });
   }
@@ -269,6 +291,7 @@ export class Link {
     if (last && last[0] === 0xff && !gap) throw new RadioError(STREAM, last[1], last.slice(2));
     if (gap) {
       await sleep(300); // what's still on its way goes with the gap
+      await this.resync();
       throw new StreamGap(frames);
     }
     return frames;
@@ -757,6 +780,24 @@ export class Link {
         for (let i = 0; i < ops.length; ) {
           // LINK-41: channel and zone writes go as WRITE_MANY, several to a frame; deletes and the settings record
           // (bigger than a frame) as before.
+          const dels = this.caps & CAP_DELETE_MANY ? deleteRun(ops, i) : 0;
+          if (dels > 0) {
+            // LINK-41.2: channel deletes several to a WRITE_MANY (records of length 0)
+            const body = new Uint8Array(1 + dels * 3);
+            body[0] = 2;
+            for (let k = 0; k < dels; k++) {
+              const p = ops[i + k].payloads[0];
+              body.set([p[1], p[2], 0], 1 + k * 3);
+            }
+            const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+            if (status !== 0) {
+              const done = rest.length ? rest[0] : 0;
+              throw new WriteError(ops[i + done], i + done, new RadioError(P.msg.WRITE_MANY, status, rest.slice(1)));
+            }
+            i += dels;
+            progress(i);
+            continue;
+          }
           const run = manyRun(ops, i);
           if (run > 0 && this.caps & CAP_WINDOW) {
             i = await this.writeManyWindowed(ops, i, progress);
@@ -801,6 +842,7 @@ function wholeRecord(op: PlanOp): { what: number; entry: Uint8Array } | null {
 
 /** How many ops from `i` go in one WRITE_MANY frame (MAX_PAYLOAD 240: the what byte, then index, length, record). */
 function manyRun(ops: PlanOp[], i: number): number {
+  if (i >= ops.length) return 0;
   const first = wholeRecord(ops[i]);
   if (!first) return 0;
   let size = 1;
@@ -809,6 +851,17 @@ function manyRun(ops: PlanOp[], i: number): number {
     const r = wholeRecord(ops[k]);
     if (!r || r.what !== first.what || size + r.entry.length > 240) break;
     size += r.entry.length;
+    n++;
+  }
+  return n;
+}
+
+/** LINK-41.2: how many channel deletes from `i` go in one WRITE_MANY (79 of 3 bytes in 240). */
+function deleteRun(ops: PlanOp[], i: number): number {
+  let n = 0;
+  for (let k = i; k < ops.length && n < 79; k++) {
+    const o = ops[k];
+    if (o.msg !== P.msg.DELETE || o.payloads.length !== 1 || o.payloads[0][0] !== 2) break;
     n++;
   }
   return n;

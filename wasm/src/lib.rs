@@ -44,6 +44,16 @@ impl Session {
         self.0.skip(n)
     }
 
+    /// LINK-51: compression on or off (from a HELLO answer); both windows start over.
+    pub fn set_lz(&mut self, on: bool) {
+        self.0.set_lz(on)
+    }
+
+    /// LINK-51: a frame was lost while compressed: HELLO before asking again.
+    pub fn lz_broken(&self) -> bool {
+        self.0.lz_broken()
+    }
+
     /// A request's wire bytes; its seq is the `next_seq()` read before.
     pub fn request(&mut self, ty: u8, payload: &[u8], now_ms: f64) -> Result<Vec<u8>, JsError> {
         self.0.request(ty, payload, now_ms).map(|r| r.wire).map_err(|_| JsError::new("payload too long"))
