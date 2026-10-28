@@ -45,6 +45,7 @@ npm run e2e:run     # the same without the build
 - On the radio: `FERRITE_E2E_SERIAL=/dev/cu.usbserial-114220 FERRITE_E2E_CHANNEL=999 npm run e2e`.
   The write tests rename that channel and put it back. Keep the backups from `test-results/shots/`.
 - The library's write test is skipped on a radio (it adds 22 channels).
+- The CHIRP import tests (`chirp.spec.ts`) run on a radio too: each adds its own zone, then deletes it and its channels.
 - On the simulator the tests run in parallel: each worker has its own simulator and bridge. The radio runs one at a time.
 - On the Xeon: `npm run e2e:xeon` copies this checkout there, builds and runs it (~16 s of tests). Sync `ferrite/` first.
   `npm run e2e:xeon -- --dir code/rt950pro/other-dir` uses another checkout there (next to `ferrite/`).
@@ -63,7 +64,7 @@ npm run e2e:run     # the same without the build
 - Remote keys: the drawn keypad, the knob, the keyboard. Never PTT.
 - Channels & Zones: read, edit in place, write with a backup and a diff first.
 - Every edit is checked by ferrite's own code. Changed rows amber, new rows green.
-- CHIRP CSV import and export.
+- CHIRP CSV import and export. An import goes in as new channels in a new zone (the default when its numbers clash), by number, or replacing every channel.
 - Backup files: save, load, restore.
 - Add channels: fixed sets (FRS, GMRS, MURS, PMR446, marine, weather, BC resource roads, calling).
 - Add channels: airports near a place (AM, RX only), place typed or from the radio's GPS or fixed position.

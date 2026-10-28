@@ -170,6 +170,9 @@ test.describe.serial("round trip", () => {
     const count = await state(page, (f) => f.channels.table.channels.length);
     await page.locator('input[type=file][accept^=".csv"]').setInputFiles(csv);
     await expect(dialog()).toBeVisible();
+    // Every number clashes, so the dialog offers a new zone first: merge is the round trip.
+    await expect(dialog().getByRole("radio", { name: "Add as new channels in a new zone" })).toBeChecked();
+    await dialog().getByRole("radio", { name: /^Merge by number/ }).check();
     await shot(page, info, "16-chirp-import");
     await dialog().getByRole("button", { name: /^Import \d+$/ }).click();
     await expect(dialog()).toHaveCount(0);

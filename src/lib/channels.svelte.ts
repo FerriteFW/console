@@ -7,6 +7,7 @@ import {
   backupFile,
   chirpExport,
   chirpImport,
+  type ChirpNewZone,
   decodeSet,
   newChannel,
   newZone,
@@ -263,6 +264,17 @@ class Channels {
     }
     this.table.channels = [...byNum.values()].sort((a, b) => a.number - b.number);
     this.source = `${imp.channels.length} channels imported from ${imp.file}${replace ? " (replacing all)" : ""}`;
+    this.notes = imp.notes;
+    this.imported = null;
+  }
+
+  /** The import as new channels in a new zone (the core numbered them: `chirpNewZone`). */
+  applyImportNewZone(nz: ChirpNewZone) {
+    const imp = this.imported;
+    if (!imp || !nz.zone || nz.room || nz.name_error) return;
+    this.table.zones = [...this.table.zones, nz.zone];
+    this.table.channels = [...this.table.channels, ...nz.channels].sort((a, b) => a.number - b.number);
+    this.source = `${nz.channels.length} channels imported from ${imp.file} as ${nz.numbers} in new zone "${nz.zone.name}"`;
     this.notes = imp.notes;
     this.imported = null;
   }

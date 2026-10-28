@@ -1,0 +1,13 @@
+Location,Name,Frequency,Duplex,Offset,Tone,rToneFreq,cToneFreq,DtcsCode,DtcsPolarity,RxDtcsCode,CrossMode,Mode,TStep,Skip,Power,Comment,URCALL,RPT1CALL,RPT2CALL,DVCODE
+1,Vancouver,146.940000,-,0.600000,Tone,127.3,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Vancouver, British Columbia VE7ZZA OPEN (fictional)",,,,
+2,Burnaby,147.360000,+,0.600000,Tone,100.0,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Burnaby, British Columbia VE7ZZB OPEN (fictional)",,,,
+3,North Vancouver,145.130000,-,0.600000,Tone,94.8,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"North Vancouver, British Columbia VE7ZZC OPEN (fictional)",,,,
+4,Coquitlam,146.680000,-,0.600000,TSQL,88.5,156.7,023,NN,023,Tone->Tone,FM,5.00,,50W,"Coquitlam, British Columbia VE7ZZD OPEN (fictional)",,,,
+5,Surrey,147.000000,+,0.600000,Tone,110.9,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Surrey, British Columbia VE7ZZE OPEN (fictional)",,,,
+6,Abbotsford,146.760000,-,0.600000,Tone,103.5,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Abbotsford, British Columbia VE7ZZF OPEN (fictional)",,,,
+7,Squamish,147.080000,+,0.600000,Tone,123.0,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Squamish, British Columbia VE7ZZG OPEN (fictional)",,,,
+8,Vancouver,443.775000,+,5.000000,Tone,156.7,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Vancouver, British Columbia VE7ZZH OPEN (fictional)",,,,
+9,Richmond,442.325000,+,5.000000,DTCS,88.5,88.5,047,NN,047,Tone->Tone,FM,5.00,,50W,"Richmond, British Columbia VE7ZZJ OPEN (fictional)",,,,
+10,Langley,444.900000,+,5.000000,TSQL,88.5,100.0,023,NN,023,Tone->Tone,FM,5.00,,50W,"Langley, British Columbia VE7ZZK OPEN (fictional)",,,,
+11,Maple Ridge,443.050000,+,5.000000,Tone,131.8,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Maple Ridge, British Columbia VE7ZZL OPEN (fictional)",,,,
+12,Chilliwack,442.075000,+,5.000000,Tone,118.8,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Chilliwack, British Columbia VE7ZZM OPEN (fictional)",,,,
