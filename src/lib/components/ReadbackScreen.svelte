@@ -117,7 +117,14 @@
   const aprsPower = (c: Kv) => (c.state === "Muted" ? `Muted · ${s(c.power)}` : s(c.power));
   /** A card's header: who wins C's VHF chip when a watched slot shares it (APRS-17, WATCH-17.3): 1 APRS first,
    *  2 Voice first. */
-  const headText = (c: Kv) => s(c.head) + (n(c.shared) === 1 ? "  VHF: APRS" : n(c.shared) === 2 ? "  VHF: voice" : "");
+  const headText = (c: Kv) => {
+    // the radio's own words for it when it sends them (`aprs_card priority=`, the M3 card: "APRS first", "A·B first")
+    if (c.kind === "aprs" && s(aprsCard?.priority)) return `${s(c.head)}  ${s(aprsCard!.priority)}`;
+    return s(c.head) + (n(c.shared) === 1 ? "  VHF: APRS" : n(c.shared) === 2 ? "  VHF: voice" : "");
+  };
+  /** The APRS card's own line (the M3 card, decision 313): the chip's priority, the unread messages and who sent the
+   *  last, what became of our last beacon, the bottom line. Absent from a radio before it. */
+  const aprsCard = $derived((ui.other.find((l) => l.kind === "aprs_card")?.kv as Kv | undefined) ?? null);
   /** The state word, or the tone hint in its place ("Heard 88.5", TSRCH-13). */
   const stateText = (c: Kv) => s(c.hint) || s(c.state);
   const stateColour = (st: string) =>
@@ -166,7 +173,11 @@
               {#if c.kind === "aprs"}
                 <div class="freq">{big}<small>{small}</small></div>
                 <div class="aprsrow"><span class="l">{aprsLine(c)}</span><span class="r" class:warn={c.state === "Muted"}>{aprsPower(c)}</span></div>
-                <div class="aprsrow"><span class="l">{s(c.beacon)}</span><span class="r b">{aprsRight(c, true)}</span></div>
+                {#if aprsCard && n(aprsCard.unread)}
+                  <div class="aprsrow"><span class="l">{n(aprsCard.unread)} new from {s(aprsCard.from)}</span></div>
+                {/if}
+                {#if aprsCard && s(aprsCard.fate)}<div class="aprsrow"><span class="l">{s(aprsCard.fate)}</span></div>{/if}
+                <div class="aprsrow"><span class="l">{s(aprsCard?.bottom) || s(c.beacon)}</span><span class="r b">{aprsRight(c, true)}</span></div>
               {:else}
                 {#if s(c.name)}<div class="cname">{s(c.name)}</div>{/if}
                 {#if c.kind === "broadcast"}

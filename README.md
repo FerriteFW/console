@@ -70,6 +70,8 @@ npm run e2e:run     # the same without the build
 - Add channels: airports near a place (AM, RX only), place typed or from the radio's GPS or fixed position.
 - Add channels: Canadian licensed sites (TAFL) near a place, grouped by licensee.
 - Radio Settings: every menu setting by its number and name; write with a backup and a diff first.
+- The model is the radio's own menu, found by running ferrite's App; a core test fails when the radio gains a setting Console doesn't show.
+- Settings no record carries (Watch, Battery Save, the message sound, MENU 0 5's symbol, comment, ambiguity, Mic-E, telemetry, TX delay and level): read with the radio's `dump`, written as its `set` lines.
 - Activity Log: the radio's event log with local times, a source filter, CSV export, positions to the map.
 - APRS (Tools): messages by station with compose, heard stations with distances, a map, APRS settings.
 - Heard stations and messages update live while an APRS page is open.

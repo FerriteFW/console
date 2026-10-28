@@ -1,5 +1,6 @@
 // APRS settings through the bridge (LINK-43): the APRS record as MENU 0 5 shows it, a choice changed, a typed value
-// refused with the radio's reason, the write (backup first, the diff, the read back), then the backup restored.
+// refused with the radio's reason, the write (backup first, the diff, the read back), then the backup restored; and
+// MENU 0 5's settings no record carries (telemetry, Mic-E, the comment: the radio's dump and set lines) the same way.
 // On a radio the backup is written back even when a step fails.
 import { type Page } from "@playwright/test";
 import { join } from "node:path";
@@ -28,8 +29,10 @@ async function startWrite() {
   return path;
 }
 
-async function commitWrite(n: number) {
-  await dialog().getByRole("button", { name: `Write ${n} ${n === 1 ? "change" : "changes"}` }).click();
+/** `n` changes written (any number when not given: putting a backup back after a failure). */
+async function commitWrite(n?: number) {
+  const name = n === undefined ? /^Write \d+ changes?$/ : `Write ${n} ${n === 1 ? "change" : "changes"}`;
+  await dialog().getByRole("button", { name }).click();
   await expect(dialog()).toContainText("Read back: the radio holds these APRS settings.", { timeout: long() });
   await dialog().getByRole("button", { name: "Close" }).click();
   await expect(dialog()).toHaveCount(0);
@@ -47,9 +50,9 @@ test.afterAll(async () => {
       if (await dialog().count()) await dialog().getByRole("button", { name: /^(Close|Cancel)$/ }).click();
       await page.locator('input[type=file][accept^=".json"]').setInputFiles(backup);
       await startWrite();
-      await commitWrite(1);
+      await commitWrite();
     } catch (e) {
-      console.error(`couldn't put the APRS power back (${backup}): ${(e as Error).message}`);
+      console.error(`couldn't put the APRS settings back (${backup}): ${(e as Error).message}`);
     }
   }
   await disconnect(page);
@@ -63,6 +66,13 @@ test("read: the APRS record as MENU 0 5 shows it", async ({}, info) => {
   await expect(page.getByLabel(FREQ, { exact: true })).toBeVisible();
   // APRS mode is the settings record's (Radio Settings), not here
   await expect(page.getByLabel("0 5 3 APRS mode", { exact: true })).toHaveCount(0);
+  // MENU 0 5's settings no record carries, read with the radio's dump: here, in menu order.
+  for (const id of ["0 5 5 2 Symbol", "0 5 5 3 Comment", "0 5 6 4 Telemetry"]) await expect(page.getByLabel(id, { exact: true })).toBeEnabled();
+  for (const id of ["0 5 5 6 Ambiguity", "0 5 5 7 Mic-E", "0 5 9 3 TX delay", "0 5 9 4 TX level"])
+    await expect(page.getByRole("group", { name: id, exact: true })).toBeVisible();
+  await expect(page.getByLabel("0 5 6 4 Telemetry", { exact: true }).locator("option")).toHaveText(["Off", "On"]);
+  // the settings record's MENU 0 5 settings, named from the core
+  await expect(page.getByText(/^In Radio Settings \(the settings record\): 0 5 3 APRS mode, .*0 5 9 7 Shared VHF\.$/)).toBeVisible();
   await shot(page, info, "aprs-settings-01-read");
 });
 
@@ -91,4 +101,46 @@ test("write: backup first, the diff, then the read back; the backup restores", a
   await commitWrite(1);
   backup = null;
   expect(await value("0 5 6 3")).not.toBe(after);
+});
+
+test("no record carries them: telemetry, Mic-E and the comment, written as set lines, read back, restored", async ({}, info) => {
+  const was = { tel: await value("0 5 6 4"), mice: await value("0 5 5 7"), comment: await value("0 5 5 3") };
+  const telTo = was.tel === "On" ? "Off" : "On";
+  const comment = page.getByLabel("0 5 5 3 Comment", { exact: true });
+  const commentTo = was.comment === "Ferrite e2e, 73" ? "None" : "Ferrite e2e, 73";
+  await page.getByLabel("0 5 6 4 Telemetry", { exact: true }).selectOption(telTo);
+  const up = was.mice !== "Priority";
+  await page.getByRole("button", { name: `0 5 5 7 Mic-E ${up ? "up" : "down"}` }).click();
+  await expect.poll(() => value("0 5 5 7")).not.toBe(was.mice);
+  const miceTo = await value("0 5 5 7");
+  await comment.fill(commentTo);
+  await comment.press("Enter");
+  await expect.poll(() => value("0 5 5 3")).toBe(commentTo);
+  // a # would end the radio's command line: refused here
+  await comment.fill("no # here");
+  await comment.press("Enter");
+  await expect(page.locator('[data-id="0 5 5 3"] .err')).toBeVisible();
+  expect(await value("0 5 5 3")).toBe(commentTo);
+  for (const id of ["0 5 6 4", "0 5 5 7", "0 5 5 3"]) await expect(page.locator(`[data-id="${id}"]`)).toHaveClass(/changed/);
+  await shot(page, info, "aprs-settings-04-term-changed");
+  backup = await startWrite();
+  const items = dialog().locator("li");
+  await expect(items).toHaveCount(3);
+  await expect(items.filter({ hasText: "0 5 6 4" }).locator("b")).toHaveText(telTo);
+  await expect(items.filter({ hasText: "0 5 5 3" }).locator("b")).toHaveText(commentTo);
+  await expect(dialog()).toContainText("3 go as the radio's own set command");
+  await shot(page, info, "aprs-settings-05-term-diff");
+  await commitWrite(3);
+  // read back from the radio: the record and the dump
+  await page.getByRole("button", { name: "Read from radio" }).click();
+  await expect(page.getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
+  expect([await value("0 5 6 4"), await value("0 5 5 7"), await value("0 5 5 3")]).toEqual([telTo, miceTo, commentTo]);
+  // the backup puts them back
+  await page.locator('input[type=file][accept^=".json"]').setInputFiles(backup);
+  await expect(page.getByText(/^Loaded .*aprs-backup\.json/)).toBeVisible();
+  await startWrite();
+  await commitWrite(3);
+  backup = null;
+  expect([await value("0 5 6 4"), await value("0 5 5 7"), await value("0 5 5 3")]).toEqual([was.tel, was.mice, was.comment]);
+  await shot(page, info, "aprs-settings-06-term-restored");
 });

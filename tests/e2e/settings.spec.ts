@@ -1,6 +1,7 @@
 // Radio Settings through the bridge: read the settings record, change Key beep (a choice) and Beep volume (a level),
 // write them (a backup and the diff first), read back, then restore the backup file (the restore path) and check
-// both are back. On the radio both are put back even when a test fails.
+// both are back. Then Battery Save (no record carries it: the radio's dump, a set line) with Shared VHF the same way.
+// On the radio both are put back even when a test fails.
 import { type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -84,7 +85,14 @@ test("read: the record as the radio's menu shows it", async ({}, info) => {
   const region = page.locator('[data-id="0 9 4"]');
   await expect(region).toContainText("changes only on the radio");
   await expect(region.locator("select, input, button")).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "APRS" })).toContainText("APRS record");
+  // MENU 0 5's other settings are named, pointing at APRS Settings; Shared VHF in the radio's own words.
+  await expect(page.getByRole("region", { name: "APRS" })).toContainText("On APRS Settings");
+  await expect(page.getByRole("region", { name: "APRS" })).toContainText("Telemetry");
+  await expect(page.getByLabel("0 5 9 7 Shared VHF", { exact: true }).locator("option")).toHaveText(["APRS first", "A·B first"]);
+  // In neither record (the terminal's dump and set): Watch, Battery Save, the message sound.
+  await expect(page.getByLabel("0 7 7 1 Battery Save", { exact: true })).toBeEnabled();
+  await expect(page.getByLabel("0 1 1 Watch", { exact: true })).toBeEnabled();
+  await expect(page.getByLabel("0 7 5 5 Message sound", { exact: true })).toBeEnabled();
   const v = await values();
   was = { beep: v["0 7 5 1"], vol: v["0 7 5 2"] };
   expect(["Off", "On"]).toContain(was.beep);
@@ -141,4 +149,38 @@ test("read back: the radio holds both; then the backup restores them", async ({}
   await expect(beep()).toHaveValue(was!.beep);
   await page.getByRole("region", { name: "Display, sound, power" }).scrollIntoViewIfNeeded();
   await shot(page, info, "24-settings-restored");
+});
+
+test("a setting no record carries (Battery Save) with one the record does (Shared VHF): the set line after the write, read back, restored", async ({}, info) => {
+  await readRadio();
+  const v = await values();
+  const bs = page.getByLabel("0 7 7 1 Battery Save", { exact: true });
+  const vhf = page.getByLabel("0 5 9 7 Shared VHF", { exact: true });
+  const bsTo = (await bs.locator("option").allTextContents()).find((o) => o !== v["0 7 7 1"])!;
+  const vhfTo = v["0 5 9 7"] === "APRS first" ? "A·B first" : "APRS first";
+  await bs.selectOption(bsTo);
+  await vhf.selectOption(vhfTo);
+  await expect(page.locator('[data-id="0 7 7 1"]')).toHaveClass(/changed/);
+  await expect(page.locator('[data-id="0 5 9 7"]')).toHaveClass(/changed/);
+  const path = await startWrite();
+  const file = JSON.parse(readFileSync(path, "utf8"));
+  expect(file.extras["0 7 7 1"]).toBe(v["0 7 7 1"]);
+  const items = dialog().locator("li");
+  await expect(items).toHaveCount(2);
+  await expect(items.filter({ hasText: "0 7 7 1" }).locator("b")).toHaveText(bsTo);
+  await expect(items.filter({ hasText: "0 5 9 7" }).locator("b")).toHaveText(vhfTo);
+  await expect(dialog()).toContainText("One goes as the radio's own set command");
+  await shot(page, info, "25-settings-term-diff");
+  backup = path;
+  await commitWrite(2);
+  await readRadio();
+  const after = await values();
+  expect([after["0 7 7 1"], after["0 5 9 7"]]).toEqual([bsTo, vhfTo]);
+  await restore(backup);
+  backup = null;
+  await readRadio();
+  const back = await values();
+  expect([back["0 7 7 1"], back["0 5 9 7"]]).toEqual([v["0 7 7 1"], v["0 5 9 7"]]);
+  await page.getByRole("region", { name: "Display, sound, power" }).scrollIntoViewIfNeeded();
+  await shot(page, info, "26-settings-term-restored");
 });

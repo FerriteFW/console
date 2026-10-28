@@ -12,8 +12,9 @@ type Entry = { name: string; texts: string[]; readback: string; readback_texts?:
 
 const FERRITE = join(import.meta.dirname, "..", "..", "..", "ferrite");
 const CORPUS = join(FERRITE, "target", "liveview", "corpus.json");
-/** Known gaps, screen -> texts: none since the screen as drawn (LINK-19.5, decision 291), so the file is gone and any
- * gap fails. `FERRITE_LIVEVIEW_BASELINE=write` writes one from this run, for a gap to be allowed while it's fixed. */
+/** Known gaps, screen -> texts. `FERRITE_LIVEVIEW_BASELINE=write` writes one from this run, for a gap to be allowed
+ * while it's fixed. One now (Oct 27): Home's structured `card` line carries no scan's last hit, so a scanning small
+ * card's "last 119.500" can't be drawn (the radio's readback, not Console; layout 2 sends the screen as drawn). */
 const BASELINE = join(import.meta.dirname, "liveview-gaps.json");
 
 /** Texts compared without case, spaces or the separators the two draw differently. */

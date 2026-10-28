@@ -23,9 +23,9 @@ test("event log: the radio's records, newest first, by source, to CSV", async ({
   await shot(page, info, "activity-01-all");
 
   if (!onRadio()) {
-    // the simulator's sample log: every source, positions on DSC and AIS
+    // the simulator's sample log (ferrite-app's `sample.rs`): APRS, pager and SAME events
     const sources = new Set(rows.map((r) => r.source));
-    for (const s of ["APRS", "Pager", "SAME", "DSC", "AIS"]) expect(sources).toContain(s);
+    for (const s of ["APRS", "Pager", "SAME"]) expect(sources).toContain(s);
     await page.getByLabel("Source").selectOption("Pager");
     const pager = rows.filter((r) => r.source === "Pager").length;
     await expect(events(page)).toHaveCount(pager);
