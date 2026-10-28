@@ -1,6 +1,6 @@
 # Ferrite Console
 
-The companion app for Ferrite on the Radtel RT-950 Pro: live view, remote keys, channel programming.
+The companion app for Ferrite on the [Radtel RT-950 Pro](https://www.radtels.com/products/radtel-rt-950-pro-27mhz-tx-rx-10w-walkie-talkie-am-fm-usb-lsb-cw-receive-gps-aprs-wireless-bluetooth-phone-programming-noaa-two-way-radio?ref=FERRITEFW&variant=44669996794064) (affiliate link: buying through it supports Ferrite, at no extra cost to you): live view, remote keys, channel programming.
 [PolyForm Noncommercial 1.0.0](LICENSE.md), copyright 2026 Alex Harvey: free for any noncommercial use.
 
 ## Layout
