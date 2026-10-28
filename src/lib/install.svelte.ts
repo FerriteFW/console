@@ -10,7 +10,7 @@
 //      backup or over a pending phone update.
 //   Back to stock: the backup written into Ferrite's own ranges over the link (STOCK_RESTORE, never calibration or
 //   the update area: core/src/install.rs), then the stock .BTF through the bootloader.
-import { ACK, BootPort, bootRate, CMD_PROBE, sendAll } from "./bootflash";
+import { ACK, askRestart, BootPort, bootRate, CMD_PROBE, sendAll } from "./bootflash";
 import {
   backupCheck,
   backupName,
@@ -27,7 +27,6 @@ import {
   RestorePlan,
   restoreIdCheck,
   restoreStart,
-  Session,
   sha256Hex,
   ssbDescribe,
   ssbExtract,
@@ -469,20 +468,9 @@ class Install {
     throw new Error("No answer from the bootloader. Turn the radio off, hold the two lower side keys, turn it on, then start this step again.");
   }
 
-  /** Ferrite's REBOOT (LINK-24) and the reader's `reboot`; stock ignores both. */
+  /** Ferrite's REBOOT (LINK-24) and the reader's `reboot` (bootflash.ts); stock ignores both. */
   private async askRestart(t: Transport) {
-    const s = new Session();
-    try {
-      // As Link.open: Ctrl-C closes Ferrite's terminal if it holds the cable (TERM-2), then 0x00 takes it.
-      await t.write(Session.opening());
-      await sleep(P.timing.open_settle_ms);
-      await t.write(s.take_cable(performance.now()));
-      await t.write(s.request(P.msg.REBOOT, new Uint8Array(), performance.now()));
-    } finally {
-      s.free();
-    }
-    await sleep(100);
-    await t.write(enc("\r\nreboot\r\n"));
+    await askRestart(t);
   }
 
   /** `ask`: restart the radio first (false: it is restarting by itself, as after the restore's FINISH). */

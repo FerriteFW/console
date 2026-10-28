@@ -1,7 +1,7 @@
 // The stock bootloader's side of the cable, shared by Firmware Update and the Install page: its replies matched by
 // command, the probes that catch it, and a whole image sent as flash.py sends it (hello, model, count, every 1 KB
 // block, end). The frames come from the Rust core (core/src/firmware.rs, core/src/install.rs).
-import { BootReader, bootProbe, bootResultText, P, type BootStep, type FirmwareUpdate } from "./core";
+import { BootReader, bootProbe, bootResultText, P, Session, type BootStep, type FirmwareUpdate } from "./core";
 import { sleep, type Transport } from "./transport/types";
 
 export const CMD_PROBE = 0x42;
@@ -101,4 +101,22 @@ export async function sendAll(port: BootPort, update: FirmwareUpdate, progress: 
 /** The bootloader talks at 115200 whatever the link had raised the cable to (LINK-11). */
 export async function bootRate(t: Transport) {
   if (t.setBaud && t.baud !== P.timing.cable_baud) await t.setBaud(P.timing.cable_baud);
+}
+
+/** Ferrite's REBOOT (LINK-24) and the reader's `reboot`, sent without waiting for an answer; stock ignores both. As
+ * Link.open: Ctrl-C closes Ferrite's terminal if it holds the cable (TERM-2), then 0x00 takes it. Sent again while
+ * probing: a radio that restarted past its bootloader's 200 ms window (the port was still changing speed) is back
+ * in Ferrite and asked again. */
+export async function askRestart(t: Transport) {
+  const s = new Session();
+  try {
+    await t.write(Session.opening());
+    await sleep(P.timing.open_settle_ms);
+    await t.write(s.take_cable(performance.now()));
+    await t.write(s.request(P.msg.REBOOT, new Uint8Array(), performance.now()));
+  } finally {
+    s.free();
+  }
+  await sleep(100);
+  await t.write(new TextEncoder().encode("\r\nreboot\r\n"));
 }

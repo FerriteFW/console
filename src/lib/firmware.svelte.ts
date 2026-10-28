@@ -3,7 +3,7 @@
 // then hello, model, count, every 1 KB block and end; then the radio restarts and Console connects again.
 // The frames come from the Rust core (core/src/firmware.rs), only from a file its checks passed: the bootloader
 // only ever gets the image's own blocks.
-import { BootPort } from "./bootflash";
+import { askRestart, BootPort } from "./bootflash";
 import {
   FirmwareUpdate,
   P,
@@ -223,7 +223,7 @@ class Firmware {
         this.message = rebooted
           ? "Waiting for the bootloader…"
           : "Waiting for the bootloader… (if nothing comes, turn the radio off and on while Console waits)";
-        if ((await this.probe(port, BOOT_WAIT_MS)) === null) {
+        if ((await this.probe(port, BOOT_WAIT_MS, rebooted)) === null) {
           this.canResume = true;
           throw new Error(
             `No answer from the bootloader in ${BOOT_WAIT_MS / 1000} s. Turn the radio off, press Resume, then turn it on while Console waits.`,
@@ -273,12 +273,21 @@ class Firmware {
    * flash.py's enter_bootloader without the stock nudge: probes until one is answered, 06 in the power-on window or
    * E5 once inside update mode. The answer, or null.
    */
-  private async probe(port: BootPort, ms: number): Promise<number | null> {
+  private async probe(port: BootPort, ms: number, reask = false): Promise<number | null> {
     const probe = bootProbe();
-    const end = performance.now() + ms;
+    const t0 = performance.now();
+    const end = t0 + ms;
+    let asked = 1;
     port.clear();
     while (performance.now() < end) {
       this.held();
+      // As Install: the first REBOOT often restarts the radio while the port still changes speed, past the
+      // bootloader's 200 ms window, so Ferrite is back; asked again (at the bootloader's rate) a few times.
+      if (reask && asked < 4 && performance.now() - t0 > asked * 3000) {
+        asked++;
+        await askRestart(port.t);
+        port.clear();
+      }
       await port.t.write(probe);
       const r = await port.next(CMD_PROBE, PROBE_GAP_MS);
       if (r !== null) {
