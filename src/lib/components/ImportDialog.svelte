@@ -1,10 +1,35 @@
 <script lang="ts">
-  // A CHIRP CSV file read by the core, for review before it goes into the table.
+  // A CHIRP CSV file read by the core, for review before it goes into the table. Three ways in: as new channels in a
+  // new zone (the default when the file's numbers clash with the table's: a RepeaterBook or CHIRP export numbers from
+  // 0 or 1), merged by number, or replacing every channel.
   import { channels } from "../channels.svelte";
+  import { chirpNewZone, chirpZoneName } from "../core";
 
-  let replace = $state(false);
+  type How = "zone" | "merge" | "replace";
+  let how = $state<How>("merge");
+  let zoneName = $state("");
   const imp = $derived(channels.imported);
   const clashes = $derived(imp ? imp.channels.filter((c) => channels.table.channels.some((t) => t.number === c.number)).length : 0);
+  const nz = $derived(imp ? chirpNewZone($state.snapshot(imp.channels), $state.snapshot(channels.table), zoneName) : null);
+  const byComment = $derived(imp ? imp.channels.filter((c) => c.zone !== null).length : 0);
+  const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+  // A new file: its zone name, and the default way in.
+  let seen: object | null = null;
+  $effect(() => {
+    if (!imp || imp === seen) return;
+    seen = imp;
+    zoneName = chirpZoneName(imp.file, $state.snapshot(channels.table.zones));
+    const room = !chirpNewZone($state.snapshot(imp.channels), $state.snapshot(channels.table), zoneName).room;
+    how = clashes && room ? "zone" : "merge";
+  });
+
+  function apply() {
+    if (how === "zone") {
+      if (nz) channels.applyImportNewZone(nz);
+    } else channels.applyImport(how === "replace");
+  }
+  const blocked = $derived(!imp?.channels.length || (how === "zone" && (!nz || !!nz.room || !!nz.name_error)));
 </script>
 
 {#if imp}
@@ -17,12 +42,31 @@
           {#each imp.notes as n, i (i)}<li>{n}</li>{/each}
         </ul>
       {/if}
-      <label class="opt"><input type="radio" name="how" checked={!replace} onchange={() => (replace = false)} /> Merge by number: {clashes} of the table's channels replaced, the rest kept</label>
-      <label class="opt"><input type="radio" name="how" checked={replace} onchange={() => (replace = true)} /> Replace every channel in the table</label>
+      <label class="opt"
+        ><input type="radio" name="how" value="zone" checked={how === "zone"} disabled={!nz || !!nz.room} onchange={() => (how = "zone")} /> Add as new channels in a new zone</label
+      >
+      <div class="more" class:off={how !== "zone"}>
+        {#if nz?.room}
+          <p class="why">Not possible: {nz.room}.</p>
+        {:else if nz}
+          <label class="zn">New zone name <input bind:value={zoneName} maxlength="16" aria-label="New zone name" disabled={how !== "zone"} /></label>
+          {#if nz.name_error}
+            <p class="why">{nz.name_error[0].toUpperCase() + nz.name_error.slice(1)}.</p>
+          {:else}
+            <p class="plan">Add {plural(nz.channels.length, "channel")} as {nz.numbers} in a new zone '{zoneName.trim()}'.</p>
+          {/if}
+          <p class="sub">
+            The file's order is kept, at free numbers (after the table's highest when they fit). A Comment naming a zone is ignored: every channel goes in
+            the new zone{#if byComment} ({byComment} named one){/if}.
+          </p>
+        {/if}
+      </div>
+      <label class="opt"><input type="radio" name="how" value="merge" checked={how === "merge"} onchange={() => (how = "merge")} /> Merge by number: {clashes} of the table's channels replaced, the rest kept</label>
+      <label class="opt"><input type="radio" name="how" value="replace" checked={how === "replace"} onchange={() => (how = "replace")} /> Replace every channel in the table</label>
       <p class="sub">Only the table changes. Write to the radio shows the diff before anything is sent.</p>
       <div class="actions">
         <button class="btn" onclick={() => (channels.imported = null)}>Cancel</button>
-        <button class="btn primary" disabled={!imp.channels.length} onclick={() => channels.applyImport(replace)}>Import {imp.channels.length}</button>
+        <button class="btn primary" disabled={blocked} onclick={apply}>Import {imp.channels.length}</button>
       </div>
     </div>
   </div>
@@ -65,6 +109,35 @@
     gap: 8px;
     align-items: center;
     margin-bottom: 6px;
+  }
+  .more {
+    margin: 0 0 10px 26px;
+  }
+  .more.off {
+    opacity: 0.6;
+  }
+  .more p {
+    margin: 4px 0;
+  }
+  .zn {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .zn input {
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 3px 6px;
+    width: 18ch;
+  }
+  .plan {
+    font-weight: 600;
+  }
+  .why {
+    color: var(--amber);
   }
   .sub {
     color: var(--sub);

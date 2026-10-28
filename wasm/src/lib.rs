@@ -301,6 +301,22 @@ pub fn chirp_import(text: &str, zones: &str) -> Result<String, JsError> {
     chirp::import(text, &z).map(|i| json(&i)).map_err(|e| JsError::new(&e))
 }
 
+/// Imported channels (JSON) into a new zone named `name` at free numbers of the table (JSON `Set`): `{channels,
+/// zone, numbers, room, name_error}` (`chirp::into_new_zone`).
+#[wasm_bindgen]
+pub fn chirp_new_zone(channels: &str, table: &str, name: &str) -> Result<String, JsError> {
+    let c: Vec<channels::ChanView> = from_json(channels, "channels")?;
+    let t: plan::Set = from_json(table, "table")?;
+    Ok(json(&chirp::into_new_zone(&c, &t, name)))
+}
+
+/// A new zone's name from the file's name, unique among `zones` (JSON).
+#[wasm_bindgen]
+pub fn chirp_zone_name(file: &str, zones: &str) -> Result<String, JsError> {
+    let z: Vec<channels::ZoneView> = from_json(zones, "zones")?;
+    Ok(chirp::zone_name_for(file, &z))
+}
+
 /// Reads one record part by part (`records::Reader`): send `next_payload()` as a `READ` and `take` the answer's
 /// rest until `done()`.
 #[wasm_bindgen]

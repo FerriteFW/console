@@ -11,8 +11,14 @@
 //! - Skip `S` is skip, `P` priority. Power is High, Mid or Low (a watt figure: 4 W and up High, 1.5 W up Mid).
 //! - Comment carries the zone's name: exported, and on import a Comment that names a zone puts the channel in it.
 //! - Modes FM, NFM, AM, USB, LSB, CW; others (WFM, DV, DMR ...) are skipped with a note.
+//!
+//! An import goes into the table one of three ways (the dialog picks): merge by number, replace every channel, or
+//! [`into_new_zone`]: the file's channels, in their order, at free numbers in a new zone (a RepeaterBook or CHIRP
+//! export numbers from 0 or 1, so merging it would overwrite the owner's first channels).
 
 use crate::channels::{mhz_text, parse_mhz, ChanView, ZoneView};
+use crate::plan::Set;
+use crate::radioside::MAX_ZONES;
 use ferrite_app::chan::MAX_CHANNELS;
 use ferrite_app::slot::{DCS_FLAG, DCS_INV, MODES, STEPS};
 use serde::Serialize;
@@ -371,6 +377,104 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
     Ok(out)
 }
 
+/// A new zone's name from the file's name: without the extension, `_` as spaces, the name set (CHAN-31), 16
+/// characters; with " 2", " 3" ... when the table has a zone of that name.
+pub fn zone_name_for(file: &str, zones: &[ZoneView]) -> String {
+    let stem = file.rsplit(['/', '\\']).next().unwrap_or(file);
+    let stem = stem.rsplit_once('.').map_or(stem, |(s, _)| s).replace('_', " ");
+    let mut base = crate::library::clean_name(stem.trim());
+    if base.is_empty() {
+        base = "Import".into();
+    }
+    let taken = |n: &str| zones.iter().any(|z| z.name.trim_end().eq_ignore_ascii_case(n));
+    if !taken(&base) {
+        return base;
+    }
+    for k in 2..=MAX_ZONES + 1 {
+        let sfx = format!(" {k}");
+        let cut: String = base.chars().take(16 - sfx.len()).collect();
+        let name = format!("{}{sfx}", cut.trim_end());
+        if !taken(&name) {
+            return name;
+        }
+    }
+    base
+}
+
+/// Numbers as ranges: "501-534", "12-20, 40, 990-1000".
+pub fn ranges(nums: &[u16]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < nums.len() {
+        let mut j = i;
+        while j + 1 < nums.len() && nums[j + 1] == nums[j] + 1 {
+            j += 1;
+        }
+        out.push(if i == j { nums[i].to_string() } else { format!("{}-{}", nums[i], nums[j]) });
+        i = j + 1;
+    }
+    out.join(", ")
+}
+
+/// What [`into_new_zone`] gives: the channels renumbered into the new zone, the zone, their numbers as ranges, and
+/// why it can't be done: `room` (not enough free numbers or no zone left: the option is off) or `name_error` (the
+/// name as typed: fix it).
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct NewZone {
+    pub channels: Vec<ChanView>,
+    pub zone: Option<ZoneView>,
+    pub numbers: String,
+    pub room: String,
+    pub name_error: String,
+}
+
+/// The imported channels, in their order, at free numbers in a new zone named `name` at the end of the table's.
+/// Numbers: the run right after the table's highest channel when it fits below 1000; else the first free run that
+/// holds them all; else the free numbers from 1 up. A Comment that named a zone is ignored: every channel goes in
+/// the new zone.
+pub fn into_new_zone(channels: &[ChanView], table: &Set, name: &str) -> NewZone {
+    let mut out = NewZone::default();
+    let n = channels.len();
+    let used: std::collections::BTreeSet<u16> = table.channels.iter().map(|c| c.number).collect();
+    let free: Vec<u16> = (1..=MAX_CHANNELS).filter(|k| !used.contains(k)).collect();
+    if table.zones.len() >= MAX_ZONES {
+        out.room = format!("the table has {MAX_ZONES} zones, the most the radio holds");
+        return out;
+    }
+    if free.len() < n {
+        out.room = format!("{n} channels, but only {} channel numbers are free", free.len());
+        return out;
+    }
+    if n == 0 {
+        out.room = "no channels to add".into();
+        return out;
+    }
+    let fits = |s: u16| (s as usize + n - 1) <= MAX_CHANNELS as usize && (s..s + n as u16).all(|k| !used.contains(&k));
+    let after = used.iter().next_back().map_or(1, |h| h + 1);
+    let nums: Vec<u16> = if fits(after) {
+        (after..after + n as u16).collect()
+    } else if let Some(s) = (1..=MAX_CHANNELS).find(|&s| fits(s)) {
+        (s..s + n as u16).collect()
+    } else {
+        free[..n].to_vec()
+    };
+    out.numbers = ranges(&nums);
+    // As the zone table takes a name: printable ASCII, 16 characters.
+    let clean = crate::library::clean_zone_name(name.trim());
+    if clean.is_empty() {
+        out.name_error = "the new zone needs a name".into();
+    } else if clean != name.trim() {
+        out.name_error = "a zone name is 1 to 16 printable ASCII characters".into();
+    } else if table.zones.iter().any(|z| z.name.trim_end().eq_ignore_ascii_case(&clean)) {
+        out.name_error = format!("the table has a zone named {clean:?}");
+    }
+    let index = table.zones.len() as u8;
+    out.zone = Some(ZoneView::new(index + 1, &clean));
+    out.channels =
+        channels.iter().zip(&nums).map(|(c, &k)| ChanView { number: k, zone: Some(index), ..c.clone() }).collect();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,5 +572,111 @@ mod tests {
         let rows = parse_csv("a,\"b,c\",\"say \"\"hi\"\"\"\r\n\r\n1,2,3");
         assert_eq!(rows, vec![vec!["a", "b,c", "say \"hi\""], vec!["1", "2", "3"]]);
         assert!(import("Name,Other\r\nx,y", &[]).is_err());
+    }
+
+    const RADIO: &str = include_str!("../../tests/e2e/fixtures/chirp-radio-export.csv");
+    const REPEATERBOOK: &str = include_str!("../../tests/e2e/fixtures/repeaterbook-bc.csv");
+
+    /// A CHIRP "Export to CSV" from a radio (tests/e2e/fixtures/chirp-radio-export.csv): Location from 0, every
+    /// column, power in watts; the WFM and DV rows skipped with their notes.
+    #[test]
+    fn chirp_radio_export() {
+        let i = import(RADIO, &zones()).unwrap();
+        assert_eq!((i.channels.len(), i.skipped), (10, 2), "{:?}", i.notes);
+        assert_eq!(i.notes.len(), 2);
+        assert!(i.notes[0].starts_with("line 10: mode WFM") && i.notes[0].ends_with("skipped"), "{:?}", i.notes);
+        assert!(i.notes[1].starts_with("line 11: mode DV") && i.notes[1].ends_with("skipped"), "{:?}", i.notes);
+        let nums: Vec<u16> = i.channels.iter().map(|c| c.number).collect();
+        assert_eq!(nums, [1, 2, 3, 4, 5, 6, 7, 8, 11, 12]);
+        let by = |n: &str| i.channels.iter().find(|c| c.name == n).unwrap();
+        let t =
+            |c: &ChanView| (c.duplex.clone(), c.offset.clone(), c.tx_tone.clone(), c.rx_tone.clone(), c.mode.clone());
+        let s = |a: &str, b: &str, c: &str, d: &str, e: &str| (a.into(), b.into(), c.into(), d.into(), e.into());
+        assert_eq!(t(by("CALL 2M")), s("", "", "off", "off", "FM"));
+        assert_eq!(t(by("NSHORE")), s("-", "0.60000", "127.3", "off", "FM"));
+        assert_eq!(t(by("BURNABY")), s("+", "0.60000", "100.0", "100.0", "FM"));
+        assert_eq!(t(by("DCS RPT")), s("+", "5.00000", "D023N", "D023N", "FM"));
+        assert_eq!(t(by("DCS REV")), s("+", "5.00000", "D754I", "D754N", "NFM"));
+        assert_eq!(t(by("SAT UP")), s("split", "437.80000", "off", "off", "FM"));
+        assert!(by("WX VAN").rx_only && by("WX VAN").skip);
+        assert!(by("SURREY").skip && by("SAT UP").skip && !by("NSHORE").skip);
+        let p: Vec<&str> = ["CALL 2M", "SURREY", "WX VAN"].iter().map(|n| by(n).power.as_str()).collect();
+        assert_eq!(p, ["High", "Low", "Low"]); // 5.0W, 1.0W, 0.5W
+        assert!(i.channels.iter().all(|c| c.zone.is_none()));
+    }
+
+    /// RepeaterBook's CHIRP download (tests/e2e/fixtures/repeaterbook-bc.csv: invented southern BC repeaters,
+    /// fictional callsigns): Location from 1, a city in Comment that names no zone.
+    #[test]
+    fn repeaterbook_export() {
+        let i = import(REPEATERBOOK, &zones()).unwrap();
+        assert_eq!((i.channels.len(), i.skipped, i.notes.len()), (12, 0, 0), "{:?}", i.notes);
+        assert_eq!(i.channels.iter().map(|c| c.number).collect::<Vec<_>>(), (1..=12).collect::<Vec<u16>>());
+        let c = &i.channels;
+        assert_eq!(
+            (c[0].name.as_str(), c[0].rx.as_str(), c[0].duplex.as_str(), c[0].tx_tone.as_str()),
+            ("Vancouver", "146.94000", "-", "127.3")
+        );
+        assert_eq!((c[3].tx_tone.as_str(), c[3].rx_tone.as_str()), ("156.7", "156.7")); // TSQL
+        assert_eq!((c[8].tx_tone.as_str(), c[8].rx_tone.as_str()), ("D047N", "D047N")); // DTCS
+        assert_eq!((c[7].offset.as_str(), c[7].duplex.as_str()), ("5.00000", "+"));
+        assert_eq!(c.iter().filter(|c| c.rx.starts_with("14")).count(), 7);
+        assert!(c.iter().all(|c| c.power == "High" && c.mode == "FM" && c.zone.is_none()));
+    }
+
+    fn table(numbers: impl IntoIterator<Item = u16>, zones: &[&str]) -> Set {
+        Set {
+            zones: zones.iter().enumerate().map(|(i, z)| ZoneView::new(i as u8 + 1, z)).collect(),
+            channels: numbers.into_iter().map(|n| ChanView::new(n, 14_652_000)).collect(),
+        }
+    }
+
+    /// Into a new zone: after the highest number, keeping the file's order; a Comment's zone ignored.
+    #[test]
+    fn new_zone_numbers() {
+        let i = import(FILE, &zones()).unwrap();
+        assert!(i.channels.iter().any(|c| c.zone == Some(1))); // "Repeaters" by Comment
+        let t = table([1, 2, 3, 500], &["Local", "Repeaters"]);
+        let z = into_new_zone(&i.channels, &t, "My file");
+        assert_eq!((z.room.as_str(), z.name_error.as_str(), z.numbers.as_str()), ("", "", "501-508"));
+        assert_eq!(z.zone.as_ref().map(|z| (z.number, z.name.as_str())), Some((3, "My file")));
+        assert!(z.channels.iter().all(|c| c.zone == Some(2)));
+        let names: Vec<&str> = z.channels.iter().map(|c| c.name.as_str()).collect();
+        let want: Vec<&str> = i.channels.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, want);
+        for c in &z.channels {
+            assert_eq!(crate::plan::check_channel(c, 3), None);
+        }
+        // No room after 995: the first free run that holds 8.
+        let t = table((1..=5).chain([995]), &[]);
+        assert_eq!(into_new_zone(&i.channels, &t, "x").numbers, "6-13");
+        // No run of 8: the free numbers from 1.
+        let t = table((1..=1000).filter(|n| n % 4 != 0), &[]);
+        assert_eq!(into_new_zone(&i.channels, &t, "x").numbers, "4, 8, 12, 16, 20, 24, 28, 32");
+        // Too few free numbers, or no zone left: the option is off.
+        let t = table(1..=995, &[]);
+        assert_eq!(into_new_zone(&i.channels, &t, "x").room, "8 channels, but only 5 channel numbers are free");
+        let full: Vec<String> = (1..=254).map(|k| format!("Z{k}")).collect();
+        let t = table([1], &full.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        assert!(into_new_zone(&i.channels, &t, "x").room.contains("254 zones"));
+        // The name: needed, printable, 16 characters, not one the table has.
+        let t = table([1], &["Local"]);
+        assert_eq!(into_new_zone(&i.channels, &t, " ").name_error, "the new zone needs a name");
+        assert!(!into_new_zone(&i.channels, &t, "local").name_error.is_empty());
+        assert!(!into_new_zone(&i.channels, &t, "Seventeen chars!!").name_error.is_empty());
+        assert!(into_new_zone(&i.channels, &t, "Exactly 16 chars").name_error.is_empty());
+    }
+
+    #[test]
+    fn new_zone_names() {
+        let z = [ZoneView::new(1, "Repeaters"), ZoneView::new(2, "Repeaters 2")];
+        assert_eq!(zone_name_for("repeaterbook_bc.csv", &[]), "repeaterbook bc");
+        assert_eq!(zone_name_for("C:\\Users\\me\\repeaters.csv", &z), "repeaters 3");
+        assert_eq!(zone_name_for("RepeaterBook BC.csv", &[ZoneView::new(1, "RepeaterBook BC")]), "RepeaterBook B 2");
+        assert_eq!(zone_name_for("A much longer file name.csv", &[]), "A much longer fi");
+        assert_eq!(zone_name_for("A much longer fi.csv", &[ZoneView::new(1, "A much longer fi")]), "A much longer 2");
+        assert_eq!(zone_name_for("Café, BC.csv", &[]), "Caf-- BC");
+        assert_eq!(zone_name_for(".csv", &[]), "Import");
+        assert_eq!(ranges(&[1, 2, 3, 7, 9, 10]), "1-3, 7, 9-10");
     }
 }
