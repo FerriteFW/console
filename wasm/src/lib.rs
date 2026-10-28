@@ -385,24 +385,33 @@ pub fn tafl_groups(names: &str) -> Result<String, JsError> {
 // Radio Settings: the settings record (bytes) as the radio's menu shows it, changed and checked by ferrite's own
 // App and link session (`ferrite_console_core::settings`).
 
-/// The record as the menu shows it (`settings::View` as JSON).
-#[wasm_bindgen]
-pub fn settings_view(record: &[u8]) -> String {
-    json(&settings::view(record))
+/// The settings no record carries, from JSON `{id: value}` (`settings::Extras`; empty text for none).
+fn extras(ex: &str) -> Result<settings::Extras, JsError> {
+    if ex.is_empty() {
+        return Ok(settings::Extras::new());
+    }
+    from_json(ex, "extras")
 }
 
-/// One setting changed (`id`: "0 7 1", or a text field's name) to a value as the menu shows it: the new record, or
-/// the radio's reason.
+/// The record and the terminal-backed values (`ex`, JSON) as the menu shows them (`settings::View` as JSON).
 #[wasm_bindgen]
-pub fn settings_set(record: &[u8], id: &str, value: &str) -> Result<Vec<u8>, JsError> {
-    settings::set(record, id, value).map_err(|e| JsError::new(&e))
+pub fn settings_view(record: &[u8], ex: &str) -> Result<String, JsError> {
+    Ok(json(&settings::view(record, &extras(ex)?)))
 }
 
-/// The write from the radio's record to the edited one (`settings::Plan` as JSON), dry-run through ferrite's link
-/// session.
+/// One setting changed (`id`: "0 7 1", or a text field's name) to a value as the menu shows it: `{record,
+/// extras}`, or the radio's reason.
 #[wasm_bindgen]
-pub fn settings_plan(base: &[u8], want: &[u8]) -> String {
-    json(&settings::plan(base, want))
+pub fn settings_set(record: &[u8], ex: &str, id: &str, value: &str) -> Result<String, JsError> {
+    let (r, x) = settings::set(record, &extras(ex)?, id, value).map_err(|e| JsError::new(&e))?;
+    Ok(serde_json::json!({ "record": r, "extras": x }).to_string())
+}
+
+/// The write from the radio's record and values to the edited ones (`settings::Plan` as JSON: the record's write and
+/// the `set` lines), dry-run through ferrite's link session.
+#[wasm_bindgen]
+pub fn settings_plan(base: &[u8], base_ex: &str, want: &[u8], want_ex: &str) -> Result<String, JsError> {
+    Ok(json(&settings::plan(base, &extras(base_ex)?, want, &extras(want_ex)?)))
 }
 
 /// This Console's record length (the radio's INFO says its own).
@@ -412,16 +421,29 @@ pub fn settings_len() -> u32 {
 }
 
 #[wasm_bindgen]
-pub fn settings_backup(record: &[u8], saved: &str, radio: &str) -> Result<String, JsError> {
+pub fn settings_backup(record: &[u8], ex: &str, saved: &str, radio: &str) -> Result<String, JsError> {
     let r = from_json(radio, "radio")?;
-    Ok(settings::backup(record, saved, r))
+    Ok(settings::backup(record, &extras(ex)?, saved, r))
 }
 
-/// A settings backup file to `{record, saved, radio}`, or why not.
+/// A settings backup file to `{record, extras, saved, radio}`, or why not.
 #[wasm_bindgen]
 pub fn settings_restore(text: &str) -> Result<String, JsError> {
     let (rec, b) = settings::restore(text).map_err(|e| JsError::new(&e))?;
-    Ok(serde_json::json!({ "record": rec, "saved": b.saved, "radio": b.radio }).to_string())
+    Ok(serde_json::json!({ "record": rec, "extras": b.extras, "saved": b.saved, "radio": b.radio }).to_string())
+}
+
+/// The terminal-backed values from the text of a `dump` the radio sent (`CMD`, its pages up to
+/// `settings_dump_end`), as JSON.
+#[wasm_bindgen]
+pub fn settings_extras_from_dump(text: &str) -> String {
+    json(&settings::extras_from_dump(text))
+}
+
+/// Where the dump's settings end: Console stops reading the dump at a line starting with it.
+#[wasm_bindgen]
+pub fn settings_dump_end() -> String {
+    settings::DUMP_SETTINGS_END.into()
 }
 
 // Firmware Update (`ferrite_console_core::firmware`): the .btf checks and the bootloader's frames.
@@ -783,18 +805,20 @@ impl LiveClient {
 // the radio's settings record (its region), or empty for the defaults.
 
 #[wasm_bindgen]
-pub fn aprs_view(settings: &[u8], record: &[u8]) -> String {
-    json(&aprs_settings::view(settings, record))
+pub fn aprs_view(settings: &[u8], record: &[u8], ex: &str) -> Result<String, JsError> {
+    Ok(json(&aprs_settings::view(settings, record, &extras(ex)?)))
+}
+
+/// `{record, extras}`, or the radio's reason.
+#[wasm_bindgen]
+pub fn aprs_set(settings: &[u8], record: &[u8], ex: &str, id: &str, value: &str) -> Result<String, JsError> {
+    let (r, x) = aprs_settings::set(settings, record, &extras(ex)?, id, value).map_err(|e| JsError::new(&e))?;
+    Ok(serde_json::json!({ "record": r, "extras": x }).to_string())
 }
 
 #[wasm_bindgen]
-pub fn aprs_set(settings: &[u8], record: &[u8], id: &str, value: &str) -> Result<Vec<u8>, JsError> {
-    aprs_settings::set(settings, record, id, value).map_err(|e| JsError::new(&e))
-}
-
-#[wasm_bindgen]
-pub fn aprs_plan(settings: &[u8], base: &[u8], want: &[u8]) -> String {
-    json(&aprs_settings::plan(settings, base, want))
+pub fn aprs_plan(settings: &[u8], base: &[u8], base_ex: &str, want: &[u8], want_ex: &str) -> Result<String, JsError> {
+    Ok(json(&aprs_settings::plan(settings, base, &extras(base_ex)?, want, &extras(want_ex)?)))
 }
 
 #[wasm_bindgen]
@@ -803,13 +827,13 @@ pub fn aprs_record_len() -> u32 {
 }
 
 #[wasm_bindgen]
-pub fn aprs_backup(settings: &[u8], record: &[u8], saved: &str, radio: &str) -> Result<String, JsError> {
+pub fn aprs_backup(settings: &[u8], record: &[u8], ex: &str, saved: &str, radio: &str) -> Result<String, JsError> {
     let r = from_json(radio, "radio")?;
-    Ok(aprs_settings::backup(settings, record, saved, r))
+    Ok(aprs_settings::backup(settings, record, &extras(ex)?, saved, r))
 }
 
 #[wasm_bindgen]
 pub fn aprs_restore(text: &str) -> Result<String, JsError> {
     let (rec, b) = aprs_settings::restore(text).map_err(|e| JsError::new(&e))?;
-    Ok(serde_json::json!({ "record": rec, "saved": b.saved, "radio": b.radio }).to_string())
+    Ok(serde_json::json!({ "record": rec, "extras": b.extras, "saved": b.saved, "radio": b.radio }).to_string())
 }

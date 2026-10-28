@@ -42,10 +42,16 @@
               {/each}
             </ul>
           </div>
+          {#if w.plan.cmds.length}
+            <p class="sub">
+              {w.plan.cmds.length === 1 ? "One goes" : `${w.plan.cmds.length} go`} as the radio's own <code>set</code> command (no record
+              carries {w.plan.cmds.length === 1 ? "it" : "them"}).
+            </p>
+          {/if}
         {/if}
         <div class="actions">
           <button class="btn" onclick={() => store.closeWrite()}>Cancel</button>
-          <button class="btn primary" disabled={!!w.plan.problems.length || !w.plan.ops.length} onclick={() => store.commitWrite()}>
+          <button class="btn primary" disabled={!!w.plan.problems.length || !(w.plan.ops.length || w.plan.cmds.length)} onclick={() => store.commitWrite()}>
             Write {w.plan.changes.length} {w.plan.changes.length === 1 ? "change" : "changes"}
           </button>
         </div>

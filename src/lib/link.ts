@@ -318,8 +318,9 @@ export class Link {
     return i;
   }
 
-  /** A text answer (UI, CMD), paged with MORE, inside one `exclusive` so nothing else cuts in between pages. */
-  text(ty: number, payload: Uint8Array): Promise<string> {
+  /** A text answer (UI, CMD), paged with MORE, inside one `exclusive` so nothing else cuts in between pages. `enough`
+   * stops the paging early (the radio's next command ends what is left). */
+  text(ty: number, payload: Uint8Array, enough?: (soFar: string) => boolean): Promise<string> {
     return this.exclusive(async () => {
       if (ty === P.msg.UI && this.caps & CAP_STREAM) {
         // LINK-50: the pages back to back; a lost one asks the whole readback again
@@ -338,7 +339,7 @@ export class Link {
         const c = parseTextChunk(rest);
         if (!c) throw new Error("A text answer didn't parse.");
         out += c.text;
-        if (!c.more) return out;
+        if (!c.more || enough?.(out)) return out;
         if (c.working) await sleep(P.timing.more_wait_ms);
         rest = await this.okRaw(P.msg.MORE);
       }
@@ -351,8 +352,8 @@ export class Link {
     return this.text(P.msg.UI, new Uint8Array([what]));
   }
 
-  cmd(line: string) {
-    return this.text(P.msg.CMD, new TextEncoder().encode(line));
+  cmd(line: string, enough?: (soFar: string) => boolean) {
+    return this.text(P.msg.CMD, new TextEncoder().encode(line), enough);
   }
 
   /** A keypad or side key (never PTT: the core has no name for one). A long press holds the link 800 ms after. */

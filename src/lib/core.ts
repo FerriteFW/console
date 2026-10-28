@@ -238,16 +238,32 @@ export type SettingItem = {
 export type SettingsGroup = { path: string; name: string; items: SettingItem[]; note: string };
 export type SettingsView = { groups: SettingsGroup[]; notes: string[] };
 export type SettingChange = { id: string; path: string; group: string; name: string; from: string; to: string };
-export type SettingsPlan = { changes: SettingChange[]; begin: number[]; ops: PlanOp[]; problems: Problem[] };
+/** The record's write (`ops`) and the terminal's `set` lines for the settings no record carries (`cmds`, sent after). */
+export type SettingsPlan = { changes: SettingChange[]; begin: number[]; ops: PlanOp[]; cmds: string[]; problems: Problem[] };
+/** The settings no record carries (Watch, Battery Save, MENU 0 5's symbol, comment, telemetry ...), by menu number, as
+ * the radio's `dump` writes them: read with `dump` and written with `set` over the link (CMD). */
+export type Extras = Record<string, string>;
+export type Edited = { record: Uint8Array; extras: Extras };
+const edited = (s: string): Edited => {
+  const r = JSON.parse(s);
+  return { record: new Uint8Array(r.record), extras: r.extras };
+};
+export type Restored = { record: number[]; extras: Extras; saved: string; radio: Record<string, string> };
 
-export const settingsView = (record: Uint8Array): SettingsView => JSON.parse(wasm.settings_view(record));
-/** The record with one setting changed, or throws the radio's reason. */
-export const settingsSet = (record: Uint8Array, id: string, value: string): Uint8Array => wasm.settings_set(record, id, value);
-export const settingsPlan = (base: Uint8Array, want: Uint8Array): SettingsPlan => JSON.parse(wasm.settings_plan(base, want));
+export const settingsView = (record: Uint8Array, extras: Extras): SettingsView => JSON.parse(wasm.settings_view(record, js(extras)));
+/** The record and values with one setting changed, or throws the radio's reason. */
+export const settingsSet = (record: Uint8Array, extras: Extras, id: string, value: string): Edited =>
+  edited(wasm.settings_set(record, js(extras), id, value));
+export const settingsPlan = (base: Uint8Array, baseEx: Extras, want: Uint8Array, wantEx: Extras): SettingsPlan =>
+  JSON.parse(wasm.settings_plan(base, js(baseEx), want, js(wantEx)));
 export const settingsLen = () => wasm.settings_len();
-export const settingsBackup = (record: Uint8Array, saved: string, radio: Record<string, string>) => wasm.settings_backup(record, saved, js(radio));
-export const settingsRestore = (text: string): { record: number[]; saved: string; radio: Record<string, string> } =>
-  JSON.parse(wasm.settings_restore(text));
+export const settingsBackup = (record: Uint8Array, extras: Extras, saved: string, radio: Record<string, string>) =>
+  wasm.settings_backup(record, js(extras), saved, js(radio));
+export const settingsRestore = (text: string): Restored => JSON.parse(wasm.settings_restore(text));
+/** The terminal-backed values from a `dump`'s text. */
+export const extrasFromDump = (text: string): Extras => JSON.parse(wasm.settings_extras_from_dump(text));
+/** Where the dump's settings end (a line starting with it). */
+export const dumpSettingsEnd = (): string => wasm.settings_dump_end();
 
 // Firmware Update (core/src/firmware.rs): the .btf checks (tools/btf.py) and the stock bootloader's frames
 // (tools/flash.py). The core only ever makes hello, model, count, the image's blocks and end.
@@ -374,11 +390,15 @@ export type LiveClient = wasm.LiveClient;
 // APRS settings (core/src/aprs_settings.rs, LINK-43): the APRS record as MENU 0 5 shows it, beside the radio's
 // settings record (its region; empty for the defaults).
 
-export type AprsView = { items: SettingItem[]; notes: string[] };
-export const aprsView = (settings: Uint8Array, record: Uint8Array): AprsView => JSON.parse(wasm.aprs_view(settings, record));
-export const aprsSet = (settings: Uint8Array, record: Uint8Array, id: string, value: string): Uint8Array => wasm.aprs_set(settings, record, id, value);
-export const aprsPlan = (settings: Uint8Array, base: Uint8Array, want: Uint8Array): SettingsPlan => JSON.parse(wasm.aprs_plan(settings, base, want));
+/** `elsewhere`: MENU 0 5's settings in the settings record, shown in Radio Settings ("0 5 3 APRS mode"). */
+export type AprsView = { items: SettingItem[]; notes: string[]; elsewhere: string[] };
+export const aprsView = (settings: Uint8Array, record: Uint8Array, extras: Extras): AprsView =>
+  JSON.parse(wasm.aprs_view(settings, record, js(extras)));
+export const aprsSet = (settings: Uint8Array, record: Uint8Array, extras: Extras, id: string, value: string): Edited =>
+  edited(wasm.aprs_set(settings, record, js(extras), id, value));
+export const aprsPlan = (settings: Uint8Array, base: Uint8Array, baseEx: Extras, want: Uint8Array, wantEx: Extras): SettingsPlan =>
+  JSON.parse(wasm.aprs_plan(settings, base, js(baseEx), want, js(wantEx)));
 export const aprsRecordLen = () => wasm.aprs_record_len();
-export const aprsBackup = (settings: Uint8Array, record: Uint8Array, saved: string, radio: Record<string, string>) =>
-  wasm.aprs_backup(settings, record, saved, js(radio));
-export const aprsRestore = (text: string): { record: number[]; saved: string; radio: Record<string, string> } => JSON.parse(wasm.aprs_restore(text));
+export const aprsBackup = (settings: Uint8Array, record: Uint8Array, extras: Extras, saved: string, radio: Record<string, string>) =>
+  wasm.aprs_backup(settings, record, js(extras), saved, js(radio));
+export const aprsRestore = (text: string): Restored => JSON.parse(wasm.aprs_restore(text));

@@ -1,20 +1,23 @@
-// APRS settings as Svelte state (LINK-43): the APRS record read from the radio (`base`) beside its settings record
-// (its region decides "the region's" frequency), the record being edited, and the view of it as MENU 0 5 shows it.
-// As Radio Settings: a fresh read saved as a backup file first, then the diff (with ferrite's dry run), the write on
-// confirm, then a read back. Every value, choice and check is the core's (ferrite's own App and link session).
-import { aprsBackup, aprsPlan, aprsRecordLen, aprsRestore, aprsSet, aprsView, P, type AprsView } from "./core";
+// APRS settings as Svelte state: MENU 0 5 as the link changes it. The APRS record (LINK-43) read from the radio
+// (`base`) with the values of MENU 0 5's settings no record carries (`baseExtras`: the symbol, comment, ambiguity,
+// Mic-E, telemetry, TX delay and level, read with the terminal's `dump`), beside its settings record (its region
+// decides "the region's" frequency); the record and values being edited, and the view of them as MENU 0 5 shows
+// them. As Radio Settings: a fresh read saved as a backup file first, then the diff (with ferrite's dry run), the
+// write on confirm (the record's session, then the `set` lines), then a read back. Every value, choice and check is
+// the core's (ferrite's own App and link session).
+import { aprsBackup, aprsPlan, aprsRecordLen, aprsRestore, aprsSet, aprsView, P, type AprsView, type Extras } from "./core";
 import { download, stamp } from "./channels.svelte";
 import { RadioError, WriteError } from "./link";
 import { radio } from "./radio.svelte";
-import type { SettingsWriteStep } from "./settings.svelte";
-
-const same = (a: Uint8Array | null, b: Uint8Array | null) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
+import { readExtras, same, sendCmds, type SettingsWriteStep } from "./settings.svelte";
 
 class AprsSettings {
   /** The radio's settings record (for its region), read with the APRS record. */
   settingsRec = $state.raw<Uint8Array>(new Uint8Array());
   base = $state.raw<Uint8Array | null>(null);
+  baseExtras = $state.raw<Extras>({});
   record = $state.raw<Uint8Array | null>(null);
+  extras = $state.raw<Extras>({});
   view = $state.raw<AprsView | null>(null);
   baseValues = $state.raw<Record<string, string>>({});
   source = $state("");
@@ -35,9 +38,10 @@ class AprsSettings {
     return !this.base || this.base.length === aprsRecordLen();
   }
 
-  private show(record: Uint8Array) {
+  private show(record: Uint8Array, extras: Extras) {
     this.record = record;
-    this.view = aprsView(this.settingsRec, record);
+    this.extras = extras;
+    this.view = aprsView(this.settingsRec, record, extras);
   }
 
   private meta(): Record<string, string> {
@@ -57,8 +61,9 @@ class AprsSettings {
     return `ferrite-${who}-${stamp()}-aprs`;
   }
 
-  /** The APRS record (READ what 5), and the settings record once a connection (for the region). */
-  async readRadio(): Promise<Uint8Array> {
+  /** The APRS record (READ what 5) and the terminal-backed values (the dump), and the settings record once a
+   * connection (for the region). */
+  async readRadio(): Promise<{ record: Uint8Array; extras: Extras }> {
     const link = radio.connectedLink;
     if (!link) throw new Error("Connect to a radio first.");
     radio.busy = this.busy = "Reading APRS settings";
@@ -72,15 +77,16 @@ class AprsSettings {
         throw e;
       }
       if (!r) throw new Error("The radio has no APRS record.");
-      return r;
+      return { record: r, extras: await readExtras(link) };
     } finally {
       radio.busy = this.busy = "";
     }
   }
 
-  private took(r: Uint8Array, source: string) {
+  private took(r: Uint8Array, extras: Extras, source: string) {
     this.base = r;
-    this.show(r);
+    this.baseExtras = extras;
+    this.show(r, extras);
     this.baseValues = Object.fromEntries(this.view!.items.map((i) => [i.id, i.value]));
     this.refused = {};
     this.source = source;
@@ -89,7 +95,8 @@ class AprsSettings {
   async read() {
     this.error = "";
     try {
-      this.took(await this.readRadio(), `Read from ${radio.label} at ${new Date().toLocaleTimeString()}`);
+      const { record, extras } = await this.readRadio();
+      this.took(record, extras, `Read from ${radio.label} at ${new Date().toLocaleTimeString()}`);
     } catch (e) {
       this.error = (e as Error).message;
     }
@@ -100,26 +107,27 @@ class AprsSettings {
     const refused = { ...this.refused };
     delete refused[id];
     try {
-      this.show(aprsSet(this.settingsRec, this.record, id, value));
+      const e = aprsSet(this.settingsRec, this.record, this.extras, id, value);
+      this.show(e.record, e.extras);
     } catch (e) {
       refused[id] = (e as Error).message;
-      this.view = aprsView(this.settingsRec, this.record);
+      this.view = aprsView(this.settingsRec, this.record, this.extras);
     }
     this.refused = refused;
   }
 
   revert() {
     if (!this.base) return;
-    this.show(this.base);
+    this.show(this.base, this.baseExtras);
     this.refused = {};
     this.source = "Edits undone: as read";
   }
 
-  async backupRadio(): Promise<{ record: Uint8Array; name: string }> {
-    const record = await this.readRadio();
+  async backupRadio(): Promise<{ record: Uint8Array; extras: Extras; name: string }> {
+    const { record, extras } = await this.readRadio();
     const name = `${this.fileBase()}-backup.json`;
-    download(name, aprsBackup(this.settingsRec, record, new Date().toISOString(), this.meta()), "application/json");
-    return { record, name };
+    download(name, aprsBackup(this.settingsRec, record, extras, new Date().toISOString(), this.meta()), "application/json");
+    return { record, extras, name };
   }
 
   async backupOnly() {
@@ -134,16 +142,22 @@ class AprsSettings {
 
   saveEdited() {
     if (!this.record) return;
-    download(`${this.fileBase()}-edited.json`, aprsBackup(this.settingsRec, this.record, new Date().toISOString(), this.meta()), "application/json");
+    download(
+      `${this.fileBase()}-edited.json`,
+      aprsBackup(this.settingsRec, this.record, this.extras, new Date().toISOString(), this.meta()),
+      "application/json",
+    );
   }
 
+  /** A backup file into the editor; a value the file lacks (a file from before it) stays as read. */
   loadFile(text: string, name: string) {
     this.error = "";
     try {
       const r = aprsRestore(text);
       const rec = new Uint8Array(r.record);
-      if (!this.base) this.took(rec, "");
-      else this.show(rec);
+      const extras = { ...this.extras, ...r.extras };
+      if (!this.base) this.took(rec, extras, "");
+      else this.show(rec, extras);
       this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})`;
     } catch (e) {
       this.error = `${name}: ${(e as Error).message}`;
@@ -155,9 +169,10 @@ class AprsSettings {
     this.error = "";
     this.write = { step: "backup" };
     try {
-      const { record: fresh, name } = await this.backupRadio();
-      const plan = aprsPlan(this.settingsRec, fresh, this.record);
-      this.write = { step: "review", plan, fresh, backupName: name, drifted: !!this.base && !same(this.base, fresh) };
+      const { record: fresh, extras, name } = await this.backupRadio();
+      const plan = aprsPlan(this.settingsRec, fresh, extras, this.record, this.extras);
+      const drifted = !!this.base && (!same(this.base, fresh) || JSON.stringify(this.baseExtras) !== JSON.stringify(extras));
+      this.write = { step: "review", plan, fresh, backupName: name, drifted };
     } catch (e) {
       this.write = null;
       this.error = `Nothing written: the backup read failed (${(e as Error).message}).`;
@@ -167,14 +182,16 @@ class AprsSettings {
   async commitWrite() {
     const w = this.write;
     const link = radio.connectedLink;
-    if (!w || w.step !== "review" || !link || w.plan.problems.length || !w.plan.ops.length) return;
+    if (!w || w.step !== "review" || !link || w.plan.problems.length || !(w.plan.ops.length || w.plan.cmds.length)) return;
     const plan = w.plan;
     const want = this.record!;
+    const wantEx = this.extras;
     this.write = { step: "writing", plan };
     let error = "";
     radio.busy = this.busy = "Writing APRS settings";
     try {
-      await link.writeSession(new Uint8Array(plan.begin), plan.ops, () => {});
+      if (plan.ops.length) await link.writeSession(new Uint8Array(plan.begin), plan.ops, () => {});
+      error = await sendCmds(link, plan.cmds);
     } catch (e) {
       error = e instanceof WriteError ? e.reason.message : (e as Error).message;
     } finally {
@@ -183,9 +200,12 @@ class AprsSettings {
     let verified = false;
     try {
       const back = await this.readRadio();
-      verified = !error && same(back, want);
-      if (!error) this.took(back, `Written to ${radio.label} and read back at ${new Date().toLocaleTimeString()}`);
-      else this.base = back;
+      verified = !error && same(back.record, want) && !aprsPlan(this.settingsRec, back.record, back.extras, want, wantEx).changes.length;
+      if (!error) this.took(back.record, back.extras, `Written to ${radio.label} and read back at ${new Date().toLocaleTimeString()}`);
+      else {
+        this.base = back.record;
+        this.baseExtras = back.extras;
+      }
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
     }

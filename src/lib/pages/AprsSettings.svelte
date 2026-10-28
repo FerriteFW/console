@@ -1,8 +1,10 @@
 <script lang="ts">
-  // APRS › APRS Settings: the APRS record (LINK-43: MENU 0 5's frequency, beacon, power, path, digipeater, beacon
-  // after voice, SSID, custom path), shown as the menu shows it and changed with the menu's own choices and checks
-  // (the core runs ferrite's App and link session). Written as Radio Settings writes: a backup file first, the diff,
-  // then the write and a read back. APRS mode and the rest of MENU 0 5 are in the settings record (Radio Settings).
+  // APRS › APRS Settings: MENU 0 5 as the link changes it: the APRS record (LINK-43: frequency, beacon, power, path,
+  // digipeater, SSID, custom path, FX.25) and the settings no record carries (symbol, comment, ambiguity, Mic-E,
+  // telemetry, TX delay and level: the terminal's `dump` and `set`), shown as the menu shows them and changed with the
+  // menu's own choices and checks (the core runs ferrite's App and link session). Written as Radio Settings writes: a
+  // backup file first, the diff, then the write and a read back. The settings record's MENU 0 5 settings (APRS mode,
+  // position, KISS, mute, Shared VHF) are in Radio Settings; the footer names them, from the core.
   import SettingRows from "../components/SettingRows.svelte";
   import SettingsWriteDialog from "../components/SettingsWriteDialog.svelte";
   import { aprsSettings as s } from "../aprsSettings.svelte";
@@ -91,7 +93,9 @@
 
   {#if s.view}
     <SettingRows {groups} {dirty} refused={s.refused} {busy} change={(id, v) => s.change(id, v)} />
-    <p class="dim foot">APRS mode, the symbol, comment, position and the rest of MENU 0 5 are in Radio Settings (0 5).</p>
+    {#if s.view.elsewhere.length}
+      <p class="dim foot">In Radio Settings (the settings record): {s.view.elsewhere.join(", ")}.</p>
+    {/if}
   {/if}
 </div>
 

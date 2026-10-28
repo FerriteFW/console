@@ -1,16 +1,21 @@
-//! APRS settings (LINK-43): the APRS record (`what` 5, 25 bytes: MENU 0 5's frequency, beacon mode, power, path,
-//! digipeater, beacon after voice, SSID, custom path and FX.25), shown, changed and checked as Radio Settings does the
-//! settings record: by ferrite's own App and link session, never a copy of the menu.
+//! APRS settings: all of MENU 0 5 the link can change, as the menu shows it. Most are in the APRS record (`what` 5,
+//! LINK-43: the frequency, beacon mode, power, path, digipeater, beacon after voice, SSID, custom path and FX.25);
+//! the rest of MENU 0 5 no record carries (the symbol, comment, ambiguity, Mic-E, telemetry, TX delay and level) are
+//! read with the terminal's `dump` and changed with its `set` over the link (`CMD`, LINK-34: [`crate::settings::Term`]).
+//! Shown, changed and checked as Radio Settings does the settings record: by ferrite's own App and link session,
+//! never a copy of the menu. The settings record's MENU 0 5 settings (APRS mode, position, KISS, mute, Shared VHF)
+//! stay in Radio Settings; [`View::elsewhere`] names them.
 //!
-//! The scratch radio holds the radio's settings record (its region decides "the region's" frequency) and the APRS
-//! record, written through ferrite's link session (`aprs_apply`'s checks). A MENU 0 5 setting is in the APRS record
-//! when what the menu shows follows that record; it is changed with the menu's knob or the terminal's `set`, as
-//! Radio Settings changes a setting, and the record is then read back through the link.
+//! The scratch radio holds the radio's settings record (its region decides "the region's" frequency), the APRS
+//! record (written through ferrite's link session: `aprs_apply`'s checks) and the terminal-backed values. A MENU 0 5
+//! setting is in the APRS record when what the menu shows follows that record; it is changed with the menu's knob or
+//! the terminal's `set`, as Radio Settings changes a setting, and the record is then read back through the link.
 
 use crate::plan::{hex, unhex, Op, Problem};
 use crate::records::{begin_payload, write_payloads};
 use crate::settings::{
-    self, classify, leaves, parse_path, path_name, path_text, settings_of, with_call, Item, Kind, Scratch, NOT_A_VALUE,
+    self, classify, leaves, parse_path, path_name, path_text, settings_of, term_cmds, term_item, term_items, term_set,
+    with_call, Extras, Item, Kind, Scratch, NOT_A_VALUE, RADIO_ONLY,
 };
 use ferrite_app::settings::Settings;
 use ferrite_core::link::{msg, what};
@@ -31,6 +36,7 @@ thread_local! {
     /// The settings that follow the APRS record (their menu paths, and what each shows on a record of zeros: a
     /// list's first choice), found once.
     static IN_RECORD: RefCell<Option<Vec<Leaf>>> = const { RefCell::new(None) };
+    static ELSEWHERE: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
 }
 
 fn scratch<R>(f: impl FnOnce(&mut Scratch) -> R) -> R {
@@ -68,16 +74,40 @@ fn in_record(sc: &mut Scratch, s: &Settings) -> Vec<Leaf> {
             out.push((p, va.value));
         }
     }
+    sc.aprs = None;
     IN_RECORD.with(|c| *c.borrow_mut() = Some(out.clone()));
     out
 }
 
-/// The record's settings as MENU 0 5 shows them (in menu order).
+/// The menu paths the APRS record holds. Never called inside `scratch`.
+pub(crate) fn record_paths() -> Vec<Vec<u8>> {
+    scratch(|sc| in_record(sc, &Settings::DEFAULT)).into_iter().map(|l| l.0).collect()
+}
+
+/// MENU 0 5 as APRS Settings shows it (in menu order).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct View {
     pub items: Vec<Item>,
     /// Notes on the record as a whole (refused by this Console's ferrite, a length it doesn't know).
     pub notes: Vec<String>,
+    /// MENU 0 5's settings in the settings record, shown in Radio Settings ("0 5 3 APRS mode").
+    pub elsewhere: Vec<String>,
+}
+
+/// MENU 0 5's settings Radio Settings shows (the settings record's), found once. Never called inside `scratch`.
+fn elsewhere() -> Vec<String> {
+    if let Some(v) = ELSEWHERE.with(|c| c.borrow().clone()) {
+        return v;
+    }
+    let v: Vec<String> = settings::view(&settings::record_of(&Settings::DEFAULT), &Extras::new())
+        .groups
+        .iter()
+        .flat_map(|g| &g.items)
+        .filter(|i| i.path.starts_with("0 5 "))
+        .map(|i| format!("{} {}", i.path, i.name))
+        .collect();
+    ELSEWHERE.with(|c| *c.borrow_mut() = Some(v.clone()));
+    v
 }
 
 /// The settings record to use: the radio's, or the defaults when it wasn't read (the region then is the default's).
@@ -89,9 +119,12 @@ fn settings_or_default(settings_rec: &[u8]) -> Settings {
     }
 }
 
-/// The APRS record as MENU 0 5 shows it, the radio's settings record (`settings_rec`, may be empty) beside it.
-pub fn view(settings_rec: &[u8], rec: &[u8]) -> View {
+/// The APRS record and the terminal-backed values (`ex`) as MENU 0 5 shows them, the radio's settings record
+/// (`settings_rec`, may be empty) beside them.
+pub fn view(settings_rec: &[u8], rec: &[u8], ex: &Extras) -> View {
     let s = settings_or_default(settings_rec);
+    let term = term_items();
+    let elsewhere = elsewhere();
     scratch(|sc| {
         let paths = in_record(sc, &s);
         let mut notes = Vec::new();
@@ -109,8 +142,13 @@ pub fn view(settings_rec: &[u8], rec: &[u8]) -> View {
         }
         let base = sc.read_record(what::APRS).unwrap_or_default();
         sc.aprs = Some(base);
+        sc.term = Some((term.clone(), ex.clone()));
         let mut items = Vec::new();
         for (p, name, help, sub) in leaves() {
+            if let Some(t) = term.iter().find(|t| t.path == p && p[0] == 5) {
+                items.push(term_item(sc, &s, t, ex, sub, help));
+                continue;
+            }
             let Some((_, first)) = paths.iter().find(|x| x.0 == p) else { continue };
             sc.load(&s);
             let got = sc.get(&p, name);
@@ -137,22 +175,32 @@ pub fn view(settings_rec: &[u8], rec: &[u8]) -> View {
             });
         }
         sc.aprs = None;
-        View { items, notes }
+        sc.term = None;
+        View { items, notes, elsewhere }
     })
 }
 
-/// One setting changed (`id` its menu number) to a value as the menu shows it: the new record, or the radio's reason.
-pub fn set(settings_rec: &[u8], rec: &[u8], id: &str, value: &str) -> Result<Vec<u8>, String> {
+/// One setting changed (`id` its menu number) to a value as the menu shows it: the new record and terminal-backed
+/// values, or the radio's reason.
+pub fn set(settings_rec: &[u8], rec: &[u8], ex: &Extras, id: &str, value: &str) -> Result<(Vec<u8>, Extras), String> {
     let s = settings_or_default(settings_rec);
     let p = parse_path(id).filter(|p| p[0] == 5).ok_or_else(|| format!("{id}: not an APRS setting"))?;
     let name = path_name(&p).ok_or_else(|| format!("{id}: not a setting"))?;
     let value = value.trim();
+    let term = term_items();
     scratch(|sc| {
-        if !in_record(sc, &s).iter().any(|x| x.0 == p) {
-            return Err(format!("{id} {name}: not in the APRS record"));
+        let in_rec = in_record(sc, &s).iter().any(|x| x.0 == p);
+        let t = term.iter().find(|t| t.path == p);
+        if !in_rec && t.is_none() {
+            return Err(format!("{id} {name}: not an APRS Settings setting"));
         }
         sc.aprs = Some(rec.to_vec());
+        sc.term = Some((term.clone(), ex.clone()));
         let r = (|| {
+            if let Some(t) = t {
+                let ex = term_set(sc, &s, t, ex, value)?;
+                return Ok((sc.read_record(what::APRS)?, ex));
+            }
             sc.load(&s);
             match sc.set(&p, NOT_A_VALUE) {
                 // A choice: the knob turned to it on the menu row, as on the radio.
@@ -171,9 +219,10 @@ pub fn set(settings_rec: &[u8], rec: &[u8], id: &str, value: &str) -> Result<Vec
                     sc.set(&p, value)?;
                 }
             }
-            sc.read_record(what::APRS)
+            Ok((sc.read_record(what::APRS)?, ex.clone()))
         })();
         sc.aprs = None;
+        sc.term = None;
         r
     })
 }
@@ -182,8 +231,8 @@ pub fn set(settings_rec: &[u8], rec: &[u8], id: &str, value: &str) -> Result<Vec
 pub type Change = settings::Change;
 
 /// What differs, setting by setting; bytes no setting shows as one "Other" line.
-pub fn diff(settings_rec: &[u8], old: &[u8], new: &[u8]) -> Vec<Change> {
-    let (a, b) = (view(settings_rec, old), view(settings_rec, new));
+pub fn diff(settings_rec: &[u8], old: &[u8], old_ex: &Extras, new: &[u8], new_ex: &Extras) -> Vec<Change> {
+    let (a, b) = (view(settings_rec, old, old_ex), view(settings_rec, new, new_ex));
     let mut out: Vec<Change> = a
         .items
         .iter()
@@ -212,53 +261,71 @@ pub fn diff(settings_rec: &[u8], old: &[u8], new: &[u8]) -> Vec<Change> {
     out
 }
 
-/// An APRS write: the diff, `BEGIN`'s payload, the one write, and what ferrite's own link session would refuse or
-/// keep otherwise (a write with problems must not be sent).
-#[derive(Clone, Debug, Serialize)]
-pub struct Plan {
-    pub changes: Vec<Change>,
-    pub begin: Vec<u8>,
-    pub ops: Vec<Op>,
-    pub problems: Vec<Problem>,
+/// An APRS write: the diff, `BEGIN`'s payload, the one write, the terminal's `set` lines (sent after it), and what
+/// ferrite's own link session would refuse or keep otherwise (a write with problems must not be sent).
+pub type Plan = settings::Plan;
+
+/// MENU 0 5's terminal-backed values only.
+fn own(ex: &Extras) -> Extras {
+    ex.iter().filter(|(k, _)| k.starts_with("0 5 ")).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-/// The write from `base` (the radio's record, read just now) to `want`, run first through ferrite's link session.
-pub fn plan(settings_rec: &[u8], base: &[u8], want: &[u8]) -> Plan {
-    let changes = diff(settings_rec, base, want);
+/// The write from `base` (the radio's record and values, read just now) to `want`, run first through ferrite's link
+/// session.
+pub fn plan(settings_rec: &[u8], base: &[u8], base_ex: &Extras, want: &[u8], want_ex: &Extras) -> Plan {
+    let changes = diff(settings_rec, base, base_ex, want, want_ex);
     let mut problems = Vec::new();
     let mut ops = Vec::new();
+    let mut cmds = Vec::new();
     let problem = |e: String| Problem { what: "aprs".into(), number: 0, error: e };
     if base.len() != RECORD_LEN || want.len() != RECORD_LEN {
         problems.push(problem(format!("the APRS record is {} bytes here, {RECORD_LEN} in this Console", want.len())));
     } else if !changes.is_empty() {
-        ops.push(Op {
-            kind: "write",
-            what: "aprs",
-            number: 0,
-            msg: msg::WRITE,
-            payloads: write_payloads(what::APRS, 0, want),
-        });
+        if base != want {
+            ops.push(Op {
+                kind: "write",
+                what: "aprs",
+                number: 0,
+                msg: msg::WRITE,
+                payloads: write_payloads(what::APRS, 0, want),
+            });
+        }
+        cmds = term_cmds(&own(base_ex), &own(want_ex));
         let s = settings_or_default(settings_rec);
+        let term = term_items();
         let r = scratch(|sc| {
             sc.aprs = Some(base.to_vec());
+            sc.term = Some((term, base_ex.clone()));
             sc.load(&s);
             sc.aprs = None;
-            sc.write_record(what::APRS, want).and_then(|_| sc.read_record(what::APRS))
+            sc.term = None;
+            let r = (|| {
+                if !ops.is_empty() {
+                    sc.write_record(what::APRS, want)?;
+                }
+                for c in &cmds {
+                    sc.link_cmd(c).map_err(|e| format!("{c}: {e}"))?;
+                }
+                Ok::<_, String>((sc.read_record(what::APRS)?, sc.dump_values()))
+            })();
+            r
         });
         match r {
             Err(e) => problems.push(problem(e)),
-            Ok(back) if back != want => {
-                for c in diff(settings_rec, want, &back) {
-                    problems.push(problem(format!("{} {}: the radio would keep {}", c.path, c.name, c.to)));
+            Ok((back, now)) => {
+                let back_ex: Extras =
+                    want_ex.keys().filter_map(|k| now.get(k).map(|v| (k.clone(), v.clone()))).collect();
+                for c in diff(settings_rec, want, want_ex, &back, &back_ex) {
+                    problems.push(problem(format!("{} {}: the radio would keep {} ({RADIO_ONLY})", c.path, c.name, c.to)));
                 }
             }
-            Ok(_) => {}
         }
     }
-    Plan { changes, begin: begin_payload(ops.len() as u16), ops, problems }
+    Plan { changes, begin: begin_payload(ops.len() as u16), ops, cmds, problems }
 }
 
-/// The backup file: the record (hex), with the settings as the menu shows them beside it for reading.
+/// The backup file: the record (hex), the terminal-backed values, with the settings as the menu shows them beside
+/// them for reading.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Backup {
     pub format: String,
@@ -267,25 +334,40 @@ pub struct Backup {
     #[serde(default)]
     pub radio: BTreeMap<String, String>,
     pub record: String,
+    /// MENU 0 5's settings no record carries, as the terminal's `dump` writes them (absent in a file before them).
+    #[serde(default)]
+    pub extras: Extras,
     #[serde(default)]
     pub settings: BTreeMap<String, String>,
 }
 
-pub fn backup(settings_rec: &[u8], rec: &[u8], saved: &str, radio: BTreeMap<String, String>) -> String {
-    let settings =
-        view(settings_rec, rec).items.iter().map(|i| (format!("{} {}", i.path, i.name), i.value.clone())).collect();
-    let b = Backup { format: BACKUP_FORMAT.into(), version: 1, saved: saved.into(), radio, record: hex(rec), settings };
+pub fn backup(settings_rec: &[u8], rec: &[u8], ex: &Extras, saved: &str, radio: BTreeMap<String, String>) -> String {
+    let settings = view(settings_rec, rec, ex)
+        .items
+        .iter()
+        .map(|i| (format!("{} {}", i.path, i.name), i.value.clone()))
+        .collect();
+    let b = Backup {
+        format: BACKUP_FORMAT.into(),
+        version: 1,
+        saved: saved.into(),
+        radio,
+        record: hex(rec),
+        extras: own(ex),
+        settings,
+    };
     serde_json::to_string_pretty(&b).unwrap_or_default()
 }
 
 pub fn restore(text: &str) -> Result<(Vec<u8>, Backup), String> {
-    let b: Backup = serde_json::from_str(text).map_err(|e| format!("not a Ferrite Console APRS backup: {e}"))?;
+    let mut b: Backup = serde_json::from_str(text).map_err(|e| format!("not a Ferrite Console APRS backup: {e}"))?;
     if b.format != BACKUP_FORMAT {
         return Err(format!("not an APRS backup (format {:?})", b.format));
     }
     if b.version != 1 {
         return Err(format!("backup version {} is newer than this Console reads", b.version));
     }
+    b.extras = own(&b.extras);
     let rec = unhex(&b.record).ok_or("its record isn't hex")?;
     Ok((rec, b))
 }
@@ -295,7 +377,25 @@ mod tests {
     use super::*;
     use crate::radioside::RadioSide;
     use crate::records::Reader;
-    use crate::settings::record_of;
+    use crate::settings::{read_extras, record_of};
+
+    fn ex0() -> Extras {
+        read_extras(&mut RadioSide::new())
+    }
+
+    // The record-only forms the tests below were written for: the terminal-backed values a default radio's.
+    fn view(srec: &[u8], rec: &[u8]) -> View {
+        super::view(srec, rec, &ex0())
+    }
+    fn set(srec: &[u8], rec: &[u8], id: &str, value: &str) -> Result<Vec<u8>, String> {
+        super::set(srec, rec, &ex0(), id, value).map(|r| r.0)
+    }
+    fn plan(srec: &[u8], base: &[u8], want: &[u8]) -> Plan {
+        super::plan(srec, base, &ex0(), want, &ex0())
+    }
+    fn backup(srec: &[u8], rec: &[u8], saved: &str, radio: BTreeMap<String, String>) -> String {
+        super::backup(srec, rec, &ex0(), saved, radio)
+    }
 
     fn ask_read(rs: &mut RadioSide) -> Vec<u8> {
         let mut r = Reader::new(what::APRS, 0);
@@ -386,5 +486,67 @@ mod tests {
         assert_eq!(back, rec);
         assert!(b.settings.keys().any(|k| k.starts_with("0 5 6 3")));
         assert!(restore("{}").is_err());
+    }
+
+    /// MENU 0 5's settings no record carries (telemetry, the comment, Mic-E, ...): on this page in menu order, changed
+    /// with the terminal's `set`, written as `set` lines over the link with the record's write, read back with the
+    /// dump; kept in the backup file.
+    #[test]
+    fn term_settings_write_and_read_back() {
+        let srec = record_of(&Settings::DEFAULT);
+        let mut rs = RadioSide::new();
+        let rec = ask_read(&mut rs);
+        let ex = read_extras(&mut rs);
+        let v = super::view(&srec, &rec, &ex);
+        let ids: Vec<&str> = v.items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "0 5 4", "0 5 5 1", "0 5 5 2", "0 5 5 3", "0 5 5 6", "0 5 5 7", "0 5 6 1", "0 5 6 2", "0 5 6 3",
+                "0 5 6 4", "0 5 7 1", "0 5 7 2", "0 5 7 3", "0 5 9 1", "0 5 9 2", "0 5 9 3", "0 5 9 4", "0 5 9 5"
+            ]
+        );
+        assert_eq!(v.elsewhere.iter().filter(|e| e.starts_with("0 5 9 7")).count(), 1, "{:?}", v.elsewhere);
+        let tel = item(&v, "0 5 6 4");
+        assert_eq!((tel.kind, tel.value.as_str(), tel.choices.clone()), (Kind::Pick, "Off", vec!["Off".to_string(), "On".into()]));
+        assert_eq!(item(&v, "0 5 5 3").kind, Kind::Text);
+        assert!(item(&v, "0 5 5 3").hint.contains("40"), "{}", item(&v, "0 5 5 3").hint);
+        // Changes: telemetry, a comment, Mic-E, and the record's power.
+        let (r, x) = super::set(&srec, &rec, &ex, "0 5 6 4", "On").unwrap();
+        let (r, x) = super::set(&srec, &r, &x, "0 5 5 3", "Ferrite test, 73").unwrap();
+        let (r, x) = super::set(&srec, &r, &x, "0 5 5 7", "En route").unwrap();
+        let (r, x) = super::set(&srec, &r, &x, "0 5 6 3", "High").unwrap();
+        assert!(super::set(&srec, &r, &x, "0 5 5 3", &"x".repeat(41)).is_err());
+        assert!(super::set(&srec, &r, &x, "0 5 5 3", "no # here").is_err());
+        let v2 = super::view(&srec, &r, &x);
+        assert_eq!(item(&v2, "0 5 5 3").value, "Ferrite test, 73", "the whole comment, not the row's start");
+        let p = super::plan(&srec, &rec, &ex, &r, &x);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(p.changes.len(), 4, "{:?}", p.changes);
+        assert_eq!(p.ops.len(), 1);
+        assert_eq!(p.cmds, ["set 0 5 5 3 Ferrite test, 73", "set 0 5 5 7 En route", "set 0 5 6 4 On"]);
+        // Sent as Console sends it: the record's write, then each line.
+        assert_eq!(rs.ask(msg::BEGIN, &p.begin).0, 0);
+        for op in &p.ops {
+            for pl in &op.payloads {
+                assert_eq!(rs.ask(op.msg, pl).0, 0);
+            }
+        }
+        rs.ask(msg::END, &[]);
+        for c in &p.cmds {
+            assert_eq!(rs.ask(msg::CMD, c.as_bytes()).0, 0, "{c}");
+        }
+        assert_eq!(ask_read(&mut rs), r);
+        assert_eq!(read_extras(&mut rs), x);
+        assert!(rs.app.aprs_cfg().telemetry);
+        // The backup keeps them (MENU 0 5's only).
+        let t = super::backup(&srec, &r, &x, "2026-10-27T12:00:00Z", BTreeMap::new());
+        let (_, b) = restore(&t).unwrap();
+        assert_eq!(b.extras.get("0 5 6 4").map(String::as_str), Some("On"));
+        assert!(b.extras.keys().all(|k| k.starts_with("0 5 ")));
+        // Back: the plan from what the radio holds now to the first read.
+        let p = super::plan(&srec, &r, &x, &rec, &ex);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert!(p.cmds.contains(&"set 0 5 5 3 None".to_string()), "{:?}", p.cmds);
     }
 }
