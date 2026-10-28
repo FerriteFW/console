@@ -182,6 +182,11 @@ export const restoreFile = (text: string): { set: ChannelSet; saved: string; rad
   JSON.parse(wasm.restore_file(text));
 export const chirpExport = (set: ChannelSet) => wasm.chirp_export(js(set));
 export const chirpImport = (text: string, zones: Zone[]): ChirpImport => JSON.parse(wasm.chirp_import(text, js(zones)));
+/** Imported channels into a new zone at free numbers: `room` says why it can't (numbers, zones), `name_error` the name. */
+export type ChirpNewZone = { channels: Channel[]; zone: Zone | null; numbers: string; room: string; name_error: string };
+export const chirpNewZone = (channels: Channel[], table: ChannelSet, name: string): ChirpNewZone =>
+  JSON.parse(wasm.chirp_new_zone(js(channels), js(table), name));
+export const chirpZoneName = (file: string, zones: Zone[]): string => wasm.chirp_zone_name(file, js(zones));
 export const recordReader = (what: number, index: number) => new wasm.RecordReader(what, index);
 
 // The channel library ("Add channels": core/src/library.rs): entries to channels and zones through ferrite's checks,
