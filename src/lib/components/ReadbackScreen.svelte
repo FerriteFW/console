@@ -188,7 +188,7 @@
                 {:else}
                   <div class="freq" class:withname={!!s(c.name)}>{big}<small>{small}</small></div>
                   <div class="chips">
-                    {#each [c.mode, c.tone, c.shift, c.power] as chip, i (i)}
+                    {#each s(c.lasthit) ? [c.mode, "last " + s(c.lasthit), c.power] : [c.mode, c.tone, c.shift, c.power] as chip, i (i)}
                       {#if s(chip)}<span class="chip">{s(chip)}</span>{/if}
                     {/each}
                   </div>
@@ -219,7 +219,7 @@
                 {/if}
               </div>
               {#if c.kind === "slot"}
-                <div class="chips2">{[c.mode, c.tone, c.shift].map(s).filter(Boolean).join(" ")}</div>
+                <div class="chips2">{(s(c.lasthit) ? [s(c.mode), "last " + s(c.lasthit)] : [c.mode, c.tone, c.shift].map(s)).filter(Boolean).join(" ")}</div>
               {:else if c.kind === "aprs"}
                 <div class="aprsrow sm"><span class="l">{aprsLine(c)}</span><span class="r" class:warn={c.state === "Muted"}>{aprsPower(c)}</span></div>
               {/if}
