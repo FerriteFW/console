@@ -23,6 +23,7 @@
 //! - [`liveview`]: Live View from the radio's compact UI events (LINK-47, LINK-48), for Bluetooth.
 //! - [`firmware`]: Firmware Update: the `.btf` checks and the stock bootloader's frames (tools/btf.py, flash.py).
 //! - [`install`]: the Install page: the reader backup (fdump), the SSB patch, back to stock (`STOCK_RESTORE`).
+//! - [`signature`]: release images' minisign signatures, checked with Ferrite's public key.
 //! - [`demo`]: a demo radio answering from memory, for trying Console without a radio.
 //! - [`timing`]: the reference client's time-outs and pacing, in one place.
 
@@ -44,6 +45,7 @@ pub mod radioside;
 pub mod records;
 pub mod session;
 pub mod settings;
+pub mod signature;
 pub mod timing;
 pub mod ui;
 pub mod uid;

@@ -3,6 +3,7 @@
   // bootloader's frames are the core's (tools/btf.py and tools/flash.py, ported); the flow is firmware.svelte.ts.
   import { firmware } from "../firmware.svelte";
   import { radio } from "../radio.svelte";
+  import { signatureText } from "../signature";
   import { bridgeEnabled } from "../transport/bridge";
 
   let fileInput: HTMLInputElement;
@@ -17,10 +18,10 @@
 
   async function pick(e: Event) {
     const el = e.currentTarget as HTMLInputElement;
-    const f = el.files?.[0];
+    const files = Array.from(el.files ?? []);
     el.value = "";
     confirming = false;
-    if (f) await firmware.pick(f);
+    if (files.length) await firmware.pick(files);
   }
 
   async function install() {
@@ -53,9 +54,10 @@
         </button>
       {/if}
       <button class="btn" disabled={firmware.running} onclick={() => fileInput.click()}>Choose .btf…</button>
-      <input bind:this={fileInput} type="file" accept=".btf,.BTF" hidden aria-label="Firmware file" onchange={pick} />
+      <input bind:this={fileInput} type="file" accept=".btf,.BTF,.minisig" multiple hidden aria-label="Firmware file" onchange={pick} />
       {#if firmware.fileName}<span class="fname">{firmware.fileName}</span>{/if}
     </div>
+    <p class="sub hint">For a release, pick its .minisig with the .btf: Console checks Ferrite's signature.</p>
     {#if check}
       <dl class="facts" aria-label="File checks">
         <dt>Version</dt>
@@ -66,6 +68,12 @@
         <dd data-k="blocks">{check.blocks}</dd>
         <dt>CRC-32</dt>
         <dd data-k="crc">{check.crc32}</dd>
+        {#if firmware.signature}
+          <dt>Signature</dt>
+          <dd data-k="signature" class:signed={firmware.signature.kind === "signed"} class:bad={firmware.signature.kind === "bad"}>
+            {firmware.signature.kind === "bad" ? "Doesn't verify" : signatureText(firmware.signature)}
+          </dd>
+        {/if}
         {#if check.describe}
           <dt>Image</dt>
           <dd class="mono">{check.describe}</dd>
@@ -213,6 +221,16 @@
   }
   .sub {
     color: var(--sub);
+  }
+  .hint {
+    margin: 6px 0 0;
+    font-size: 13px;
+  }
+  dd.signed {
+    color: var(--green);
+  }
+  dd.bad {
+    color: var(--red);
   }
   .good {
     color: var(--green);

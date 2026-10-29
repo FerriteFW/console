@@ -50,6 +50,8 @@ test("firmware: a whole update through the fake bootloader, then connected again
   await expect(page.getByRole("region", { name: "File check" })).toContainText("Checks passed");
   await expect(fact(page, "version")).toHaveText("v9.8.7");
   await expect(fact(page, "blocks")).toHaveText("24");
+  // No .minisig: someone's own build, allowed.
+  await expect(fact(page, "signature")).toHaveText("Not signed: not a Ferrite release");
   await shot(page, info, "60-firmware-checked");
 
   await page.getByRole("button", { name: "Update firmware…" }).click();
@@ -109,6 +111,16 @@ test("firmware: files the checks refuse can't be installed", async ({ page }, in
 
   await pickFile(page, "tiny.btf", Buffer.from("not a firmware file"));
   await expect(refused).toContainText("too short");
+
+  // A .minisig that doesn't verify with Ferrite's key (the core's throwaway test key): refused like a failed check.
+  const minisig = readFileSync(join(import.meta.dirname, "../../core/tests/fixtures/signed-test.btf.minisig"));
+  await page.getByLabel("Firmware file").setInputFiles([
+    { name: "ferrite-test.btf", mimeType: "application/octet-stream", buffer: testBtf(8) },
+    { name: "ferrite-test.btf.minisig", mimeType: "text/plain", buffer: minisig },
+  ]);
+  await expect(refused).toContainText("Bad signature: the signature is from another key, not Ferrite's");
+  await expect(fact(page, "signature")).toHaveText("Doesn't verify");
+  await expect(page.getByRole("button", { name: "Update firmware…" })).toHaveCount(0);
 
   await pickFile(page, "ferrite.bin", testBtf(8));
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("not a .btf file");

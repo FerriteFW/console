@@ -2,7 +2,7 @@
 
 use ferrite_console_core::{
     answers, aprs, aprs_settings, channels, chirp, demo, firmware, install, keys, library, liveview, log, plan,
-    records, session, settings, timing, ui, uid,
+    records, session, settings, signature, timing, ui, uid,
 };
 use wasm_bindgen::prelude::*;
 
@@ -532,6 +532,12 @@ impl FirmwareUpdate {
 #[wasm_bindgen]
 pub fn sha256_hex(b: &[u8]) -> String {
     install::sha256_hex(b)
+}
+
+/// An image against its `.minisig` text, with Ferrite's key: `{signed, error}` (the trusted comment, or why not).
+#[wasm_bindgen]
+pub fn signature_check(image: &[u8], minisig: &str) -> String {
+    json(&signature::check(image, minisig))
 }
 
 /// `{size, sha256, crc32, cal_crc32, pending_update, regions, problems}`.

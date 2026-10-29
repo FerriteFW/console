@@ -18,6 +18,7 @@ import {
 } from "./core";
 import { Link, TimeoutError } from "./link";
 import { radio } from "./radio.svelte";
+import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
 import { sleep, type Transport } from "./transport/types";
 
 const CMD_PROBE = 0x42;
@@ -46,6 +47,8 @@ class Firmware {
   stage = $state<Stage>("pick");
   fileName = $state("");
   check = $state<FirmwareCheck | null>(null);
+  /** The image's minisig signature: Ferrite's (its trusted comment), none, or one that doesn't verify (refused). */
+  signature = $state<Signed | null>(null);
   /** What the step is doing, in words. */
   message = $state("");
   error = $state("");
@@ -72,7 +75,7 @@ class Firmware {
   }
 
   /** The Ferrite release bundled with Console (public/firmware/manifest.json, scripts/bundle-firmware.mjs). */
-  bundled = $state<{ version: string; file: string; sha256: string } | null>(null);
+  bundled = $state<{ version: string; file: string; sha256: string; minisig?: string } | null>(null);
 
   /** The manifest, once: what the page offers besides a file (Ferrite to the next Ferrite from the browser). */
   async loadBundled() {
@@ -85,7 +88,10 @@ class Firmware {
     }
   }
 
-  /** UPD-15: the bundled image, used only when its SHA-256 is the manifest's; then checked as a picked file. */
+  /**
+   * UPD-15: the bundled image, used only when its SHA-256 is the manifest's; then checked as a picked file, with the
+   * manifest's signature when it has one.
+   */
   async useBundled() {
     const r = this.bundled;
     if (this.running || !r) return;
@@ -95,29 +101,39 @@ class Firmware {
       const b = new Uint8Array(await res.arrayBuffer());
       await loadCore();
       if (sha256Hex(b) !== r.sha256.toLowerCase()) throw new Error(`${r.file} doesn't match its checksum: Console won't use it`);
-      await this.pick(new File([b as BlobPart], r.file));
+      const files = [new File([b as BlobPart], r.file)];
+      if (r.minisig) files.push(new File([r.minisig], `${r.file}.minisig`));
+      await this.pick(files);
     } catch (e) {
       this.error = `The bundled release didn't load (${(e as Error).message}). Choose a file instead.`;
     }
   }
 
-  /** A picked file, checked by the core. */
-  async pick(file: File) {
+  /** The picked files (the .btf, and its .minisig when there is one), checked by the core. */
+  async pick(picked: FileList | File[]) {
     if (this.running) return;
+    const files = Array.from(picked);
+    if (!files.length) return;
     await loadCore();
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    this.fileName = file.name;
+    const { btf: file, sig } = splitPicked(files);
+    this.fileName = file?.name ?? files[0].name;
     this.error = "";
     this.after = null;
     this.done = 0;
-    if (!/\.btf$/i.test(file.name)) {
+    this.signature = null;
+    if (!file) {
       this.check = null;
       this.bytes = null;
-      this.error = `${file.name} is not a .btf file. Build one with tools/mkbtf.sh.`;
+      this.error = `${files[0].name} is not a .btf file. Build one with tools/mkbtf.sh.`;
       this.stage = "pick";
       return;
     }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const signature = signatureOf(bytes, sig ? await sig.text() : null);
+    this.signature = signature;
     const c = firmwareCheck(bytes);
+    // A signature that doesn't verify refuses the image like a failed check.
+    if (signature.kind === "bad") c.problems.push(signatureText(signature));
     this.check = c;
     this.bytes = c.problems.length ? null : bytes;
     this.blocks = c.blocks;
@@ -127,6 +143,7 @@ class Firmware {
   clearFile() {
     if (this.running) return;
     this.check = null;
+    this.signature = null;
     this.bytes = null;
     this.fileName = "";
     if (this.stage !== "failed") this.stage = "pick";

@@ -4,6 +4,7 @@
   // (core/src/install.rs). `#install` shows this page alone.
   import { install as I } from "../install.svelte";
   import { radio } from "../radio.svelte";
+  import { signatureText } from "../signature";
   import { bridgeEnabled } from "../transport/bridge";
 
   let { focus = false }: { focus?: boolean } = $props();
@@ -36,14 +37,14 @@
 
   async function picked(kind: "ferrite" | "reader" | "stock" | "backup", e: Event) {
     const el = e.currentTarget as HTMLInputElement;
-    const f = el.files?.[0];
+    const files = Array.from(el.files ?? []);
     el.value = "";
-    if (f) await I.pickFile(kind, f);
+    if (files.length) await I.pickFile(kind, files);
   }
   async function dropped(kind: "stock" | "backup", e: DragEvent) {
     e.preventDefault();
-    const f = e.dataTransfer?.files?.[0];
-    if (f) await I.pickFile(kind, f);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length) await I.pickFile(kind, files);
   }
   async function checkSaved(e: Event) {
     const el = e.currentTarget as HTMLInputElement;
@@ -197,6 +198,10 @@
         {#if I.ferriteSource === "bundled"}<span class="sub">, included with Console, checksum checked</span>{:else}<span class="sub">, from {I.ferrite.name}</span>{/if}
         {#if I.ssb}<span class="sub">, with your SSB patch</span>{/if}
       </p>
+      <!-- A bad signature is also in the image's problems (the install block says it once unlocked). -->
+      {#if I.ferriteSignature && !(I.ferriteSignature.kind === "bad" && I.unlocked)}
+        <p class={I.ferriteSignature.kind === "bad" ? "warn" : "sub"} data-k="signature">{signatureText(I.ferriteSignature)}</p>
+      {/if}
     {:else if I.releaseError}
       <p class="warn">{I.releaseError}</p>
     {/if}
@@ -288,15 +293,15 @@
     <div class="adv">
       <div>
         <h3>Ferrite image</h3>
-        <p class="sub">Use a file instead of the release included with Console.</p>
-        <label class="btn">Use a file…<input type="file" accept=".btf,.BTF" hidden aria-label="Ferrite file" onchange={(e) => picked("ferrite", e)} /></label>
+        <p class="sub">Use a file instead of the release included with Console. Pick its .minisig with it to check Ferrite's signature.</p>
+        <label class="btn">Use a file…<input type="file" accept=".btf,.BTF,.minisig" multiple hidden aria-label="Ferrite file" onchange={(e) => picked("ferrite", e)} /></label>
         {#if I.ferriteCheck?.problems.length}<ul class="warn">{#each I.ferriteCheck.problems as p, i (i)}<li>{p}</li>{/each}</ul>{/if}
       </div>
       <div>
         <h3>Reader image</h3>
         <p class="sub">The image that reads the flash for the backup. It can't write: it has no write code at all.</p>
-        <label class="btn">Use a file…<input type="file" accept=".btf,.BTF" hidden aria-label="Reader file" onchange={(e) => picked("reader", e)} /></label>
-        {#if I.readerFile}<p class="sub">{I.readerFile.name} ({I.readerSource === "bundled" ? "included" : "file"})</p>{/if}
+        <label class="btn">Use a file…<input type="file" accept=".btf,.BTF,.minisig" multiple hidden aria-label="Reader file" onchange={(e) => picked("reader", e)} /></label>
+        {#if I.readerFile}<p class="sub">{I.readerFile.name} ({I.readerSource === "bundled" ? "included" : "file"}){#if I.readerSignature && I.readerSignature.kind !== "bad"}. {signatureText(I.readerSignature)}{/if}</p>{/if}
         {#if I.readerCheck?.problems.length}<ul class="warn">{#each I.readerCheck.problems as p, i (i)}<li>{p}</li>{/each}</ul>{/if}
       </div>
     </div>

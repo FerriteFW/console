@@ -10,5 +10,6 @@ description = "Ferrite Console's protocol core: link sessions, answers, the UI r
 ferrite-core.workspace = true
 ferrite-app.workspace = true
 ferrite-ui.workspace = true
+minisign-verify.workspace = true
 serde.workspace = true
 serde_json.workspace = true

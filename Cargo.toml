@@ -17,6 +17,8 @@ ferrite-core = { path = "../ferrite/crates/ferrite-core" }
 ferrite-app = { path = "../ferrite/crates/ferrite-app" }
 ferrite-ui = { path = "../ferrite/crates/ferrite-ui" }
 ferrite-console-core = { path = "core" }
+# Ferrite release images are signed with minisign (Ed25519); Console checks them. No dependencies of its own.
+minisign-verify = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

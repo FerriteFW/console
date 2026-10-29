@@ -312,6 +312,9 @@ export type RestoreStart = { chip: number; cal_crc32: number; ranges: [number, n
 export type RestoreSummary = { ranges: [number, number][]; bytes: number; problems: string[]; ops: number; confirm_uid: string | null };
 
 export const sha256Hex = (b: Uint8Array): string => wasm.sha256_hex(b);
+/** A release signature (core/src/signature.rs): `signed` is its trusted comment; `error` says why it doesn't verify. */
+export type SignatureCheck = { signed: string | null; error: string | null };
+export const signatureCheck = (image: Uint8Array, minisig: string): SignatureCheck => JSON.parse(wasm.signature_check(image, minisig));
 export const backupCheck = (b: Uint8Array): BackupCheck => JSON.parse(wasm.backup_check(b));
 /** The Rust reader speaks fdumpz (BACKUP-9.6); hwtest's reader doesn't. */
 export const readerHasFdumpz = (btf: Uint8Array): boolean => wasm.reader_has_fdumpz(btf);

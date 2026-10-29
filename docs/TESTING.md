@@ -70,7 +70,7 @@ Open `target/release/bundle/macos/Ferrite Console.app` (unsigned: right-click �
 1. Have the current image as a fallback, and `flash.py` ready.
 2. Build the new image: `tools/mkbtf.sh tx` in ferrite.
 3. Connect › Cable. Firmware Update › Choose .btf (or "Use the bundled release (vX)": the image Console ships, SHA-256 checked). Version, size, blocks show; "Checks passed".
-4. Pick a stock `.btf`: refused, "not a Ferrite image".
+4. Pick a stock `.btf`: refused, "not a Ferrite image". Pick a CI release with its `.btf.minisig`: "Signed by Ferrite: …"; with a `.minisig` from another image: refused, "Bad signature".
 5. Update firmware…: the radio's firmware and build show against the file's version. Install.
 6. The radio restarts; the bar says "Firmware Update holds"; blocks count up (about 85 s).
 7. Done: Console connects again and shows the version. Check About (MENU 0 9 9) and a channel.

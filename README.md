@@ -77,8 +77,9 @@ npm run e2e:run     # the same without the build
 - Heard stations and messages update live while an APRS page is open.
 - Terminal: the radio's command line, with history; `key`, `txtest` and `xb start` refused.
 - Firmware Update: a Ferrite `.btf` into a radio already on Ferrite, over the cable.
+- Signatures: pick a release's `.btf.minisig` with its `.btf` (Firmware Update, Install › Advanced). Console checks it with Ferrite's minisign key and refuses one that doesn't verify; an image without one (your own build) is allowed, shown as not signed.
 - Install (`#install` shows it alone): back up the whole flash, save it, SSB from your stock `.BTF`, install Ferrite. Back to stock writes the backup back and flashes the stock `.BTF`.
-- `npm run bundle-firmware` copies the release and the reader image into `public/firmware/` (not committed).
+- `npm run bundle-firmware` copies the release and the reader image into `public/firmware/` (not committed), with each image's `.minisig` when one sits beside it (its text goes in the manifest).
 - Light and dark themes.
 
 ## Not done yet

@@ -38,6 +38,7 @@ import {
   type RestoreSummary,
   type SsbFound,
 } from "./core";
+import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
 import { Link, TimeoutError } from "./link";
 import { radio } from "./radio.svelte";
 import { sleep, type Transport } from "./transport/types";
@@ -58,7 +59,8 @@ const OP_FINISH = 4;
 
 export type Step = "idle" | "running" | "done" | "failed";
 export type Picked = { name: string; bytes: Uint8Array };
-export type Release = { version: string; file: string; sha256: string };
+/** A bundled image; `minisig` is its signature's text when the release was signed (scripts/bundle-firmware.mjs). */
+export type Release = { version: string; file: string; sha256: string; minisig?: string };
 type Manifest = { ferrite?: Release; reader?: Release };
 
 class Abort extends Error {}
@@ -231,9 +233,12 @@ class Install {
   ferrite = $state<Picked | null>(null);
   ferriteCheck = $state<FirmwareCheck | null>(null);
   ferriteSource = $state<"bundled" | "file" | "">("");
+  /** The images' minisig signatures (signature.ts): a bad one is also a problem in the image's check. */
+  ferriteSignature = $state<Signed | null>(null);
   readerFile = $state<Picked | null>(null);
   readerCheck = $state<ImageCheck | null>(null);
   readerSource = $state<"bundled" | "file" | "">("");
+  readerSignature = $state<Signed | null>(null);
   installStep = $state<Step>("idle");
   installed = $state("");
   // Back to stock
@@ -292,12 +297,12 @@ class Install {
       const b = await this.fetchChecked(m.ferrite);
       if (b) {
         this.release = m.ferrite;
-        this.setFerrite({ name: m.ferrite.file, bytes: b }, "bundled");
+        this.setFerrite({ name: m.ferrite.file, bytes: b }, "bundled", m.ferrite.minisig ?? null);
       }
     }
     if (m.reader) {
       const b = await this.fetchChecked(m.reader);
-      if (b) this.setReader({ name: m.reader.file, bytes: b }, "bundled");
+      if (b) this.setReader({ name: m.reader.file, bytes: b }, "bundled", m.reader.minisig ?? null);
     }
   }
 
@@ -318,24 +323,43 @@ class Install {
     }
   }
 
-  setFerrite(p: Picked, source: "bundled" | "file") {
+  /** A signature that doesn't verify refuses the image like a failed check. */
+  setFerrite(p: Picked, source: "bundled" | "file", minisig: string | null) {
+    const sig = signatureOf(p.bytes, minisig);
+    const c = firmwareCheck(p.bytes);
+    if (sig.kind === "bad") c.problems.push(signatureText(sig));
     this.ferrite = p;
-    this.ferriteCheck = firmwareCheck(p.bytes);
+    this.ferriteCheck = c;
+    this.ferriteSignature = sig;
     this.ferriteSource = source;
   }
 
-  setReader(p: Picked, source: "bundled" | "file") {
+  setReader(p: Picked, source: "bundled" | "file", minisig: string | null) {
+    const sig = signatureOf(p.bytes, minisig);
+    const c = imageCheck("reader", p.bytes);
+    if (sig.kind === "bad") c.problems.push(signatureText(sig));
     this.readerFile = p;
-    this.readerCheck = imageCheck("reader", p.bytes);
+    this.readerCheck = c;
+    this.readerSignature = sig;
     this.readerSource = source;
   }
 
-  async pickFile(kind: "ferrite" | "reader" | "stock" | "backup", f: File) {
+  /** Ferrite and the reader take a .btf with its .minisig (signature.ts); stock and backup the first file. */
+  async pickFile(kind: "ferrite" | "reader" | "stock" | "backup", files: File[]) {
     await loadCore();
+    if (kind === "ferrite" || kind === "reader") {
+      const { btf, sig } = splitPicked(files);
+      // No .btf among them: the image's own check refuses whatever came first, as before.
+      const f = btf ?? files[0];
+      const p = { name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) };
+      const minisig = btf && sig ? await sig.text() : null;
+      if (kind === "ferrite") this.setFerrite(p, "file", minisig);
+      else this.setReader(p, "file", minisig);
+      return;
+    }
+    const f = files[0];
     const p = { name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) };
-    if (kind === "ferrite") this.setFerrite(p, "file");
-    else if (kind === "reader") this.setReader(p, "file");
-    else if (kind === "stock") {
+    if (kind === "stock") {
       this.pickStock(p);
       if (this.keepStock) await keep.put(p);
     } else {
