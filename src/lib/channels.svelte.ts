@@ -65,6 +65,9 @@ export function download(name: string, text: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/** The channels part's JSON, as far as Console counts it (core/src/plan.rs `Backup`). */
+export type ChannelsFile = { format: string; version: number; zones: unknown[]; channels: unknown[] };
+
 export function stamp(d = new Date()) {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
@@ -233,29 +236,14 @@ class Channels {
     return { set, home, name };
   }
 
-  /** The Back up button: a fresh read to a file; the table is left alone. */
-  async backupOnly() {
-    this.error = "";
-    try {
-      const { name } = await this.backupRadio();
-      this.notes = [`Backup saved: ${name} (your downloads).`];
-    } catch (e) {
-      this.error = (e as Error).message;
-    }
+  /** The table as the channels part's JSON (the backup format: `.ferrite`'s channels.json), unwritten changes too. */
+  fileText(saved: string, radio: Record<string, string>): string {
+    return backupFile($state.snapshot(this.table) as ChannelSet, saved, radio);
   }
 
-  /** The table to a file, in the backup format (works offline). */
-  saveTable() {
-    this.error = "";
-    try {
-      download(`${this.fileBase()}-table.json`, backupFile(this.table, new Date().toISOString(), this.radioMeta()), "application/json");
-    } catch (e) {
-      this.error = (e as Error).message;
-    }
-  }
-
-  /** A backup file into the table (Write then shows the diff against the radio). */
-  loadFile(text: string, name: string) {
+  /** A backup file (or a codeplug's channels.json) into the table as unwritten changes (Write then shows the diff
+   *  against the radio): true when loaded, else `error` says why. */
+  loadFile(text: string, name: string): boolean {
     this.error = "";
     try {
       const r = restoreFile(text);
@@ -263,8 +251,10 @@ class Channels {
       this.table = r.set;
       this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})`;
       this.notes = [];
+      return true;
     } catch (e) {
       this.error = `${name}: ${(e as Error).message}`;
+      return false;
     }
   }
 

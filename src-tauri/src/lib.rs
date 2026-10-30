@@ -8,7 +8,7 @@
 //!   come back on the `events` channel (an ArrayBuffer per read, a string when the link drops).
 //! - `transport_write(bytes)`, `transport_set_baud(rate)` (the cable), `transport_close()`.
 //! - `save_file` (raw body, the `x-name` header): the native save dialog, the file written and read back; the path,
-//!   or null when cancelled (the Install page's backup, BACKUP-2).
+//!   or null when cancelled (the Install page's backup, BACKUP-2; the .ferrite codeplug's Save as… and Back up radio).
 
 mod ble;
 mod serial;

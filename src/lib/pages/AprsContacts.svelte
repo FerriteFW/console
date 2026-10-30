@@ -69,6 +69,15 @@
     {/if}
   </div>
   {#if c.error}<div class="pg-banner">{c.error}</div>{/if}
+  {#if c.pending}
+    <div class="pending" aria-live="polite">
+      <span>{c.pending.list.length} {c.pending.list.length === 1 ? "contact" : "contacts"} from {c.pending.from}, not written yet.</span>
+      <button class="btn primary" disabled={!connected || !!c.busy} onclick={() => c.writePending()} title={connected ? "Adds or renames them on the radio" : "Connect a radio to write"}
+        >Write to radio</button
+      >
+      <button class="btn" onclick={() => (c.pending = null)}>Discard</button>
+    </div>
+  {/if}
 
   {#if c.loaded}
     <form
@@ -106,6 +115,15 @@
 </div>
 
 <style>
+  .pending {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 8px 12px;
+    border: 1px solid var(--amber);
+    border-radius: 8px;
+  }
   .add {
     display: flex;
     gap: 8px;

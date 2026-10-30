@@ -29,17 +29,17 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 3. Leave it open while a station is heard: it moves to the top without Refresh.
 4. Map: stations and the radio (green) on OpenStreetMap.
 5. Messages: conversations match the radio. Only with Dry TX on (MENU 0 8 9 2): send one to yourself, check the radio's toast and its state.
-6. APRS Settings: read, change Power, write (backup first). Check MENU 0 5 5 4. Load the backup and write it back.
+6. APRS Settings: read, change Power, write (backup first). Check MENU 0 5 5 4. Open… the backup and write it back.
 
 ## Channels & Zones (cable). Keep every backup until done.
 
 1. Read from radio. Counts and names match the radio.
-2. Back up radio: a backup file downloads.
+2. Back up radio: a `.ferrite` downloads.
 3. Spot-check five channels against the radio's editor.
 4. Rename one, set a TX tone `D023N`, set one RX only. Type `700` as RX: a red refusal. Put it back.
 5. Write to radio…: a backup downloads, the diff shows exactly the three changes. Cancel.
 6. Write and confirm. Console reads back: "the radio holds the table". Check on the radio.
-7. Load file › the step-2 backup. Write: the three changes go back. Check on the radio.
+7. File › Open… the step-2 `.ferrite`. Write: the three changes go back. Check on the radio.
 8. CHIRP: export, import the same file. No notes; Write shows nothing to write.
 9. + Zone, add a channel to it, Write. Delete the zone, Write. Check ◀▶ on the radio.
 10. BACK on the radio during a write: Console says cancelled, re-reads.

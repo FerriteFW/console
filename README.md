@@ -37,7 +37,7 @@ npm run tauri build                            # the .app and a .dmg in target/r
 ## Test
 
 ```sh
-npm test            # the core's Rust tests
+npm test            # the core's Rust tests, then the Node unit tests (tests/unit: zip, codeplug)
 npm run e2e         # build, then the e2e tests on a headless simulator through the bridge
 npm run e2e:run     # the same without the build
 ```
@@ -65,7 +65,7 @@ npm run e2e:run     # the same without the build
 - Channels & Zones: read, edit in place, write with a backup and a diff first.
 - Every edit is checked by ferrite's own code. Changed rows amber, new rows green.
 - CHIRP CSV import and export. An import goes in as new channels in a new zone (the default when its numbers clash), by number, or replacing every channel.
-- Backup files: save, load, restore.
+- One file kind, the `.ferrite` codeplug: Save as… holds the channels, zones, settings, APRS settings and contacts; Open… loads each part as unwritten changes. Older `-backup.json` files still open. Format: `docs/dev/codeplug-format.md` in the docs repo.
 - Add channels: fixed sets (FRS, GMRS, MURS, PMR446, marine, weather, BC resource roads, calling).
 - Add channels: airports near a place (AM, RX only), place typed or from the radio's GPS or fixed position.
 - Add channels: Canadian licensed sites (TAFL) near a place, grouped by licensee.

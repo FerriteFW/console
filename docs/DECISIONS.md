@@ -53,6 +53,7 @@
 - Then read back.
 - Deleting a middle zone rewrites the zones after it. Correct, but more writes than needed.
 - Backup files are Console's JSON with the link's record bytes. CHIRP CSV can't hold zones, end tones or flags.
+- Oct 30, 2026 (Alex): one codeplug file, `.ferrite`: a zip with `manifest.json` and each part as Console already writes it (`channels.json`, `settings.json`, `aprs.json`, `contacts.json`; a part may be missing). The zip is NeonPlug's own writer and reader (`src/lib/zip.ts`), no library. Save as… and Back up radio save it on every page; Open… loads every part into its page as unwritten changes. The per-page backup taken before a write stays a single-part `-backup.json`. Spec: `docs/dev/codeplug-format.md` (docs repo).
 
 ## CHIRP CSV
 

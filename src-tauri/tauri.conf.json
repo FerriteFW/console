@@ -30,6 +30,16 @@
     "targets": "all",
     "category": "Utility",
     "shortDescription": "Live view and remote keys for Ferrite radios",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "fileAssociations": [
+      {
+        "ext": ["ferrite"],
+        "name": "Ferrite codeplug",
+        "description": "Ferrite codeplug",
+        "role": "Editor",
+        "mimeType": "application/x-ferrite-codeplug",
+        "exportedType": { "identifier": "dev.ferritefw.console.codeplug", "conformsTo": ["public.data", "public.zip-archive"] }
+      }
+    ]
   }
 }

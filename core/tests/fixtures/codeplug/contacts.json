@@ -1,0 +1,21 @@
+{
+  "format": "ferrite-console-contacts",
+  "version": 1,
+  "saved": "2026-10-30T21:12:00.000Z",
+  "radio": {
+    "callsign": "VA7IF",
+    "connection": "Cable",
+    "firmware": "0.8.2",
+    "uid": "7Q2KD M4XRT 9BC1F HW03N"
+  },
+  "contacts": [
+    {
+      "call": "VA7XYZ-9",
+      "name": "Sam mobile"
+    },
+    {
+      "call": "VE7ABC",
+      "name": "Club station"
+    }
+  ]
+}

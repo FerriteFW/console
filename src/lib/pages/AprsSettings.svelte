@@ -9,6 +9,7 @@
   import SettingsWriteDialog from "../components/SettingsWriteDialog.svelte";
   import { aprsSettings as s } from "../aprsSettings.svelte";
   import { radio } from "../radio.svelte";
+  import { backUp, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
   import type { SettingItem } from "../core";
 
   let fileInput: HTMLInputElement;
@@ -45,11 +46,31 @@
     await s.read();
   }
 
-  async function pick(e: Event) {
-    const el = e.currentTarget as HTMLInputElement;
-    const f = el.files?.[0];
-    el.value = "";
-    if (f) s.loadFile(await f.text(), f.name);
+
+  let notice = $state("");
+  /** Open…: a .ferrite (every part into its page) or an older backup; one notice says what was loaded. */
+  async function open(e: Event) {
+    const f = await picked(e);
+    if (!f) return;
+    notice = "";
+    try {
+      const o = await openFile(f);
+      // An old backup of this page's own part: the status line already says it was loaded.
+      notice = o.parts.length === 1 && o.parts[0] === "aprs" && !o.failed.length ? "" : o.notice;
+    } catch (err) {
+      s.error = (err as Error).message;
+    }
+  }
+
+  /** Save as… and Back up radio: the notice says where it went. */
+  async function saving(run: () => Promise<string>) {
+    s.error = "";
+    notice = "";
+    try {
+      notice = await run();
+    } catch (err) {
+      s.error = (err as Error).message;
+    }
   }
 </script>
 
@@ -68,11 +89,11 @@
       <button class="btn quiet" disabled={!dirty.size || busy} onclick={() => s.revert()} title="Back to what was read">Undo edits</button>
     </div>
     <div class="grp">
-      <span class="label">Backup</span>
-      <button class="btn" disabled={!connected || busy} onclick={() => s.backupOnly()}>Back up radio</button>
-      <button class="btn" disabled={busy || !s.record} onclick={() => s.saveEdited()}>Save edited</button>
-      <button class="btn" disabled={busy} onclick={() => fileInput.click()}>Load file…</button>
-      <input bind:this={fileInput} type="file" accept=".json,application/json" hidden onchange={pick} />
+      <span class="label">File</span>
+      <button class="btn" disabled={busy} onclick={() => fileInput.click()} title="A codeplug (.ferrite) or an older backup (.json) into the editors; Write then puts it on the radio">Open…</button>
+      <button class="btn" disabled={busy || !s.record} onclick={() => saving(saveCodeplug)} title="Everything open in Console as one codeplug (.ferrite): these settings with their unwritten edits, the channels, Radio Settings and contacts">Save as…</button>
+      <button class="btn" disabled={!connected || busy} onclick={() => saving(() => backUp("aprs"))} title="Read the radio's APRS settings and save them to a .ferrite">Back up radio</button>
+      <input bind:this={fileInput} type="file" accept={OPEN_ACCEPT} hidden onchange={open} />
     </div>
   </div>
 
@@ -89,6 +110,7 @@
     {/if}
   </div>
   {#if s.error}<div class="pg-banner">{s.error}</div>{/if}
+  {#if notice}<div class="pg-banner ok" aria-live="polite">{notice} <button class="x" aria-label="Dismiss" onclick={() => (notice = "")}>✕</button></div>{/if}
   {#each s.view?.notes ?? [] as n, i (i)}<div class="pg-banner warn">{n}</div>{/each}
 
   {#if s.view}
@@ -102,6 +124,16 @@
 <SettingsWriteDialog store={s} what="APRS settings" />
 
 <style>
+  .pg-banner.ok {
+    border-color: var(--line);
+    color: var(--text);
+  }
+  .pg-banner .x {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+  }
   .dirty {
     color: var(--amber);
   }

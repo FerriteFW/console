@@ -13,6 +13,10 @@
   import LibraryDialog from "../components/library/LibraryDialog.svelte";
   import { library } from "../library.svelte";
   import { channels } from "../channels.svelte";
+  import { backUp, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
+  import { settings } from "../settings.svelte";
+  import { aprsSettings } from "../aprsSettings.svelte";
+  import { contacts } from "../contacts.svelte";
   import { radio } from "../radio.svelte";
   import { DEV_TOOLS } from "../devtools";
   import { channelChoices, loadCore, type Choices } from "../core";
@@ -113,6 +117,30 @@
     if (f) then(await f.text(), f.name);
   }
 
+  /** Open…: a .ferrite (every part into its page) or an older backup; one notice says what was loaded. */
+  async function open(e: Event) {
+    const f = await picked(e);
+    if (!f) return;
+    try {
+      say((await openFile(f)).notice);
+    } catch (err) {
+      channels.error = (err as Error).message;
+    }
+  }
+
+  /** Save as… and Back up radio…: the notice says where it went. */
+  async function saving(run: () => Promise<string>) {
+    channels.error = "";
+    try {
+      const text = await run();
+      if (text) say(text);
+    } catch (err) {
+      channels.error = (err as Error).message;
+    }
+  }
+
+  const anything = $derived(!!(t.channels.length || t.zones.length || settings.record || aprsSettings.record || contacts.loaded || contacts.pending));
+
   function choose(f: () => void) {
     menuOpen = false;
     f();
@@ -193,10 +221,10 @@
         {#if menuOpen}
           <div class="menu" role="menu" aria-label="File">
             <button role="menuitem" disabled={busy} onclick={() => choose(() => fileInput.click())}>
-              <b>Open…</b><span>A saved file (.json) into the table; Write then restores it</span>
+              <b>Open…</b><span>A codeplug (.ferrite) or an older backup (.json); Write then puts it on the radio</span>
             </button>
-            <button role="menuitem" disabled={busy || (!t.channels.length && !t.zones.length)} onclick={() => choose(() => channels.saveTable())}>
-              <b>Save as…</b><span>The table, unwritten changes too, as a file</span>
+            <button role="menuitem" disabled={busy || !anything} onclick={() => choose(() => void saving(saveCodeplug))}>
+              <b>Save as…</b><span>One codeplug (.ferrite): the table with its unwritten changes, and the settings, APRS settings and contacts read or opened</span>
             </button>
             <hr />
             <button role="menuitem" disabled={busy} onclick={() => choose(() => chirpInput.click())}>
@@ -206,8 +234,8 @@
               <b>Export CHIRP…</b><span>The table as a CHIRP CSV file</span>
             </button>
             <hr />
-            <button role="menuitem" disabled={!connected || busy} onclick={() => choose(() => void channels.backupOnly())}>
-              <b>Back up radio…</b><span>A fresh read of the radio to a file; the table is left alone</span>
+            <button role="menuitem" disabled={!connected || busy} onclick={() => choose(() => void saving(() => backUp("channels")))}>
+              <b>Back up radio…</b><span>A fresh read of the radio's channels to a .ferrite; the table is left alone</span>
             </button>
             <button role="menuitem" disabled={busy || !pending} onclick={discard}>
               <b>Discard unwritten changes</b><span>The table back as it was read</span>
@@ -229,7 +257,7 @@
     {/if}
   </div>
   <input bind:this={chirpInput} type="file" accept=".csv,text/csv" hidden onchange={(e) => pick(e, (s, n) => channels.importChirp(s, n))} />
-  <input bind:this={fileInput} type="file" accept=".json,application/json" hidden onchange={(e) => pick(e, (s, n) => channels.loadFile(s, n))} />
+  <input bind:this={fileInput} type="file" accept={OPEN_ACCEPT} hidden onchange={open} />
 
   {#if channels.restored}
     <div class="restored" aria-live="polite">

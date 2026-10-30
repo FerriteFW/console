@@ -172,24 +172,9 @@ class RadioSettings {
     return { record, extras, name };
   }
 
-  async backupOnly() {
-    this.error = "";
-    try {
-      const { name } = await this.backupRadio();
-      this.source = `Backup saved: ${name} (your downloads).`;
-    } catch (e) {
-      this.error = (e as Error).message;
-    }
-  }
-
-  saveEdited() {
-    if (!this.record) return;
-    download(`${this.fileBase()}-edited.json`, settingsBackup(this.record, this.extras, new Date().toISOString(), this.radioMeta()), "application/json");
-  }
-
-  /** A backup file into the editor (Write then shows the diff to the radio and restores it). A value the file lacks
-   * (a file from before it) stays as read. */
-  loadFile(text: string, name: string) {
+  /** A backup file (or a codeplug's settings.json) into the editor as unwritten changes (Write then shows the diff to
+   * the radio and restores it): true when loaded. A value the file lacks (a file from before it) stays as read. */
+  loadFile(text: string, name: string): boolean {
     this.error = "";
     try {
       const r = settingsRestore(text);
@@ -198,8 +183,10 @@ class RadioSettings {
       if (!this.base) this.took(rec, extras, "");
       else this.show(rec, extras);
       this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})`;
+      return true;
     } catch (e) {
       this.error = `${name}: ${(e as Error).message}`;
+      return false;
     }
   }
 

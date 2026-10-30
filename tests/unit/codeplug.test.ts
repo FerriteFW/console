@@ -1,0 +1,120 @@
+// src/lib/codeplug.ts: the .ferrite codeplug (docs/dev/codeplug-format.md). The documented example
+// (core/tests/fixtures/codeplug/, which the doc shows and core's codeplug_example tests check against Console's own
+// part writers) zipped and read back; files refused: not a zip, a zip that isn't a codeplug, a newer version, a
+// listed part missing.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import {
+  buildCodeplug,
+  codeplugName,
+  contactsJson,
+  isZip,
+  manifest,
+  PARTS,
+  readCodeplug,
+  readContacts,
+  VERSION,
+  type Manifest,
+  type Parts,
+} from "../../src/lib/codeplug.ts";
+import { createZip, readZip } from "../../src/lib/zip.ts";
+
+const fx = (n: string) => readFileSync(new URL(`../../core/tests/fixtures/codeplug/${n}`, import.meta.url), "utf8");
+const bytes = async (b: Blob) => new Uint8Array(await b.arrayBuffer());
+
+test("the documented example round-trips", async () => {
+  const m: Manifest = JSON.parse(fx("manifest.json"));
+  const parts: Parts = {};
+  for (const p of m.parts) parts[p] = fx(`${p}.json`);
+  const file = await bytes(await buildCodeplug(parts, m));
+  assert.ok(isZip(file));
+  // The zip holds exactly the manifest and the listed parts, byte for byte.
+  const files = await readZip(file);
+  assert.deepEqual([...files.keys()], ["manifest.json", "channels.json", "aprs.json", "contacts.json"]);
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(files.get("manifest.json"))), m);
+  const back = await readCodeplug(file);
+  assert.deepEqual(back.manifest, m);
+  assert.deepEqual(back.parts, parts);
+  assert.equal(back.parts.settings, undefined, "saved before Settings was read: no settings part");
+  assert.equal(readContacts(back.parts.contacts!).contacts.length, 2);
+});
+
+test("the example's manifest is what Console writes", () => {
+  const m: Manifest = JSON.parse(fx("manifest.json"));
+  const parts: Parts = { channels: "{}", aprs: "{}", contacts: "{}" };
+  const made = manifest(parts, { id: m.radio.id, callsign: m.radio.callsign, firmware: m.radio.firmware, build: m.radio.build }, m.console, new Date(m.created));
+  assert.deepEqual(made, m);
+  // Byte for byte as Console writes it (buildCodeplug: JSON.stringify(.., null, 2)), key order included.
+  assert.equal(JSON.stringify(made, null, 2), fx("manifest.json"));
+  assert.equal(m.version, VERSION);
+  // Unknown radio facts are left out, not written empty.
+  assert.deepEqual(manifest({ settings: "{}" }, { callsign: "" }, "0.1.0").radio, {});
+  assert.deepEqual(manifest({ contacts: "{}", channels: "{}" }, {}, "0.1.0").parts, ["channels", "contacts"], "in PARTS order");
+  assert.deepEqual([...PARTS], ["channels", "settings", "aprs", "contacts"]);
+});
+
+test("the example's contacts.json is what Console writes", () => {
+  const f = readContacts(fx("contacts.json"));
+  assert.equal(contactsJson(f.contacts, f.saved, f.radio), fx("contacts.json"));
+});
+
+// docs/dev/codeplug-format.md (the docs checkout beside this one) shows the example: its blocks are the fixtures.
+const doc = new URL("../../../docs/dev/codeplug-format.md", import.meta.url);
+test("the format doc shows the example as it is", { skip: !existsSync(doc) && "no docs checkout beside this one" }, () => {
+  const text = readFileSync(doc, "utf8");
+  for (const n of ["manifest.json", "channels.json", "aprs.json", "contacts.json"]) {
+    const at = text.indexOf(`\`${n}\``, text.indexOf("## Example"));
+    assert.ok(at > 0, `the doc's example has ${n}`);
+    const open = text.indexOf("```json\n", at) + "```json\n".length;
+    const block = text.slice(open, text.indexOf("\n```", open));
+    assert.equal(block, fx(n), `the doc's ${n} is the fixture`);
+  }
+});
+
+test("contacts: written and read back", () => {
+  const t = contactsJson([{ call: "VE7ABC", name: "Club" }], "2026-10-30T00:00:00.000Z", { callsign: "VA7IF" });
+  const f = readContacts(t);
+  assert.equal(f.format, "ferrite-console-contacts");
+  assert.deepEqual(f.contacts, [{ call: "VE7ABC", name: "Club" }]);
+  assert.throws(() => readContacts('{"format":"ferrite-console-contacts","version":2,"contacts":[]}'), /newer/);
+  assert.throws(() => readContacts('{"format":"ferrite-console-channels","version":1}'), /not a contacts file/);
+});
+
+test("names: callsign or radio, then yyyymmdd-hhmm", () => {
+  const d = new Date(2026, 9, 30, 14, 12, 59);
+  assert.equal(codeplugName("VA7IF", d), "VA7IF-20261030-1412.ferrite");
+  assert.equal(codeplugName("7Q2KDM4XRT", d), "7Q2KDM4XRT-20261030-1412.ferrite");
+  assert.equal(codeplugName(undefined, d), "radio-20261030-1412.ferrite");
+  assert.equal(codeplugName("a/b c", d), "abc-20261030-1412.ferrite");
+});
+
+test("refused: not a zip, not a codeplug, a newer version, a listed part missing", async () => {
+  const m: Manifest = JSON.parse(fx("manifest.json"));
+  const zip = async (entries: { name: string; data: string }[]) => bytes(await createZip(entries));
+  await assert.rejects(readCodeplug(new TextEncoder().encode(fx("channels.json"))), /not a Ferrite codeplug/);
+  await assert.rejects(readCodeplug(await zip([{ name: "readme.txt", data: "hi" }])), /not a Ferrite codeplug: a zip without manifest\.json/);
+  await assert.rejects(readCodeplug(await zip([{ name: "manifest.json", data: '{"format":"neonplug"}' }])), /not a Ferrite codeplug: its manifest says format "neonplug"/);
+  await assert.rejects(readCodeplug(await zip([{ name: "manifest.json", data: "{" }])), /isn't JSON/);
+  await assert.rejects(
+    readCodeplug(await zip([{ name: "manifest.json", data: JSON.stringify({ ...m, version: VERSION + 1 }) }])),
+    /newer codeplug \(format version 2\) than this Console reads \(version 1\): update Ferrite Console/,
+  );
+  await assert.rejects(readCodeplug(await zip([{ name: "manifest.json", data: JSON.stringify(m) }])), /damaged codeplug: the manifest lists channels but there is no channels\.json/);
+  // A damaged zip is refused by the zip reader's checks.
+  const good = await bytes(await buildCodeplug({ channels: fx("channels.json") }, manifest({ channels: "x" }, {}, "0.1.0")));
+  const bad = good.slice();
+  bad[30 + "manifest.json".length + 8] ^= 0xff; // inside the first entry's data
+  await assert.rejects(readCodeplug(bad), /not a Ferrite codeplug: Corrupt ZIP/);
+});
+
+test("a part this Console doesn't know (added later in the same version) is left alone", async () => {
+  const m = { ...manifest({ contacts: "x" }, {}, "0.1.0"), parts: ["contacts", "presets"] };
+  const file = await bytes(await createZip([
+    { name: "manifest.json", data: JSON.stringify(m) },
+    { name: "contacts.json", data: fx("contacts.json") },
+    { name: "presets.json", data: "{}" },
+  ]));
+  const back = await readCodeplug(file);
+  assert.deepEqual(Object.keys(back.parts), ["contacts"]);
+});

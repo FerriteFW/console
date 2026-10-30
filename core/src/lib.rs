@@ -33,6 +33,8 @@ pub mod audio;
 pub mod aprs_settings;
 pub mod channels;
 pub mod chirp;
+#[cfg(test)]
+mod codeplug_example;
 pub mod demo;
 pub mod firmware;
 pub mod install;

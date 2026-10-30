@@ -1,0 +1,41 @@
+{
+  "format": "ferrite-console-aprs",
+  "version": 1,
+  "saved": "2026-10-30T21:12:00.000Z",
+  "radio": {
+    "callsign": "VA7IF",
+    "connection": "Cable",
+    "firmware": "0.8.2",
+    "uid": "7Q2KD M4XRT 9BC1F HW03N"
+  },
+  "record": "00000000020000070000000000000000000000000000000010",
+  "extras": {
+    "0 5 5 2": "Person",
+    "0 5 5 3": "None",
+    "0 5 5 6": "Exact",
+    "0 5 5 7": "Off",
+    "0 5 6 4": "Off",
+    "0 5 9 3": "300 ms",
+    "0 5 9 4": "Mid"
+  },
+  "settings": {
+    "0 5 4 Frequency": "144.390",
+    "0 5 5 1 SSID": "7 Handheld",
+    "0 5 5 2 Symbol": "Person",
+    "0 5 5 3 Comment": "None",
+    "0 5 5 6 Ambiguity": "Exact",
+    "0 5 5 7 Mic-E": "Off",
+    "0 5 6 1 Mode": "Off",
+    "0 5 6 2 After voice TX": "Off",
+    "0 5 6 3 Power": "Low",
+    "0 5 6 4 Telemetry": "Off",
+    "0 5 7 1 Digipeat": "Off",
+    "0 5 7 2 Aliases": "WIDE1-1",
+    "0 5 7 3 Wait": "0 s",
+    "0 5 9 1 Path": "WIDE1-1,WIDE2-1",
+    "0 5 9 2 Custom path": "None",
+    "0 5 9 3 TX delay": "300 ms",
+    "0 5 9 4 TX level": "Mid",
+    "0 5 9 5 FX.25 on TX": "16 bytes"
+  }
+}

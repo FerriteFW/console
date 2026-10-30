@@ -27,6 +27,21 @@ class Contacts {
   loaded = $state(false);
   busy = $state("");
   error = $state("");
+  /** Contacts opened from a file (a .ferrite's contacts.json), not on the radio yet: the page offers to write them. */
+  pending = $state<{ list: Contact[]; from: string } | null>(null);
+
+  /** A file's contacts as unwritten changes (contacts are written by callsign: adds and renames, none deleted). */
+  offer(list: Contact[], from: string) {
+    this.pending = { list: list.map((c) => ({ call: c.call.toUpperCase(), name: cleanName(c.name) })), from };
+  }
+
+  /** The opened contacts onto the radio (the ones compose can't take are left out), then read back. */
+  async writePending() {
+    const p = this.pending;
+    if (!p) return;
+    await this.write(p.list.filter((c) => callOk(c.call)));
+    if (!this.error) this.pending = null;
+  }
 
   async read() {
     const link = radio.connectedLink;

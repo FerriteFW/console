@@ -6,6 +6,7 @@
   import SettingRows from "../components/SettingRows.svelte";
   import { settings } from "../settings.svelte";
   import { radio } from "../radio.svelte";
+  import { backUp, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
 
   let fileInput: HTMLInputElement;
   let search = $state("");
@@ -43,11 +44,31 @@
     await settings.read();
   }
 
-  async function pick(e: Event) {
-    const el = e.currentTarget as HTMLInputElement;
-    const f = el.files?.[0];
-    el.value = "";
-    if (f) settings.loadFile(await f.text(), f.name);
+
+  let notice = $state("");
+  /** Open…: a .ferrite (every part into its page) or an older backup; one notice says what was loaded. */
+  async function open(e: Event) {
+    const f = await picked(e);
+    if (!f) return;
+    notice = "";
+    try {
+      const o = await openFile(f);
+      // An old backup of this page's own part: the status line already says it was loaded.
+      notice = o.parts.length === 1 && o.parts[0] === "settings" && !o.failed.length ? "" : o.notice;
+    } catch (err) {
+      settings.error = (err as Error).message;
+    }
+  }
+
+  /** Save as… and Back up radio: the notice says where it went. */
+  async function saving(run: () => Promise<string>) {
+    settings.error = "";
+    notice = "";
+    try {
+      notice = await run();
+    } catch (err) {
+      settings.error = (err as Error).message;
+    }
   }
 
 </script>
@@ -67,11 +88,11 @@
       <button class="btn quiet" disabled={!dirty.size || busy} onclick={() => settings.revert()} title="Back to what was read">Undo edits</button>
     </div>
     <div class="grp">
-      <span class="label">Backup</span>
-      <button class="btn" disabled={!connected || busy} onclick={() => settings.backupOnly()} title="Read the radio's settings and save them to a file">Back up radio</button>
-      <button class="btn" disabled={busy || !settings.record} onclick={() => settings.saveEdited()} title="These settings as a backup file">Save edited</button>
-      <button class="btn" disabled={busy} onclick={() => fileInput.click()} title="A backup file into the editor; Write then restores it">Load file…</button>
-      <input bind:this={fileInput} type="file" accept=".json,application/json" hidden onchange={pick} />
+      <span class="label">File</span>
+      <button class="btn" disabled={busy} onclick={() => fileInput.click()} title="A codeplug (.ferrite) or an older backup (.json) into the editors; Write then puts it on the radio">Open…</button>
+      <button class="btn" disabled={busy || !settings.record} onclick={() => saving(saveCodeplug)} title="Everything open in Console as one codeplug (.ferrite): these settings with their unwritten edits, the channels, APRS settings and contacts">Save as…</button>
+      <button class="btn" disabled={!connected || busy} onclick={() => saving(() => backUp("settings"))} title="Read the radio's settings and save them to a .ferrite">Back up radio</button>
+      <input bind:this={fileInput} type="file" accept={OPEN_ACCEPT} hidden onchange={open} />
     </div>
     {#if view}
       <input class="search" type="search" placeholder="Find a setting" aria-label="Find a setting" bind:value={search} />
@@ -91,6 +112,7 @@
     {/if}
   </div>
   {#if settings.error}<div class="banner">{settings.error}</div>{/if}
+  {#if notice}<div class="banner ok" aria-live="polite">{notice} <button class="x" aria-label="Dismiss" onclick={() => (notice = "")}>✕</button></div>{/if}
   {#each view?.notes ?? [] as n, i (i)}<div class="banner warn">{n}</div>{/each}
 
   {#if view}
@@ -154,6 +176,16 @@
     border: 1px solid var(--red);
     border-radius: 8px;
     color: var(--red);
+  }
+  .banner.ok {
+    border-color: var(--line);
+    color: var(--text);
+  }
+  .banner .x {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
   }
   .banner.warn {
     border-color: var(--amber);
