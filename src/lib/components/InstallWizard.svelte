@@ -7,7 +7,7 @@
   import { signatureText } from "../signature";
   import { bridgeEnabled } from "../transport/bridge";
 
-  let { onclose, home = "#/home" }: { onclose: () => void; home?: string } = $props();
+  let { onclose, home = "#/live" }: { onclose: () => void; home?: string } = $props();
   const bridge = bridgeEnabled();
   void I.load();
 
@@ -270,7 +270,7 @@
       </ul>
       <div class="row">
         <button class="btn" onclick={close}>Close</button>
-        <a class="btn primary" href={home} onclick={() => onclose()}>Open Home</a>
+        <a class="btn primary" href={home} onclick={() => onclose()}>Open Live View</a>
       </div>
     {/if}
   </div>

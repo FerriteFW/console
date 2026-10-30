@@ -10,7 +10,7 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
 - [x] A cable with no answer points to Install (in the welcome).
 - [x] The browser's reason a way can't connect, as text (in the welcome; the top bar still uses a tooltip).
 - [x] Layout (Alex chose the desktop shell over tabs, Oct 29): sidebar Home, Live View, Channels & Zones, Radio
-  Settings, APRS, Firmware, then More (Event Log, Terminal, About); APRS and Firmware as tabs; Home with the jobs as
+  Settings, APRS, Firmware, then More (Home was tried and dropped, Alex Oct 29: "I do not like the Home tab"; the welcome is the starting point and Live View the first page) (Event Log, Terminal, About); APRS and Firmware as tabs; Home with the jobs as
   cards and Update saying whether the radio is behind. Next for the editors: NeonPlug's toolbar (Read, Write,
   File, "N unwritten") on Channels, Settings and APRS settings.
 - [x] Update as a modal wizard (Alex's pick, Oct 29): Check (versions, signature) → Update (progress, keep the cable

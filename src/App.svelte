@@ -6,7 +6,6 @@
   import { DEV_TOOLS } from "./lib/devtools";
   import Wordmark from "./lib/components/Wordmark.svelte";
   import LiveView from "./lib/pages/LiveView.svelte";
-  import Home from "./lib/pages/Home.svelte";
   import About from "./lib/pages/About.svelte";
   import Channels from "./lib/pages/Channels.svelte";
   import Terminal from "./lib/pages/Terminal.svelte";
@@ -38,7 +37,6 @@
   type Page = { id: string; name: string; soon?: string };
   type Section = { id: string; name: string; tabs?: Page[] };
   const sections: Section[] = [
-    { id: "home", name: "Home" },
     { id: "live", name: "Live View" },
     { id: "channels", name: "Channels & Zones" },
     { id: "settings", name: "Radio Settings" },
@@ -74,7 +72,7 @@
 
   let navOpen = $state(false);
   let coreError = $state("");
-  const page = $derived(all.find((p) => p.id === route.id)?.id ?? "home");
+  const page = $derived(all.find((p) => p.id === route.id)?.id ?? "live");
   const section = $derived(sectionOf(page));
   // `#install` (no slash): the Install wizard alone, for setting up a new radio (ferritefw.dev/install); closing it
   // goes to the Install tab.
@@ -161,9 +159,7 @@
           {/each}
         </div>
       {/if}
-      {#if page === "home"}
-        <Home />
-      {:else if page === "live"}
+      {#if page === "live"}
         <LiveView />
       {:else if page === "channels"}
         <Channels />
