@@ -1257,6 +1257,40 @@ pub fn backup(rec: &[u8], ex: &Extras, saved: &str, radio: BTreeMap<String, Stri
     serde_json::to_string_pretty(&b).unwrap_or_default()
 }
 
+/// The PIN lock's settings (MENU 0 9 3: PIN lock, channel-only mode, the PIN; and the PIN's counters).
+const PIN_MENU: &str = "0 9 3 ";
+
+/// The record with the PIN lock's fields cleared (mode, PIN, length, counters, channel-only): what a `.ferrite`
+/// codeplug carries. Codeplugs get shared; the PIN lock stays the radio's own.
+pub fn without_pin(rec: &[u8]) -> Vec<u8> {
+    keep_pin(rec, &record_of(&Settings::DEFAULT))
+}
+
+/// `rec` with the PIN lock's fields taken from `from` (the radio's own record): opening a codeplug keeps them.
+pub fn keep_pin(rec: &[u8], from: &[u8]) -> Vec<u8> {
+    let f = settings_of(from);
+    let s = settings_of(rec);
+    record_of(&Settings {
+        pin_mode: f.pin_mode,
+        pin: f.pin,
+        pin_len: f.pin_len,
+        pin_misses: f.pin_misses,
+        pin_wait: f.pin_wait,
+        chan_only: f.chan_only,
+        ..s
+    })
+}
+
+/// The `.ferrite` codeplug's settings.json: the backup without the PIN lock (its record fields cleared, its menu
+/// entries left out: `docs/dev/codeplug-format.md`).
+pub fn codeplug_part(rec: &[u8], ex: &Extras, saved: &str, radio: BTreeMap<String, String>) -> String {
+    let rec = without_pin(rec);
+    let ex: Extras = ex.iter().filter(|(k, _)| !k.starts_with(PIN_MENU)).map(|(k, v)| (k.clone(), v.clone())).collect();
+    let mut b: Backup = serde_json::from_str(&backup(&rec, &ex, saved, radio)).expect("our own backup");
+    b.settings.retain(|k, _| !k.starts_with(PIN_MENU));
+    serde_json::to_string_pretty(&b).unwrap_or_default()
+}
+
 /// A backup file back to its record (and terminal-backed values), or why not.
 pub fn restore(text: &str) -> Result<(Vec<u8>, Backup), String> {
     let mut b: Backup = serde_json::from_str(text).map_err(|e| format!("not a Ferrite Console settings backup: {e}"))?;

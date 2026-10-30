@@ -12,6 +12,7 @@ import {
   settingsLen,
   settingsPlan,
   settingsRestore,
+  settingsKeepPin,
   settingsSet,
   settingsView,
   type Extras,
@@ -73,6 +74,9 @@ class RadioSettings {
   /** The radio's reason a change was refused, by setting. */
   refused = $state<Record<string, string>>({});
   write = $state<SettingsWriteStep | null>(null);
+  /** The record came from a codeplug, which never carries the PIN lock: the radio's own is kept (taken from the
+   *  record read before the write). */
+  keepPin = false;
 
   /** Settings whose value differs from what was read. */
   get dirty(): Set<string> {
@@ -138,6 +142,7 @@ class RadioSettings {
     try {
       const { record, extras } = await this.readRadio();
       this.took(record, extras, `Read from ${radio.label} at ${new Date().toLocaleTimeString()}`);
+      this.keepPin = false;
     } catch (e) {
       this.error = (e as Error).message;
     }
@@ -174,15 +179,18 @@ class RadioSettings {
 
   /** A backup file (or a codeplug's settings.json) into the editor as unwritten changes (Write then shows the diff to
    * the radio and restores it): true when loaded. A value the file lacks (a file from before it) stays as read. */
-  loadFile(text: string, name: string): boolean {
+  loadFile(text: string, name: string, codeplug = false): boolean {
     this.error = "";
     try {
       const r = settingsRestore(text);
-      const rec = new Uint8Array(r.record);
+      let rec = new Uint8Array(r.record);
+      // A codeplug has no PIN lock: the radio's own (as read) stays, and the write takes it from its fresh read.
+      if (codeplug && this.base) rec = settingsKeepPin(rec, this.base);
       const extras = { ...this.extras, ...r.extras };
       if (!this.base) this.took(rec, extras, "");
       else this.show(rec, extras);
       this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})`;
+      this.keepPin = codeplug;
       return true;
     } catch (e) {
       this.error = `${name}: ${(e as Error).message}`;
@@ -197,7 +205,8 @@ class RadioSettings {
     this.write = { step: "backup" };
     try {
       const { record: fresh, extras, name } = await this.backupRadio();
-      const plan = settingsPlan(fresh, extras, this.record, this.extras);
+      if (this.keepPin) this.show(settingsKeepPin(this.record, fresh), this.extras);
+      const plan = settingsPlan(fresh, extras, this.record!, this.extras);
       const drifted = !!this.base && (!same(this.base, fresh) || JSON.stringify(this.baseExtras) !== JSON.stringify(extras));
       this.write = { step: "review", plan, fresh, backupName: name, drifted };
     } catch (e) {

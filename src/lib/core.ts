@@ -266,6 +266,11 @@ export const settingsPlan = (base: Uint8Array, baseEx: Extras, want: Uint8Array,
 export const settingsLen = () => wasm.settings_len();
 export const settingsBackup = (record: Uint8Array, extras: Extras, saved: string, radio: Record<string, string>) =>
   wasm.settings_backup(record, js(extras), saved, js(radio));
+/** The .ferrite codeplug's settings.json: the backup without the PIN lock (docs/dev/codeplug-format.md). */
+export const settingsCodeplugPart = (record: Uint8Array, extras: Extras, saved: string, radio: Record<string, string>) =>
+  wasm.settings_codeplug_part(record, js(extras), saved, js(radio));
+/** `record` with the PIN lock's fields from `from` (the radio's own record). */
+export const settingsKeepPin = (record: Uint8Array, from: Uint8Array): Uint8Array => wasm.settings_keep_pin(record, from);
 export const settingsRestore = (text: string): Restored => JSON.parse(wasm.settings_restore(text));
 /** The terminal-backed values from a `dump`'s text. */
 export const extrasFromDump = (text: string): Extras => JSON.parse(wasm.settings_extras_from_dump(text));

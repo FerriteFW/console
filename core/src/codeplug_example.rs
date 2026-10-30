@@ -22,7 +22,8 @@ fn dir() -> PathBuf {
 }
 
 fn radio() -> BTreeMap<String, String> {
-    [("connection", "Cable"), ("firmware", "0.8.2"), ("callsign", "VA7IF"), ("uid", "7Q2KD M4XRT 9BC1F HW03N")]
+    // No unique ID in a codeplug (the manifest's radio_fingerprint stands for it).
+    [("connection", "Cable"), ("firmware", "0.8.2"), ("callsign", "VA7IF")]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect()
@@ -96,7 +97,6 @@ fn parts() -> Vec<(&'static str, String)> {
     .unwrap();
     #[derive(serde::Serialize)]
     struct Radio {
-        id: &'static str,
         callsign: &'static str,
         firmware: &'static str,
         build: &'static str,
@@ -108,6 +108,7 @@ fn parts() -> Vec<(&'static str, String)> {
         created: &'static str,
         console: &'static str,
         radio: Radio,
+        radio_fingerprint: &'static str,
         parts: [&'static str; 3],
     }
     // Saved before Radio Settings was read: no settings part (a part may be missing).
@@ -116,7 +117,9 @@ fn parts() -> Vec<(&'static str, String)> {
         version: 1,
         created: SAVED,
         console: "0.1.0",
-        radio: Radio { id: "7Q2KD M4XRT 9BC1F HW03N", callsign: "VA7IF", firmware: "0.8.2", build: "tx" },
+        radio: Radio { callsign: "VA7IF", firmware: "0.8.2", build: "tx" },
+        // SHA-256 of the UID bytes 10 32 54 76 98 ba dc fe 01 23 45 67, its first 8 hex digits.
+        radio_fingerprint: "7f755785",
         parts: ["channels", "aprs", "contacts"],
     })
     .unwrap();
@@ -189,4 +192,49 @@ fn record_layouts_as_documented() {
     let c3 = crate::channels::channel_record(&chans[2]);
     assert_eq!(c3[2], 255, "no zone");
     assert_eq!(c3[38], 1, "flags: skip");
+}
+
+/// The PIN lock never goes in a codeplug (Alex, Oct 30): no key naming it anywhere in settings.json, its menu
+/// entries left out, its record fields cleared; opening one keeps the radio's own.
+#[test]
+fn no_pin_in_the_settings_part() {
+    let mut s = Settings::DEFAULT;
+    s.pin_mode = 2;
+    s.pin_len = 4;
+    s.pin = 1234;
+    s.chan_only = true;
+    let mut r = RadioSide::new();
+    *r.app.settings_mut() = s;
+    let ex = read_extras(&mut r);
+    // The record as Console holds it, with the PIN lock's fields set (the link reads the PIN itself as zeros).
+    let rec = record_of(&s);
+    // The Node test (tests/unit/codeplug.test.ts) saves a whole codeplug from this record: kept as a fixture.
+    let hex: String = rec.iter().map(|b| format!("{b:02x}")).collect();
+    let path = dir().join("settings-with-pin.hex");
+    if std::env::var("FERRITE_WRITE_CODEPLUG_EXAMPLE").is_ok() {
+        std::fs::write(&path, &hex).unwrap();
+    }
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), hex, "settings-with-pin.hex (FERRITE_WRITE_CODEPLUG_EXAMPLE=1)");
+    let part = settings::codeplug_part(&rec, &ex, SAVED, radio());
+    fn keys(v: &serde_json::Value, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(m) => m.iter().for_each(|(k, x)| {
+                out.push(k.clone());
+                keys(x, out);
+            }),
+            serde_json::Value::Array(a) => a.iter().for_each(|x| keys(x, out)),
+            _ => {}
+        }
+    }
+    let mut all = vec![];
+    keys(&serde_json::from_str(&part).unwrap(), &mut all);
+    assert!(all.len() > 50, "{all:?}");
+    assert!(!all.iter().any(|k| k.to_lowercase().contains("pin") || k.starts_with("0 9 3 ")), "{all:?}");
+    let (back, _) = settings::restore(&part).unwrap();
+    let got = settings::settings_of(&back);
+    assert_eq!((got.pin_mode, got.pin_len, got.pin, got.chan_only), (0, 0, 0, false));
+    // Opened onto a radio: its own PIN lock kept.
+    let kept = settings::settings_of(&settings::keep_pin(&back, &rec));
+    assert_eq!((kept.pin_mode, kept.pin_len, kept.chan_only), (2, 4, true));
+    assert_eq!(settings::keep_pin(&back, &rec), rec);
 }

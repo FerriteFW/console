@@ -4,11 +4,11 @@
   "created": "2026-10-30T21:12:00.000Z",
   "console": "0.1.0",
   "radio": {
-    "id": "7Q2KD M4XRT 9BC1F HW03N",
     "callsign": "VA7IF",
     "firmware": "0.8.2",
     "build": "tx"
   },
+  "radio_fingerprint": "7f755785",
   "parts": [
     "channels",
     "aprs",

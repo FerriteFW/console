@@ -11,8 +11,9 @@ export const VERSION = 1;
 export const PARTS = ["channels", "settings", "aprs", "contacts"] as const;
 export type Part = (typeof PARTS)[number];
 
-/** What the radio said about itself when the file was saved (each only when known). */
-export type RadioMeta = { id?: string; callsign?: string; firmware?: string; build?: string };
+/** What the radio said about itself when the file was saved (each only when known). Never its unique ID: codeplugs
+ *  get shared, and the ID is a permanent hardware serial (the manifest's `radio_fingerprint` stands for it). */
+export type RadioMeta = { callsign?: string; firmware?: string; build?: string };
 
 export type Manifest = {
   format: typeof FORMAT;
@@ -22,6 +23,9 @@ export type Manifest = {
   /** The Console version that saved it. */
   console: string;
   radio: RadioMeta;
+  /** The first 8 hex digits of SHA-256 over the radio's unique ID bytes (INFO's 12), when known: which radio, without
+   *  the serial. Stored for later; nothing reads it yet. */
+  radio_fingerprint?: string;
   /** The parts in the zip, in PARTS order. */
   parts: Part[];
 };
@@ -49,17 +53,32 @@ export function readContacts(text: string): ContactsFile {
   return f;
 }
 
-/** `<who>-<yyyymmdd-hhmm>.ferrite`: the callsign, else the radio's ID, else "radio". */
+/** `<who>-<yyyymmdd-hhmm>.ferrite`: the callsign, else "radio". */
 export function codeplugName(who: string | undefined, d = new Date()): string {
   const p = (n: number) => String(n).padStart(2, "0");
   const w = (who ?? "").replace(/[^A-Za-z0-9-]/g, "") || "radio";
   return `${w}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.ferrite`;
 }
 
-export function manifest(parts: Parts, radio: RadioMeta, console: string, created = new Date()): Manifest {
+/** The radio's fingerprint: SHA-256 over its unique ID's bytes as INFO gives them (12), the first 8 hex digits. */
+export async function fingerprint(uid: Uint8Array): Promise<string> {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(uid)));
+  return [...h.subarray(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export function manifest(parts: Parts, radio: RadioMeta, console: string, created = new Date(), radioFingerprint?: string): Manifest {
   const r: RadioMeta = {};
-  for (const k of ["id", "callsign", "firmware", "build"] as const) if (radio[k]) r[k] = radio[k];
-  return { format: FORMAT, version: VERSION, created: created.toISOString(), console, radio: r, parts: PARTS.filter((p) => parts[p] !== undefined) };
+  for (const k of ["callsign", "firmware", "build"] as const) if (radio[k]) r[k] = radio[k];
+  // Key order as the doc shows it (JSON.stringify keeps insertion order).
+  return {
+    format: FORMAT,
+    version: VERSION,
+    created: created.toISOString(),
+    console,
+    radio: r,
+    ...(radioFingerprint ? { radio_fingerprint: radioFingerprint } : {}),
+    parts: PARTS.filter((p) => parts[p] !== undefined),
+  };
 }
 
 /** The .ferrite file: manifest.json first, then each part present. */

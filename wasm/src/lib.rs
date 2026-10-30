@@ -448,6 +448,19 @@ pub fn settings_backup(record: &[u8], ex: &str, saved: &str, radio: &str) -> Res
     Ok(settings::backup(record, &extras(ex)?, saved, r))
 }
 
+/// The `.ferrite` codeplug's settings.json: the backup without the PIN lock.
+#[wasm_bindgen]
+pub fn settings_codeplug_part(record: &[u8], ex: &str, saved: &str, radio: &str) -> Result<String, JsError> {
+    let r = from_json(radio, "radio")?;
+    Ok(settings::codeplug_part(record, &extras(ex)?, saved, r))
+}
+
+/// `record` with the PIN lock's fields from `from` (the radio's own record).
+#[wasm_bindgen]
+pub fn settings_keep_pin(record: &[u8], from: &[u8]) -> Vec<u8> {
+    settings::keep_pin(record, from)
+}
+
 /// A settings backup file to `{record, extras, saved, radio}`, or why not.
 #[wasm_bindgen]
 pub fn settings_restore(text: &str) -> Result<String, JsError> {

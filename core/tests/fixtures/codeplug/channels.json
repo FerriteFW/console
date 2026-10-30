@@ -5,8 +5,7 @@
   "radio": {
     "callsign": "VA7IF",
     "connection": "Cable",
-    "firmware": "0.8.2",
-    "uid": "7Q2KD M4XRT 9BC1F HW03N"
+    "firmware": "0.8.2"
   },
   "zones": [
     {

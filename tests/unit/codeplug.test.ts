@@ -9,6 +9,7 @@ import {
   buildCodeplug,
   codeplugName,
   contactsJson,
+  fingerprint,
   isZip,
   manifest,
   PARTS,
@@ -43,7 +44,7 @@ test("the documented example round-trips", async () => {
 test("the example's manifest is what Console writes", () => {
   const m: Manifest = JSON.parse(fx("manifest.json"));
   const parts: Parts = { channels: "{}", aprs: "{}", contacts: "{}" };
-  const made = manifest(parts, { id: m.radio.id, callsign: m.radio.callsign, firmware: m.radio.firmware, build: m.radio.build }, m.console, new Date(m.created));
+  const made = manifest(parts, m.radio, m.console, new Date(m.created), m.radio_fingerprint);
   assert.deepEqual(made, m);
   // Byte for byte as Console writes it (buildCodeplug: JSON.stringify(.., null, 2)), key order included.
   assert.equal(JSON.stringify(made, null, 2), fx("manifest.json"));
@@ -72,6 +73,38 @@ test("the format doc shows the example as it is", { skip: !existsSync(doc) && "n
   }
 });
 
+test("the radio's fingerprint: SHA-256 of the UID bytes, 8 hex digits (the example's)", async () => {
+  const uid = new Uint8Array([0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe, 0x01, 0x23, 0x45, 0x67]);
+  assert.equal(await fingerprint(uid), "7f755785");
+  assert.equal(await fingerprint(new Uint8Array(12)), "15ec7bf0");
+  assert.equal(JSON.parse(fx("manifest.json")).radio_fingerprint, "7f755785");
+  // No unique ID anywhere in the example.
+  for (const n of ["manifest.json", "channels.json", "aprs.json", "contacts.json"]) assert.doesNotMatch(fx(n), /"(uid|id)"/, n);
+});
+
+// The core's WebAssembly build (npm run wasm; not in git): a whole codeplug saved from a settings record with the
+// PIN lock set (fixture from core's no_pin_in_the_settings_part) has no key naming the PIN anywhere.
+const wasmJs = new URL("../../src/core-wasm/core.js", import.meta.url);
+test("no PIN in a saved codeplug", { skip: !existsSync(wasmJs) && "no core-wasm build (npm run wasm)" }, async () => {
+  const core = await import(wasmJs.href);
+  await core.default({ module_or_path: readFileSync(new URL("../../src/core-wasm/core_bg.wasm", import.meta.url)) });
+  const hex = fx("settings-with-pin.hex");
+  const rec = new Uint8Array(hex.match(/../g)!.map((h: string) => parseInt(h, 16)));
+  const settings = core.settings_codeplug_part(rec, "{}", "2026-10-30T21:12:00.000Z", JSON.stringify({ callsign: "VA7IF" }));
+  const m: Manifest = JSON.parse(fx("manifest.json"));
+  const parts: Parts = { channels: fx("channels.json"), settings, aprs: fx("aprs.json"), contacts: fx("contacts.json") };
+  const file = await bytes(await buildCodeplug(parts, manifest(parts, m.radio, m.console, new Date(m.created), m.radio_fingerprint)));
+  const keys: string[] = [];
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) keys.push(k), walk(x);
+  };
+  for (const [name, b] of await readZip(file)) walk(JSON.parse(new TextDecoder().decode(b)) ?? name);
+  assert.ok(keys.length > 100);
+  assert.deepEqual(keys.filter((k) => /pin/i.test(k)), []);
+  assert.ok(!keys.some((k) => k.startsWith("0 9 3 ")), "the PIN lock's menu entries left out");
+});
+
 test("contacts: written and read back", () => {
   const t = contactsJson([{ call: "VE7ABC", name: "Club" }], "2026-10-30T00:00:00.000Z", { callsign: "VA7IF" });
   const f = readContacts(t);
@@ -84,7 +117,6 @@ test("contacts: written and read back", () => {
 test("names: callsign or radio, then yyyymmdd-hhmm", () => {
   const d = new Date(2026, 9, 30, 14, 12, 59);
   assert.equal(codeplugName("VA7IF", d), "VA7IF-20261030-1412.ferrite");
-  assert.equal(codeplugName("7Q2KDM4XRT", d), "7Q2KDM4XRT-20261030-1412.ferrite");
   assert.equal(codeplugName(undefined, d), "radio-20261030-1412.ferrite");
   assert.equal(codeplugName("a/b c", d), "abc-20261030-1412.ferrite");
 });

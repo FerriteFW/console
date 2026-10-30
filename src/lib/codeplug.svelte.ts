@@ -3,10 +3,10 @@
 // one file; Open… loads each part a file holds into its page as unwritten changes (Write to radio, per page, puts
 // it on the radio). The older per-page `-backup.json` files still open, each into its own page. In the desktop app
 // the file goes through the native save dialog (the shell's `save_file`); in a browser it downloads.
-import { aprsBackup, backupFile, settingsBackup } from "./core";
+import { aprsBackup, backupFile, settingsCodeplugPart } from "./core";
 import { aprsSettings } from "./aprsSettings.svelte";
 import { channels, type ChannelsFile } from "./channels.svelte";
-import { buildCodeplug, codeplugName, contactsJson, isZip, manifest, readCodeplug, readContacts, type Part, type Parts, type RadioMeta } from "./codeplug.ts";
+import { buildCodeplug, codeplugName, contactsJson, fingerprint, isZip, manifest, readCodeplug, readContacts, type Part, type Parts, type RadioMeta } from "./codeplug.ts";
 import { contacts } from "./contacts.svelte";
 import { radio } from "./radio.svelte";
 import { settings } from "./settings.svelte";
@@ -19,17 +19,17 @@ const CONSOLE_VERSION = typeof __CONSOLE_VERSION__ === "string" ? __CONSOLE_VERS
 function radioMeta(): RadioMeta {
   const i = radio.info;
   if (!i) return {};
-  return { id: i.uid_text ?? undefined, callsign: i.callsign || undefined, firmware: i.firmware || undefined, build: i.build?.name || undefined };
+  return { callsign: i.callsign || undefined, firmware: i.firmware || undefined, build: i.build?.name || undefined };
 }
 
-/** The part files' own `radio` block (as their single-part saves have always written it). */
+/** The parts' own `radio` block, as their single-part saves write it but without the unique ID (codeplugs get
+ *  shared; the manifest's fingerprint stands for it). */
 function partRadio(): Record<string, string> {
   const i = radio.info;
   const m: Record<string, string> = { connection: radio.label };
   if (i) {
     m.firmware = i.firmware;
     m.callsign = i.callsign;
-    if (i.uid_text) m.uid = i.uid_text;
   }
   return m;
 }
@@ -40,7 +40,8 @@ export function gather(saved: string): Parts {
   const parts: Parts = {};
   const t = channels.table;
   if (t.channels.length || t.zones.length) parts.channels = channels.fileText(saved, r);
-  if (settings.record) parts.settings = settingsBackup(settings.record, settings.extras, saved, r);
+  // Never the PIN lock: settings.json leaves it out, and opening keeps the radio's own.
+  if (settings.record) parts.settings = settingsCodeplugPart(settings.record, settings.extras, saved, r);
   if (aprsSettings.record) parts.aprs = aprsBackup(aprsSettings.settingsRec, aprsSettings.record, aprsSettings.extras, saved, r);
   // The radio's contacts with the opened ones not written yet over them (what the radio would hold after Write).
   if (contacts.loaded || contacts.pending) {
@@ -73,9 +74,10 @@ export async function saveBlob(name: string, blob: Blob): Promise<string | null>
 /** Parts as a .ferrite file, saved: the notice's text ("" when the save dialog was cancelled). */
 export async function saveParts(parts: Parts, what = "Saved"): Promise<string> {
   const meta = radioMeta();
-  const m = manifest(parts, meta, CONSOLE_VERSION);
+  const uid = radio.info?.uid;
+  const m = manifest(parts, meta, CONSOLE_VERSION, new Date(), uid ? await fingerprint(new Uint8Array(uid)) : undefined);
   if (!m.parts.length) throw new Error("Nothing to save yet: read the radio or open a file first.");
-  const name = await saveBlob(codeplugName(meta.callsign ?? meta.id?.replace(/\s/g, "").slice(0, 10)), await buildCodeplug(parts, m));
+  const name = await saveBlob(codeplugName(meta.callsign), await buildCodeplug(parts, m));
   return name ? `${what} ${list(m.parts, parts)} as ${name}${isTauri() ? "" : " (your downloads)"}.` : "";
 }
 
@@ -93,7 +95,7 @@ export async function backUp(part: "channels" | "settings" | "aprs"): Promise<st
     text = backupFile(set, saved, r);
   } else if (part === "settings") {
     const { record, extras } = await settings.readRadio();
-    text = settingsBackup(record, extras, saved, r);
+    text = settingsCodeplugPart(record, extras, saved, r);
   } else {
     const { record, extras } = await aprsSettings.readRadio();
     text = aprsBackup(aprsSettings.settingsRec, record, extras, saved, r);
@@ -132,7 +134,7 @@ function loadPart(p: Part, text: string, from: string): string {
     case "channels":
       return channels.loadFile(text, from) ? "" : channels.error;
     case "settings":
-      return settings.loadFile(text, from) ? "" : settings.error;
+      return settings.loadFile(text, from, true) ? "" : settings.error;
     case "aprs":
       return aprsSettings.loadFile(text, from) ? "" : aprsSettings.error;
     case "contacts":
