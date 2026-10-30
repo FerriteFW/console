@@ -154,7 +154,6 @@
     </nav>
     <div class="side-foot">
       <a class="guide" href="https://manual.ferritefw.dev" target="_blank" rel="noopener">User guide ↗</a>
-      For Ferrite on the Radtel RT-950 Pro
     </div>
   </aside>
 

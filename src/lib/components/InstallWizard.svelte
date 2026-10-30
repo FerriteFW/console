@@ -113,7 +113,8 @@
     {#if step === 1}
       <h3>Connect the radio</h3>
       <ul class="notes">
-        <li>Plug in the programming cable and turn the radio on. It can still run Radtel's firmware: that's what Install is for.</li>
+        <li>Ferrite runs on the Radtel RT-950 Pro, and radios built on the same hardware.</li>
+        <li>Plug in the programming cable and turn the radio on. It can still run its stock firmware: that's what Install is for.</li>
         <li>Console first backs up the radio's whole flash. Nothing is written until you have saved that file.</li>
       </ul>
       {#if I.releaseError}<p class="warn">{I.releaseError}</p>{/if}
@@ -178,7 +179,7 @@
     {:else if step === 3}
       <h3>SSB receive (optional)</h3>
       <p class="good" data-k="saved">Backup saved: {I.savedWhere}</p>
-      <p>USB, LSB and CW need a patch that only Radtel's firmware carries. Drop in your own stock .BTF (from Radtel's website) and Console takes the patch from it, here on this computer. Without it, Ferrite installs and those modes stay hidden.</p>
+      <p>USB, LSB and CW need a patch that only the stock firmware carries. Drop in your own stock .BTF (from the radio maker's website) and Console takes the patch from it, here on this computer. Without it, Ferrite installs and those modes stay hidden.</p>
       <label class="drop" ondragover={(e) => e.preventDefault()} ondrop={dropped}>
         <input type="file" accept=".btf,.BTF" hidden aria-label="Stock firmware file" onchange={picked} />
         {I.stock ? I.stock.name : "Drop your stock .BTF here, or click to choose"}

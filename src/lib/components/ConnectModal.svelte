@@ -47,7 +47,7 @@
   <div class="panel" role="dialog" aria-modal="true" aria-labelledby="connect-title">
     <div class="head">
       <Wordmark size={40} />
-      <p class="sub">The companion for Ferrite on the Radtel RT-950 Pro</p>
+      <p class="sub">The companion app for Ferrite radios</p>
     </div>
 
     {#if radio.phase === "pin"}
@@ -76,13 +76,13 @@
       {#if radio.error}
         <div class="err" role="alert">
           <p>{radio.error}</p>
-          {#if noAnswer}<p>Still on Radtel's firmware? <button class="link" onclick={install}>Install Ferrite</button> first.</p>{/if}
+          {#if noAnswer}<p>Still on its stock firmware? <button class="link" onclick={install}>Install Ferrite</button> first.</p>{/if}
         </div>
       {/if}
     {/if}
 
     <div class="more">
-      <p>New radio, still on Radtel's firmware? <button class="link" onclick={install}>Install Ferrite</button></p>
+      <p>New radio, still on its stock firmware? <button class="link" onclick={install}>Install Ferrite</button></p>
       <p><a href="https://manual.ferritefw.dev" target="_blank" rel="noopener">User guide ↗</a></p>
     </div>
 

@@ -34,7 +34,8 @@
 <div class="page">
   <section class="card intro">
     <h1>Install Ferrite</h1>
-    <p>Takes a radio still on Radtel's firmware to Ferrite over the programming cable: Console backs up the whole radio first, and nothing is written until you have saved that backup.</p>
+    <p>For the Radtel RT-950 Pro, and radios built on the same hardware.</p>
+    <p>Takes a radio still on its stock firmware to Ferrite over the programming cable: Console backs up the whole radio first, and nothing is written until you have saved that backup.</p>
     <div class="row">
       <button class="btn primary" onclick={() => (wizard = true)}>{started && I.installStep !== "done" ? "Continue install…" : "Start install…"}</button>
     </div>

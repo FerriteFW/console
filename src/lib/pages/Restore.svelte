@@ -29,7 +29,7 @@
 <div class="page">
   <section class="card" aria-label="Back to stock">
     <h1>Back to stock</h1>
-    <p>For a radio on Ferrite that should go back to Radtel's firmware. Console writes your backup back (never calibration or the update area), then installs your stock firmware. The radio must be running Ferrite and on the cable.</p>
+    <p>For a radio on Ferrite that should go back to its stock firmware. Console writes your backup back (never calibration or the update area), then installs your stock firmware. The radio must be running Ferrite and on the cable.</p>
 
     <h2>1. Your files</h2>
     <div class="two">
@@ -40,8 +40,8 @@
       </label>
       <label class="drop" ondragover={(e) => e.preventDefault()} ondrop={(e) => dropped("stock", e)}>
         <input type="file" accept=".btf,.BTF" hidden aria-label="Stock firmware for Back to stock" onchange={(e) => picked("stock", e)} />
-        <span class="what">Radtel's firmware (.BTF)</span>
-        <span>{I.stock ? I.stock.name : "From Radtel's website: drop it here, or click"}</span>
+        <span class="what">The stock firmware (.BTF)</span>
+        <span>{I.stock ? I.stock.name : "From the radio maker's website: drop it here, or click"}</span>
       </label>
     </div>
     {#if I.restoreBackup && I.restoreBackupCheck && !I.restoreBackupCheck.problems.filter((p) => !p.startsWith("a stock phone")).length}

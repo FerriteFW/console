@@ -55,7 +55,7 @@
       <button class="btn primary" disabled={!latest || (!!check && !ok)} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
       {#if connected && current}<span class="sub">Up to date.</span>{/if}
     </div>
-    <p class="sub hint">Channels and settings stay. Over the cable only. A radio still on Radtel's firmware: use the <a href="#/install">Install</a> tab.</p>
+    <p class="sub hint">Channels and settings stay. Over the cable only. A radio still on its stock firmware: use the <a href="#/install">Install</a> tab.</p>
   </section>
 
   <details class="card" aria-label="Advanced" open={chosen || undefined}>

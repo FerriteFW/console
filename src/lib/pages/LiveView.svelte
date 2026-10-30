@@ -39,7 +39,8 @@
     void showKeypad;
     if (!area) return;
     const r = area.getBoundingClientRect();
-    room = { w: Math.max(200, r.width), h: Math.max(200, innerHeight - r.top - 16) };
+    // From the radio's left edge to the window's right (its own box only wraps the radio, so it never grows).
+    room = { w: Math.max(200, innerWidth - r.left - 24), h: Math.max(200, innerHeight - r.top - 16) };
   });
   const fit = $derived.by(() => {
     const [w, h] = showKeypad ? [490, 920] : [256, 336];

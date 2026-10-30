@@ -7,7 +7,7 @@
 <div class="card about">
   <Wordmark size={44} />
   <p>
-    Ferrite Console is the companion for Ferrite, the firmware for the Radtel RT-950 Pro: the radio's screen and
+    Ferrite Console is the companion app for Ferrite, firmware for the Radtel RT-950 Pro and radios built on the same hardware: the radio's screen and
     keys from the computer now, channel programming next.
   </p>
   <p class="sub">
