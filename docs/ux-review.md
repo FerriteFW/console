@@ -9,6 +9,10 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
   NeonPlug's start-up modal. `ConnectModal.svelte`.
 - [x] A cable with no answer points to Install (in the welcome).
 - [x] The browser's reason a way can't connect, as text (in the welcome; the top bar still uses a tooltip).
+- [x] Layout (Alex chose the desktop shell over tabs, Oct 29): sidebar Home, Live View, Channels & Zones, Radio
+  Settings, APRS, Firmware, then More (Event Log, Terminal, About); APRS and Firmware as tabs; Home with the jobs as
+  cards and Update saying whether the radio is behind. Next for the editors: NeonPlug's toolbar (Read, Write,
+  File, "N unwritten") on Channels, Settings and APRS settings.
 
 ## Open
 
