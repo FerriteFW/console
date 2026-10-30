@@ -32,7 +32,7 @@ export class WebSerialTransport implements Transport {
 
   static async request(): Promise<WebSerialTransport> {
     const serial = webSerial();
-    if (!serial) throw new Error("This browser has no Web Serial: use Chrome or Edge on a desktop.");
+    if (!serial) throw new Error("This browser has no Web Serial: use Chrome, Edge or Firefox on a desktop.");
     const port = await serial.requestPort({ filters: FILTERS });
     const t = new WebSerialTransport(port);
     await t.openAt(115200);

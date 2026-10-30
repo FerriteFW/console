@@ -10,9 +10,14 @@ export type { Transport, TransportKind } from "./types";
 
 export const provider: TransportProvider = {
   available() {
-    const why = (web: boolean, what: string): true | string =>
-      web || isTauri() ? true : `This browser has no ${what}: use Chrome or Edge on a desktop, from https or localhost.`;
-    return { cable: why(!!webSerial(), "Web Serial"), bluetooth: why(!!webBluetooth(), "Web Bluetooth"), demo: true };
+    // Web Serial: Chrome, Edge and Firefox (151 and later) on a desktop; Web Bluetooth: Chrome and Edge.
+    const why = (web: boolean, what: string, browsers: string): true | string =>
+      web || isTauri() ? true : `This browser has no ${what}: use ${browsers} on a desktop, from https or localhost.`;
+    return {
+      cable: why(!!webSerial(), "Web Serial", "Chrome, Edge or Firefox"),
+      bluetooth: why(!!webBluetooth(), "Web Bluetooth", "Chrome or Edge"),
+      demo: true,
+    };
   },
   async open(kind: TransportKind): Promise<Transport> {
     if (kind === "demo") return new DemoTransport();

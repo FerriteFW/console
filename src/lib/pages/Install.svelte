@@ -83,7 +83,7 @@
   <section class="card intro">
     <h1>Install Ferrite</h1>
     <ul>
-      <li>For a Radtel RT-950 Pro on the programming cable. Chrome or Edge, or the desktop app.</li>
+      <li>For a Radtel RT-950 Pro on the programming cable. Chrome, Edge or Firefox, or the desktop app.</li>
       <li>Console first backs up the radio's whole flash, calibration included. You keep that file: it's the way back.</li>
       <li>Then it installs Ferrite. Calibration and the bootloader's update area are never written.</li>
       <li>Back to stock is not part of installing: it sits apart, at the bottom, for taking Ferrite off a radio.</li>
