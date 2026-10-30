@@ -53,7 +53,7 @@ export class StreamGap extends Error {
 
 type Waiter = { ty: number; seq: number; resolve: (a: Answer) => void };
 /** LINK-50: frames of one STREAM, numbered from its request's seq. */
-type StreamWaiter = { seq: number; frames: Uint8Array[]; done: (gap: boolean) => void; poke: () => void };
+type StreamWaiter = { seq: number; frames: Uint8Array[]; done: (gap: boolean) => void; poke: () => void; onFrame?: (f: Uint8Array) => void };
 
 /** LINK-35.2: HELLO's caps bits. */
 export const CAP_STREAM = 1;
@@ -114,8 +114,10 @@ export class Link {
             s.done(false);
             continue;
           }
-          s.frames.push(new Uint8Array(a.rest));
+          const f = new Uint8Array(a.rest);
+          s.frames.push(f);
           s.poke();
+          s.onFrame?.(f);
           if (a.ty === (STREAM | 0x80)) s.done(false);
           continue;
         }
@@ -272,7 +274,8 @@ export class Link {
    * LINK-50: one STREAM of `ty`'s request (callers hold `exclusive`): its answers' payloads after the status, in
    * order. A frame missing throws StreamGap with what came; a refusal throws RadioError.
    */
-  private async streamRaw(ty: number, payload: Uint8Array): Promise<Uint8Array[]> {
+  /** `onFrame`: each answer as it arrives (progress over a slow link), before the whole stream is in. */
+  private async streamRaw(ty: number, payload: Uint8Array, onFrame?: (f: Uint8Array) => void): Promise<Uint8Array[]> {
     if (this.closed) throw new Error("not connected");
     const seq = this.session.next_seq();
     const frames: Uint8Array[] = [];
@@ -291,6 +294,7 @@ export class Link {
           resolve(g);
         },
         poke: arm,
+        onFrame,
       };
       this.streamW = w;
       arm();
@@ -583,9 +587,10 @@ export class Link {
 
   /**
    * Every record of `what` held at indexes first..end, several whole records an answer (READ_MANY, LINK-40), as a
-   * map index → bytes. `progress(at)` with the index it has reached.
+   * map index → bytes. `progress(at, got)` with the index it has reached and how many records are in, as each
+   * answer arrives (on a streamed read too: Bluetooth's take seconds).
    */
-  readMany(what: number, first: number, end: number, progress?: (at: number) => void): Promise<Map<number, Uint8Array>> {
+  readMany(what: number, first: number, end: number, progress?: (at: number, got: number) => void): Promise<Map<number, Uint8Array>> {
     return this.exclusive(async () => {
       const out = new Map<number, Uint8Array>();
       let at = first;
@@ -610,15 +615,24 @@ export class Link {
           v.setUint16(3, Math.min(end - at, 0xffff), true);
           let frames: Uint8Array[];
           let whole = true;
+          // Each answer is taken as it arrives, so progress moves during the stream, not after it.
+          let taken = 0;
+          const each = (f: Uint8Array) => {
+            at = Math.max(at, take(f));
+            taken++;
+            progress?.(at, out.size);
+          };
           try {
-            frames = await this.streamRaw(P.msg.READ_MANY, p);
+            frames = await this.streamRaw(P.msg.READ_MANY, p, each);
           } catch (e) {
             if (!(e instanceof StreamGap)) throw e;
             [frames, whole] = [e.got, false];
           }
-          for (const f of frames) {
+          // Any frames not seen by `each` (none normally) are taken now; the error frame (0xff) is not a record.
+          for (const f of frames.slice(taken)) {
+            if (f[0] === 0xff) continue;
             at = Math.max(at, take(f));
-            progress?.(at);
+            progress?.(at, out.size);
           }
           if (whole) return out;
         }
@@ -642,7 +656,7 @@ export class Link {
         }
         if (next <= at) break; // the radio's last index
         at = next;
-        progress?.(at);
+        progress?.(at, out.size);
       }
       return out;
     });
