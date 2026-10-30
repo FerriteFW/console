@@ -31,6 +31,8 @@
   const bare = (v: string) => v.trim().replace(/^v/i, "");
   const mine = $derived(radio.info?.firmware ?? "");
   const latest = $derived(firmware.check?.version ?? firmware.bundled?.version ?? "");
+  // A file chosen here (not the bundled release): Advanced stays open to show its checks.
+  const chosen = $derived(!!firmware.fileName && firmware.fileName !== firmware.bundled?.file);
   const current = $derived(!!mine && !!latest && bare(mine).startsWith(bare(latest)));
 
   void firmware.loadBundled();
@@ -46,17 +48,17 @@
     <dl class="facts">
       <dt>Your radio</dt>
       <dd data-k="now">{connected ? mine || "?" : "not connected"}</dd>
-      <dt>{firmware.check && firmware.fileName !== firmware.bundled?.file ? "Chosen file" : "Latest"}</dt>
+      <dt>{chosen && firmware.check ? "Chosen file" : "Latest"}</dt>
       <dd data-k="latest">{latest || "none in this copy of Console: choose a file under Advanced"}</dd>
     </dl>
     <div class="row">
-      <button class="btn primary" disabled={!latest} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
+      <button class="btn primary" disabled={!latest || (!!check && !ok)} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
       {#if connected && current}<span class="sub">Up to date.</span>{/if}
     </div>
     <p class="sub hint">Channels and settings stay. Over the cable only. A radio still on Radtel's firmware: use the <a href="#/install">Install</a> tab.</p>
   </section>
 
-  <details class="card" aria-label="Advanced">
+  <details class="card" aria-label="Advanced" open={chosen || undefined}>
     <summary>Advanced: install a .btf file</summary>
     <div class="row">
       <button class="btn" disabled={firmware.running} onclick={() => fileInput.click()}>Choose .btf…</button>
@@ -97,7 +99,7 @@
         </div>
       {/if}
     {/if}
-    {#if firmware.error && !wizard}<div class="banner" role="alert">{firmware.error}</div>{/if}
+    {#if firmware.error && !wizard}<div class="banner" role="alert" aria-label="Update error">{firmware.error}</div>{/if}
   </details>
 
   {#if !connected && !holding && ok}

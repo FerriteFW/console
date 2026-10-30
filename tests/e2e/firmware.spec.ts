@@ -1,4 +1,4 @@
-// Tools > Firmware Update against the simulator and the bridge's fake bootloader (tools/fakeboot.py): the file
+// Firmware › Update (the page, then the Check → Update → Done wizard) against the simulator and the bridge's fake bootloader (tools/fakeboot.py): the file
 // checks, REBOOT (LINK-24), the probes, every block, the reconnect; a NAK'd block and Resume; REBOOT refused busy.
 // Never on a radio: only Alex flashes, by hand (docs/TESTING.md).
 import { type Page } from "@playwright/test";
@@ -10,7 +10,11 @@ import { connect, disconnect, expect, onRadio, openConsole, shot, test } from ".
 // The worker's bridge sets the mode file once its fixture has run, so it is read when a test runs.
 const modeFile = () => process.env.FERRITE_E2E_FAKEBOOT ?? "";
 test.skip(onRadio(), "the fake bootloader runs on the simulator only");
-test.afterEach(async ({ page }) => disconnect(page));
+// The wizard closes with Esc once nothing is running (a finished or refused update), then the cable is let go.
+test.afterEach(async ({ page }) => {
+  await page.keyboard.press("Escape");
+  await disconnect(page);
+});
 
 const resultPath = () => join(dirname(modeFile()), "mode.result.json");
 function setMode(m: Record<string, unknown>) {
@@ -40,6 +44,14 @@ async function pickFile(page: Page, name: string, buffer: Buffer) {
 }
 
 const fact = (page: Page, k: string) => page.locator(`[data-k="${k}"]`);
+/** The page's button: "Install again…" when the radio already has that version (the e2e build bundles one). */
+const updateButton = (page: Page) => page.getByRole("button", { name: /^(Update|Install again)…$/ });
+const wizard = (page: Page) => page.getByRole("dialog", { name: "Update Ferrite" });
+/** The page's Update button, then the wizard's Update: the update starts. */
+async function update(page: Page) {
+  await updateButton(page).click();
+  await wizard(page).getByRole("button", { name: "Update", exact: true }).click();
+}
 
 test("firmware: a whole update through the fake bootloader, then connected again", async ({ page }, info) => {
   setMode({});
@@ -47,19 +59,18 @@ test("firmware: a whole update through the fake bootloader, then connected again
   await openConsole(page, "firmware");
   await connect(page);
   await pickFile(page, "ferrite-test.btf", btf);
-  await expect(page.getByRole("region", { name: "File check" })).toContainText("Checks passed");
   await expect(fact(page, "version")).toHaveText("v9.8.7");
   await expect(fact(page, "blocks")).toHaveText("24");
   // No .minisig: someone's own build, allowed.
   await expect(fact(page, "signature")).toHaveText("Not signed: not a Ferrite release");
   await shot(page, info, "60-firmware-checked");
 
-  await page.getByRole("button", { name: "Update firmware…" }).click();
-  const confirm = page.getByRole("group", { name: "Confirm update" });
-  await expect(confirm.locator('[data-k="now"]')).toHaveText(/^v\d+\.\d+\.\d+/);
-  await expect(confirm.locator('[data-k="new"]')).toHaveText("v9.8.7");
+  await updateButton(page).click();
+  const w = wizard(page);
+  await expect(w.locator('[data-k="now"]')).toHaveText(/^v\d+\.\d+\.\d+/);
+  await expect(w.locator('[data-k="new"]')).toHaveText("v9.8.7");
   await shot(page, info, "61-firmware-confirm");
-  await confirm.getByRole("button", { name: "Install" }).click();
+  await w.getByRole("button", { name: "Update", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Firmware Update holds");
 
   const done = page.getByRole("region", { name: "Update done" });
@@ -87,12 +98,15 @@ test("firmware: the bundled release, checked by its SHA-256 (Ferrite to the next
   });
   await openConsole(page, "firmware");
   await connect(page);
-  await page.getByRole("button", { name: "Use the bundled release (v9.8.7)" }).click();
-  await expect(page.getByRole("region", { name: "File check" })).toContainText("Checks passed");
-  await expect(fact(page, "version")).toHaveText("v9.8.7");
-  await expect(page.getByRole("button", { name: "Update firmware…" })).toBeVisible();
+  // The page names the bundled release; the wizard loads and checks it.
+  await expect(fact(page, "latest")).toHaveText("v9.8.7");
+  await updateButton(page).click();
+  await expect(wizard(page).locator('[data-k="new"]')).toHaveText("v9.8.7");
+  await expect(wizard(page).getByRole("button", { name: "Update", exact: true })).toBeEnabled();
+  await wizard(page).getByRole("button", { name: "Cancel" }).click();
   served = testBtf(25); // the file on the server isn't the one the manifest names
-  await page.getByRole("button", { name: "Use the bundled release (v9.8.7)" }).click();
+  await page.getByText("Advanced: install a .btf file").click();
+  await page.getByRole("button", { name: "Back to the bundled release" }).click();
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("doesn't match its checksum");
 });
 
@@ -103,7 +117,7 @@ test("firmware: files the checks refuse can't be installed", async ({ page }, in
 
   await pickFile(page, "stock.btf", testBtf(8, { ferrite: false }));
   await expect(refused).toContainText("not a Ferrite image");
-  await expect(page.getByRole("button", { name: "Update firmware…" })).toHaveCount(0);
+  await expect(updateButton(page)).toBeDisabled();
 
   await pickFile(page, "broken.btf", testBtf(8, { tag: false }));
   await expect(refused).toContainText("Firmware Error!");
@@ -120,11 +134,11 @@ test("firmware: files the checks refuse can't be installed", async ({ page }, in
   ]);
   await expect(refused).toContainText("Bad signature: the signature is from another key, not Ferrite's");
   await expect(fact(page, "signature")).toHaveText("Doesn't verify");
-  await expect(page.getByRole("button", { name: "Update firmware…" })).toHaveCount(0);
+  await expect(updateButton(page)).toBeDisabled();
 
+  // Not a .btf at all: refused before the checks; Update would offer only the bundled release, never this file.
   await pickFile(page, "ferrite.bin", testBtf(8));
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("not a .btf file");
-  await expect(page.getByRole("button", { name: "Update firmware…" })).toHaveCount(0);
 });
 
 test("firmware: a refused block leaves the radio in the bootloader; Resume finishes without REBOOT", async ({ page }, info) => {
@@ -133,8 +147,7 @@ test("firmware: a refused block leaves the radio in the bootloader; Resume finis
   await openConsole(page, "firmware");
   await connect(page);
   await pickFile(page, "ferrite-test.btf", btf);
-  await page.getByRole("button", { name: "Update firmware…" }).click();
-  await page.getByRole("button", { name: "Install" }).click();
+  await update(page);
 
   const err = page.getByRole("alert", { name: "Update error" });
   await expect(err).toContainText("Block 6 of 16: flash write failed", { timeout: 30_000 });
@@ -142,7 +155,7 @@ test("firmware: a refused block leaves the radio in the bootloader; Resume finis
   await expect(page.getByRole("status")).toContainText("Firmware Update holds");
   await shot(page, info, "64-firmware-nak");
 
-  await page.getByRole("button", { name: "Resume" }).click();
+  await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 45_000 });
   await expect(page.getByRole("status")).toContainText("Connected: Bridge");
   const r = result();
@@ -158,11 +171,11 @@ test("firmware: after giving up, the cable opened as it is finds the radio waiti
   await openConsole(page, "firmware");
   await connect(page);
   await pickFile(page, "ferrite-test.btf", btf);
-  await page.getByRole("button", { name: "Update firmware…" }).click();
-  await page.getByRole("button", { name: "Install" }).click();
+  await update(page);
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("Block 3 of 12", { timeout: 30_000 });
   await page.getByRole("button", { name: "Give up and disconnect" }).click();
   await expect(page.getByRole("status")).toContainText("Disconnected");
+  await page.keyboard.press("Escape"); // nothing running: the wizard closes
 
   // A new session with no HELLO: only a radio already in update mode (E5) goes on.
   const recover = page.getByRole("region", { name: "Recover" });
@@ -182,8 +195,7 @@ test("firmware: REBOOT refused busy (transmitting) says so and keeps the connect
   await openConsole(page, "firmware");
   await connect(page);
   await pickFile(page, "ferrite-test.btf", testBtf(8));
-  await page.getByRole("button", { name: "Update firmware…" }).click();
-  await page.getByRole("button", { name: "Install" }).click();
+  await update(page);
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("transmitting");
   await expect(page.getByRole("status")).toContainText("Connected: Bridge", { timeout: 20_000 });
   expect(existsSync(resultPath())).toBe(false);

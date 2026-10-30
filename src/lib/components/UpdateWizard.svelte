@@ -44,9 +44,9 @@
     {#if step === 1}
       {#if check}
         <div class="versions">
-          <span>{radio.info?.firmware ?? "?"}</span>
+          <span data-k="now">{radio.info?.firmware ?? "?"}</span>
           <span class="arrow">→</span>
-          <span class="to">{check.version ?? "?"}</span>
+          <span class="to" data-k="new">{check.version ?? "?"}</span>
         </div>
         {#if firmware.signature}
           <p class="sig" class:signed={firmware.signature.kind === "signed"} class:bad={firmware.signature.kind === "bad"}>
@@ -64,11 +64,10 @@
             <ul>{#each check.problems as p, i (i)}<li>{p}</li>{/each}</ul>
           </div>
         {/if}
-      {:else if firmware.error}
-        <div class="err" role="alert">{firmware.error}</div>
-      {:else}
+      {:else if !firmware.error}
         <p class="sub">Getting the release ready…</p>
       {/if}
+      {#if firmware.error}<div class="err" role="alert" aria-label="Update error">{firmware.error}</div>{/if}
       {#if !onCable}
         <p class="warn">{radio.phase === "connected" ? "Updates need the cable: disconnect, then connect with the cable." : "Connect the radio with the cable first."}</p>
       {/if}
@@ -77,7 +76,7 @@
         <button class="btn primary" disabled={!ok || !onCable} onclick={() => firmware.start()}>Update</button>
       </div>
     {:else if step === 2}
-      <p class="msg" role="status" aria-live="polite">{firmware.message || "Starting…"}</p>
+      <p class="msg" aria-live="polite">{firmware.message || "Starting…"}</p>
       {#if firmware.stage === "sending"}
         <progress max={firmware.blocks} value={firmware.done} aria-label="Sent"></progress>
         <p class="sub">{firmware.pct}%</p>
@@ -85,7 +84,7 @@
       {#if firmware.running}
         <p class="warn">Keep the cable in until this says done.</p>
       {/if}
-      {#if firmware.error}<div class="err" role="alert">{firmware.error}</div>{/if}
+      {#if firmware.error}<div class="err" role="alert" aria-label="Update error">{firmware.error}</div>{/if}
       {#if firmware.stage === "failed" && !firmware.running}
         <p class="sub">The radio is waiting in its bootloader (a blank screen). It's safe: send the image again.</p>
         <div class="row">
@@ -98,9 +97,9 @@
         </div>
       {/if}
     {:else}
-      <div class="done" role="status">
+      <div class="done" role="region" aria-label="Update done">
         <p class="big">Done</p>
-        <p>The radio runs {firmware.after?.firmware ?? "the new firmware"}{firmware.after?.build ? ` (${firmware.after.build})` : ""}.</p>
+        <p>The radio runs <span data-k="after">{firmware.after?.firmware ?? "the new firmware"}</span>{firmware.after?.build ? ` (${firmware.after.build})` : ""}.</p>
         {#if check?.version && firmware.after && check.version !== firmware.after.firmware}
           <p class="warn">The file said {check.version}: check the radio's About page (MENU 0 9 8).</p>
         {/if}

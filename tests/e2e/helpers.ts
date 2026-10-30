@@ -54,6 +54,14 @@ export async function openConsole(page: Page, section = "live", bridge?: string)
   const url = bridge ?? process.env.FERRITE_E2E_BRIDGE;
   if (!url) throw new Error("FERRITE_E2E_BRIDGE is not set (the bridge fixture starts the bridge)");
   await page.goto(`/?bridge=${encodeURIComponent(url)}#/${section}`);
+  await closeWelcome(page);
+}
+
+/** The welcome (ConnectModal) opens on every visit: closed as a visitor would, to reach the page underneath. */
+export async function closeWelcome(page: Page) {
+  const skip = page.getByRole("button", { name: "Look around without a radio" });
+  await skip.waitFor({ timeout: 5_000 }).catch(() => {});
+  if (await skip.isVisible()) await skip.click();
 }
 
 export async function connect(page: Page) {
