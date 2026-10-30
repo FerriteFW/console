@@ -13,25 +13,7 @@
   import { sequencer } from "../sequence.svelte";
   import { copyPng, download, pngName, screenPng } from "../snapshot";
 
-  let scale = $state(load("scale", 1.5));
   let showKeypad = $state(true);
-
-  function load(k: string, d: number) {
-    try {
-      const v = Number(localStorage.getItem(k));
-      return v > 0 ? v : d;
-    } catch {
-      return d;
-    }
-  }
-  $effect(() => {
-    try {
-      localStorage.setItem("scale", String(scale));
-    } catch {
-      /* not kept */
-    }
-  });
-
   const connected = $derived(radio.phase === "connected");
   const asleep = $derived(connected && Number(radio.ui?.state?.dark) === 1);
   // LINK-13.4, decision 290: what Listen hears: a slot, the broadcast ("Broadcast · 101.1 · ROCK 101"), or HF mode.
@@ -44,16 +26,28 @@
     const name = String(radio.ui?.bcast?.[listen.slot]?.rds ?? "").trim().slice(0, 24);
     return ["Broadcast", mhz, name].filter(Boolean).join(" · ");
   });
-  // Narrow windows (a phone): the radio shrinks to fit, the side keys and bezel (~150 px) included.
-  // The radio fits the window both ways: drawn at 1.5x it is about 490 x 920 px with the keypad (the screen alone
-  // 256 x 336); the sidebar, header and toolbar take about 300 px across and 230 px down.
+  // The scale picks itself (Alex, Oct 30: "dont let the user pick"): the largest of 2x, 1.5x and 1x that fits the room
+  // left under the toolbar, both ways; a smaller window (a phone) shrinks it below 1x. Drawn at 1.5x the radio is
+  // about 490 x 920 px with the keypad, the screen alone 256 x 336.
   let innerWidth = $state(1200);
   let innerHeight = $state(900);
+  let area: HTMLElement | undefined = $state();
+  let room = $state({ w: 800, h: 700 });
+  $effect(() => {
+    void innerWidth;
+    void innerHeight;
+    void showKeypad;
+    if (!area) return;
+    const r = area.getBoundingClientRect();
+    room = { w: Math.max(200, r.width), h: Math.max(200, innerHeight - r.top - 16) };
+  });
   const fit = $derived.by(() => {
     const [w, h] = showKeypad ? [490, 920] : [256, 336];
-    const room = innerWidth > 860 ? innerWidth - 300 : innerWidth - 32;
-    return Math.max(0.6, Math.min(scale, (1.5 * room) / w, (1.5 * (innerHeight - 230)) / h));
+    const most = Math.min((1.5 * room.w) / w, (1.5 * room.h) / h);
+    return [2, 1.5, 1].find((k) => k <= most) ?? Math.max(0.5, most);
   });
+  let seqOpen = $state(false);
+  const DEV = import.meta.env.VITE_DEV_TOOLS === "1" || import.meta.env.DEV;
 
   // Keyboard: as the web simulator's map (ferrite/sim-web), plus M for MENU; Shift for a long press.
   const CODES: Record<string, string> = {
@@ -142,16 +136,6 @@
 
 <div class="live">
   <div class="toolbar" role="toolbar" aria-label="Display">
-    <label
-      >Size
-      <select bind:value={scale}>
-        <option value={1}>1×</option>
-        <option value={1.5}>1.5×</option>
-        <option value={2}>2×</option>
-      </select>
-    </label>
-    <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
-    <label title="Pause reading the screen (keys still work)"><input type="checkbox" bind:checked={radio.live} /> Live</label>
     <span class="listen">
       <button class="btn quiet" class:on={listen.on} aria-pressed={listen.on} disabled={!listen.available || listen.starting} title={listenTitle} onclick={() => (listen.on ? listen.stop() : listen.start())}>{listen.on ? "Listening" : "Listen"}</button>
       {#if listen.on}
@@ -161,10 +145,9 @@
       {/if}
       {#if listen.error}<span class="meta err">{listen.error}</span>{/if}
     </span>
-    {#if connected}
-      <span class="meta" title={radio.liveByEvents ? `Live View from the radio's updates (LINK-47): ${radio.liveUpdates} so far, ${radio.liveResyncs} whole-state asks` : "Each readback's time"}>{radio.liveByEvents ? `${radio.liveRate} B/s` : `${radio.uiMs} ms`}{radio.ui?.screen ? ` · ${radio.ui.screen.id}` : ""}</span>
-    {/if}
+    <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
     <span class="spacer"></span>
+    {#if shotNote}<span class="meta" aria-live="polite">{shotNote}</span>{/if}
     <span class="group">
       <button class="btn quiet" onclick={() => savePng(1)} disabled={!connected || !radio.ui} title="Save the screen as a 240×320 PNG"
         >Save PNG</button
@@ -176,12 +159,14 @@
         aria-label="More screenshot options">▾</button
       >
     </span>
-    {#if shotNote}<span class="meta" aria-live="polite">{shotNote}</span>{/if}
     {#if connected}
       <button class="btn quiet" popovertarget="radio-info" title="The radio's details">Radio</button>
     {/if}
-    <button class="btn quiet" popovertarget="keys-help" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+    <button class="btn quiet" popovertarget="live-more" title="More" aria-label="More Live View options">⋯</button>
+  </div>
+  {#if seqOpen}
     <form class="seq" onsubmit={sendSeq} aria-label="Key sequence">
+      <!-- svelte-ignore a11y_autofocus -->
       <input
         type="text"
         bind:value={seqText}
@@ -192,6 +177,7 @@
         autocomplete="off"
         spellcheck="false"
         disabled={!connected}
+        autofocus
       />
       <datalist id="seq-recent">
         {#each sequencer.recent as r (r)}<option value={r}></option>{/each}
@@ -202,11 +188,12 @@
       {:else}
         <button type="submit" class="btn quiet" disabled={!connected || !seqText.trim()}>Send</button>
       {/if}
+      <button type="button" class="btn quiet" onclick={() => (seqOpen = false)} aria-label="Close the key sequence">✕</button>
       {#if sequencer.error}<span class="err" role="alert">{sequencer.error}</span>{/if}
     </form>
-  </div>
+  {/if}
 
-  <section class="radio" aria-label="The radio">
+  <section class="radio" aria-label="The radio" bind:this={area}>
     {#snippet screen()}
       {#if radio.ui && connected}
         <ReadbackScreen ui={radio.ui} />
@@ -220,7 +207,7 @@
             <b>Reading the screen…</b>
           {:else}
             <b>Ready to connect</b>
-            <span>Cable or Bluetooth, above. No radio? Try the demo radio.</span>
+            <span>Cable or Bluetooth, at the top.{#if DEV} No radio? Try the demo radio.{/if}</span>
           {/if}
         </div>
       {/if}
@@ -241,6 +228,14 @@
     <button class="btn quiet" popovertarget="shot-menu" popovertargetaction="hide" onclick={copyShot}>Copy to clipboard</button>
   </div>
   <div id="keys-help" popover class="pop"><KeyboardHelp /></div>
+  <div id="live-more" popover class="pop menu">
+    <button class="btn quiet" popovertarget="live-more" popovertargetaction="hide" onclick={() => (seqOpen = true)} disabled={!connected}>Send a key sequence…</button>
+    <button class="btn quiet" popovertarget="keys-help">Keyboard shortcuts</button>
+    <label class="opt" title="Pause reading the screen (keys still work)"><input type="checkbox" bind:checked={radio.live} /> Update the screen live</label>
+    {#if connected}
+      <span class="meta" title={radio.liveByEvents ? `Live View from the radio's updates (LINK-47): ${radio.liveUpdates} so far, ${radio.liveResyncs} whole-state asks` : "Each readback's time"}>{radio.liveByEvents ? `${radio.liveRate} B/s` : `${radio.uiMs} ms`}{radio.ui?.screen ? ` · ${radio.ui.screen.id}` : ""}</span>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -371,16 +366,15 @@
     border: 8px solid var(--bezel);
     box-sizing: content-box;
   }
-  select {
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 3px 6px;
-  }
   .meta {
     color: var(--sub);
     font-size: 12px;
+  }
+  .opt {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
   }
 </style>

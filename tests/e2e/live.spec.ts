@@ -83,11 +83,25 @@ test("save PNG: the screen downloads at 240x320 (and 480x640 at 2x), named by sc
   await info.attach("screen-2x", { path: path2, contentType: "image/png" });
 });
 
+/** The key sequence box opens from the toolbar's ⋯ menu. */
+async function openSequence(page: import("@playwright/test").Page) {
+  await page.getByRole("button", { name: "More Live View options" }).click();
+  await page.getByRole("button", { name: "Send a key sequence…" }).click();
+  return page.getByRole("combobox", { name: "Key sequence" });
+}
+/** Pauses or resumes reading the screen (⋯ › Update the screen live). */
+async function setLive(page: import("@playwright/test").Page, on: boolean) {
+  await page.getByRole("button", { name: "More Live View options" }).click();
+  const c = page.getByRole("checkbox", { name: "Update the screen live" });
+  await (on ? c.check() : c.uncheck());
+  await page.keyboard.press("Escape");
+}
+
 test("key sequence: typed keys are pressed in order and reach the screen", async ({ page }, info) => {
   await openConsole(page, "live");
   await connect(page);
   await expectScreen(page, "Home");
-  const box = page.getByRole("combobox", { name: "Key sequence" });
+  const box = await openSequence(page);
   await box.fill("MENU 0 7");
   await box.press("Enter");
   await expectScreen(page, SEQ_SCREEN);
@@ -107,15 +121,15 @@ test("key sequence: an unknown name (or PTT) is refused before anything is sent"
   await connect(page);
   await expectScreen(page, "Home");
   // Readbacks paused, so any frame sent after Enter would be a key.
-  await page.getByRole("checkbox", { name: "Live" }).uncheck();
+  await setLive(page, false);
   await page.waitForTimeout(500);
-  const box = page.getByRole("combobox", { name: "Key sequence" });
+  const box = await openSequence(page);
   await box.fill("MENU 0 PTT FOO");
   const before = sent.length;
   await box.press("Enter");
   await expect(page.getByRole("alert")).toContainText("Unknown keys: PTT, FOO");
   await page.waitForTimeout(500);
   expect(sent.length, "nothing went to the radio").toBe(before);
-  await page.getByRole("checkbox", { name: "Live" }).check();
+  await setLive(page, true);
   await expectScreen(page, "Home");
 });
