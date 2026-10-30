@@ -11,15 +11,17 @@ const long = () => (onRadio() ? 120_000 : 30_000);
 /** Vancouver airport. */
 const PLACE = "49.1947, -123.1792";
 
+const toolbar = () => page.getByRole("toolbar", { name: "Channels" });
+
 async function readRadio() {
   await page.evaluate(() => ((window as any).__e2eBase = (window as any).ferrite.channels.base));
-  await page.getByRole("button", { name: "Read from radio" }).click();
+  await toolbar().getByRole("button", { name: "Read from radio" }).click();
   await expect.poll(() => page.evaluate(() => (window as any).ferrite.channels.base !== (window as any).__e2eBase), { timeout: long() }).toBe(true);
-  await expect(page.getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
+  await expect(toolbar().getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
 }
 
 async function openLibrary(tab: string) {
-  await page.getByRole("button", { name: "Add channels…" }).click();
+  await page.getByRole("button", { name: "Add from library…" }).click();
   await expect(lib()).toBeVisible();
   await lib().getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
 }
@@ -67,7 +69,7 @@ test.describe.serial("write", () => {
 
     // Write: backup, the diff (22 channels and the zone added), no problems.
     const dl = page.waitForEvent("download", { timeout: long() });
-    await page.getByRole("button", { name: "Write to radio…" }).click();
+    await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
     await dl;
     await expect(writeDialog()).toContainText("Backup saved", { timeout: long() });
     await expect(writeDialog().locator("h3.added")).toHaveText("Added (23)");
@@ -146,7 +148,9 @@ test.describe.serial("near a place", () => {
     expect(added.length).toBeGreaterThan(0);
     await shot(page, info, "37-library-tafl-rows");
     // Leave the table as read (nothing of this test is written).
-    await page.getByRole("button", { name: "Undo edits" }).click();
+    await toolbar().getByRole("button", { name: /^File/ }).click();
+    await page.getByRole("menuitem", { name: /^Discard unwritten changes/ }).click();
+    expect(await state(page, (f) => f.channels.pending)).toBe(0);
   });
 
   test("repeaters: says why not yet", async ({}, info) => {

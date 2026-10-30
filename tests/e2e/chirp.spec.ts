@@ -93,18 +93,22 @@ for (const fx of FILES) {
     const imp = () => page.getByRole("dialog", { name: "Import CHIRP CSV" });
     const wd = () => page.getByRole("dialog", { name: "Write to the radio" });
     const table = () => state(page, (f) => f.channels.table);
+    const toolbar = () => page.getByRole("toolbar", { name: "Channels" });
 
     async function readRadio() {
       await page.evaluate(() => ((window as any).__e2eBase = (window as any).ferrite.channels.base));
-      await page.getByRole("button", { name: "Read from radio" }).click();
+      await toolbar().getByRole("button", { name: "Read from radio" }).click();
+      // Unwritten changes (a failed step): the page asks first.
+      const drop = page.getByRole("button", { name: "Read and discard" });
+      if (await drop.isVisible()) await drop.click();
       await expect.poll(() => page.evaluate(() => (window as any).ferrite.channels.base !== (window as any).__e2eBase), { timeout: long() }).toBe(true);
-      await expect(page.getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
+      await expect(toolbar().getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
     }
 
     /** Write to radio: the backup downloads (kept in the shots folder), the review shows. */
     async function startWrite(as: string) {
       const dl = page.waitForEvent("download", { timeout: long() });
-      await page.getByRole("button", { name: "Write to radio…" }).click();
+      await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
       const backup = await dl;
       expect(backup.suggestedFilename()).toMatch(/^ferrite-.*-backup\.json$/);
       await backup.saveAs(join(shotsDir(), `${onRadio() ? "radio" : "sim"}-${as}`));
@@ -118,15 +122,22 @@ for (const fx of FILES) {
       await expect(wd()).toHaveCount(0);
     }
 
-    /** Takes the zone named `zone` and its channels out of the table (the rows' and the zone's delete buttons): how
-     *  many channels, or -1 when the table has no such zone. */
+    /** Takes the zone named `zone` and its channels out of the table (the zone shown, every row ticked and deleted
+     *  from the bulk bar, then the zone's delete button): how many channels, or -1 when the table has no such zone. */
     async function removeZone(): Promise<number> {
       const t = await table();
       const zi = t.zones.findIndex((z: any) => z.name === zone);
       if (zi < 0) return -1;
       await page.getByRole("tab", { name: /^Channels/ }).click();
       const mine = t.channels.filter((c: any) => c.zone === zi).map((c: any) => c.number as number);
-      for (const n of mine) await page.getByRole("button", { name: `Delete channel ${n}`, exact: true }).click();
+      if (mine.length) {
+        await toolbar().getByLabel("Show zone").selectOption(String(zi));
+        await page.getByRole("checkbox", { name: "Select every channel shown" }).check();
+        const bar = page.getByRole("region", { name: "Selected channels" });
+        await expect(bar).toContainText(`${mine.length} selected`);
+        await bar.getByRole("button", { name: `Delete ${mine.length}` }).click();
+        await toolbar().getByLabel("Show zone").selectOption("all");
+      }
       await page.getByRole("tab", { name: /^Zones/ }).click();
       await page.getByRole("button", { name: `Delete zone ${zi + 1}`, exact: true }).click();
       await page.getByRole("tab", { name: /^Channels/ }).click();
@@ -135,7 +146,6 @@ for (const fx of FILES) {
 
     test.beforeAll(async ({ browser }) => {
       page = await browser.newPage();
-      page.on("dialog", (d) => d.accept()); // confirm() on a zone delete with channels (none here)
       await openConsole(page, "channels");
       await connect(page);
     });

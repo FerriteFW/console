@@ -1,6 +1,7 @@
 // Channels & Zones as Svelte state: the set read from the radio (`base`), the table being edited (`table`), and the
 // flows around them: read (READ records over the link, part by part), write (a fresh read saved as a backup file
 // first, then the diff, then the write session on confirm), CHIRP CSV in and out, backup files out and back in.
+// Unwritten edits are kept in IndexedDB (restored on the next visit); each table edit can be undone (`undo`).
 // Every record layout, check, diff and conversion is the Rust core's; this file only moves them and the files.
 import {
   P,
@@ -11,6 +12,7 @@ import {
   decodeSet,
   newChannel,
   newZone,
+  normalizeChannel,
   restoreFile,
   writePlan,
   type Channel,
@@ -69,9 +71,15 @@ class Channels {
   notes = $state<string[]>([]);
   write = $state<WriteStep | null>(null);
   imported = $state<(ChirpImport & { file: string }) | null>(null);
+  /** The table before each edit, newest last, for `undo` (not kept across visits). */
+  history = $state.raw<ChannelSet[]>([]);
+  /** Unwritten changes brought back from the last visit (for the notice), 0 once seen to. */
+  restored = $state(0);
+  /** False until the last visit's edits are looked for (the page's auto-read waits for it). */
+  ready = $state(typeof indexedDB === "undefined");
+  #reading: Promise<void> | null = null;
 
-  /** Rows (by number) that differ from what was read: changed, added; and how many were deleted. */
-  get dirty() {
+  #dirty = $derived.by(() => {
     const base = this.base ?? { zones: [], channels: [] };
     const bc = new Map(base.channels.map((c) => [c.number, c]));
     const tc = new Set(this.table.channels.map((c) => c.number));
@@ -81,7 +89,31 @@ class Channels {
     const zones = new Set<number>();
     for (const z of this.table.zones) if (!sameJson(base.zones[z.number - 1], z)) zones.add(z.number);
     const zonesDeleted = Math.max(0, base.zones.length - this.table.zones.length);
-    return { changed, deleted, zones, zonesDeleted, any: changed.size + deleted + zones.size + zonesDeleted > 0 };
+    const count = changed.size + deleted + zones.size + zonesDeleted;
+    return { changed, deleted, zones, zonesDeleted, count, any: count > 0 };
+  });
+
+  /** Rows (by number) that differ from what was read: changed, added; and how many were deleted. */
+  get dirty() {
+    return this.#dirty;
+  }
+
+  /** How many changes Write would make (channels and zones changed, added or deleted). */
+  get pending() {
+    return this.#dirty.count;
+  }
+
+  /** The table as it is now onto the undo list: called before each edit. */
+  private remember() {
+    this.history = [...this.history.slice(-99), clone($state.snapshot(this.table) as ChannelSet)];
+  }
+
+  /** The last edit undone. */
+  undo() {
+    const prev = this.history.at(-1);
+    if (!prev) return;
+    this.history = this.history.slice(0, -1);
+    this.table = prev;
   }
 
   private radioMeta(): Record<string, string> {
@@ -130,17 +162,25 @@ class Channels {
     }
   }
 
-  /** Read into the table (and base). Unwritten edits are dropped: the caller asks first. */
-  async read() {
-    this.error = "";
-    try {
-      const set = await this.readRadio();
-      this.base = clone(set);
-      this.table = clone(set);
-      this.source = `Read from ${radio.label} at ${new Date().toLocaleTimeString()}`;
-    } catch (e) {
-      this.error = (e as Error).message;
-    }
+  /** Read into the table (and base). Unwritten edits are dropped: the caller asks first. A read already going is
+   *  joined, not started again. */
+  read(): Promise<void> {
+    this.#reading ??= (async () => {
+      this.error = "";
+      try {
+        const set = await this.readRadio();
+        this.base = clone(set);
+        this.table = clone(set);
+        this.history = [];
+        this.restored = 0;
+        this.source = `Read from ${radio.label} at ${new Date().toLocaleTimeString()}`;
+      } catch (e) {
+        this.error = (e as Error).message;
+      } finally {
+        this.#reading = null;
+      }
+    })();
+    return this.#reading;
   }
 
   /** A fresh read saved as a backup file: the radio as it is now. */
@@ -177,6 +217,7 @@ class Channels {
     this.error = "";
     try {
       const r = restoreFile(text);
+      this.remember();
       this.table = r.set;
       this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})`;
       this.notes = [];
@@ -225,7 +266,11 @@ class Channels {
       const back = await this.readRadio();
       this.base = clone(back);
       verified = !error && sameJson(back, this.table);
-      if (!error) this.table = clone(back);
+      if (!error) {
+        this.table = clone(back);
+        this.history = [];
+        this.restored = 0;
+      }
       this.source = `Written to ${radio.label} and read back at ${new Date().toLocaleTimeString()}`;
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
@@ -251,6 +296,7 @@ class Channels {
   applyImport(replace: boolean) {
     const imp = this.imported;
     if (!imp) return;
+    this.remember();
     const byNum = new Map((replace ? [] : this.table.channels).map((c) => [c.number, c]));
     for (const c of imp.channels) {
       // Merge: what CHIRP's columns can't hold stays as the table had it (an export and import changes nothing).
@@ -272,6 +318,7 @@ class Channels {
   applyImportNewZone(nz: ChirpNewZone) {
     const imp = this.imported;
     if (!imp || !nz.zone || nz.room || nz.name_error) return;
+    this.remember();
     this.table.zones = [...this.table.zones, nz.zone];
     this.table.channels = [...this.table.channels, ...nz.channels].sort((a, b) => a.number - b.number);
     this.source = `${nz.channels.length} channels imported from ${imp.file} as ${nz.numbers} in new zone "${nz.zone.name}"`;
@@ -282,6 +329,7 @@ class Channels {
   /** The library's channels and new zones into the table (the core numbered and checked them). */
   addLibrary(a: LibraryAdded, what: string) {
     this.error = "";
+    this.remember();
     this.table.zones = [...this.table.zones, ...a.zones];
     this.table.channels = [...this.table.channels, ...a.channels].sort((x, y) => x.number - y.number);
     const z = a.zones.length ? `, ${a.zones.length} new ${a.zones.length === 1 ? "zone" : "zones"}` : "";
@@ -298,7 +346,39 @@ class Channels {
 
   setChannel(number: number, c: Channel) {
     const i = this.table.channels.findIndex((x) => x.number === number);
-    if (i >= 0) this.table.channels[i] = c;
+    if (i < 0 || sameJson(this.table.channels[i], c)) return;
+    this.remember();
+    this.table.channels[i] = c;
+  }
+
+  /** One field of a channel, normalised by the core as the radio would hold it; a value that doesn't parse stays as
+   *  typed (the row's marker says what is wrong). */
+  edit<K extends keyof Channel>(number: number, k: K, v: Channel[K]) {
+    const c = this.table.channels.find((x) => x.number === number);
+    if (!c) return;
+    const next = { ...($state.snapshot(c) as Channel), [k]: v };
+    let out = next;
+    try {
+      out = normalizeChannel(next);
+    } catch {
+      /* kept as typed */
+    }
+    this.setChannel(number, out);
+  }
+
+  /** One change to several channels (the bulk bar), each through the core's normalising as a row edit is; one undo. */
+  setMany(numbers: Iterable<number>, patch: Partial<Channel>) {
+    const want = new Set(numbers);
+    this.remember();
+    this.table.channels = this.table.channels.map((c) => {
+      if (!want.has(c.number)) return c;
+      const next = { ...($state.snapshot(c) as Channel), ...patch };
+      try {
+        return normalizeChannel(next);
+      } catch {
+        return next; // kept as set: the row's marker says what is wrong
+      }
+    });
   }
 
   addChannel(): number | null {
@@ -306,12 +386,18 @@ class Channels {
     let n = 1;
     while (used.has(n)) n++;
     if (n > 1000) return null;
+    this.remember();
     this.table.channels = [...this.table.channels, newChannel(n, "146.52")].sort((a, b) => a.number - b.number);
     return n;
   }
 
-  deleteChannel(number: number) {
-    this.table.channels = this.table.channels.filter((c) => c.number !== number);
+  /** Channels out of the table (undoable): how many went. */
+  deleteChannels(numbers: Iterable<number>): number {
+    const gone = new Set(numbers);
+    const before = this.table.channels.length;
+    this.remember();
+    this.table.channels = this.table.channels.filter((c) => !gone.has(c.number));
+    return before - this.table.channels.length;
   }
 
   /** A channel to another number (free ones only). */
@@ -320,6 +406,7 @@ class Channels {
     if (this.table.channels.some((c) => c.number === to)) return `Channel ${to} is in use.`;
     const c = this.table.channels.find((x) => x.number === from);
     if (!c) return "";
+    this.remember();
     c.number = to;
     for (const z of this.table.zones) {
       if (z.pri1 === from) z.pri1 = to;
@@ -332,16 +419,20 @@ class Channels {
   addZone() {
     const n = this.table.zones.length + 1;
     if (n > 254) return;
+    this.remember();
     this.table.zones = [...this.table.zones, newZone(n, `Zone ${n}`)];
   }
 
   setZone(number: number, z: Zone) {
+    if (sameJson(this.table.zones[number - 1], z)) return;
+    this.remember();
     this.table.zones[number - 1] = z;
   }
 
   /** CHAN-12: a zone goes, its channels to no zone; the zones after it move up one (and their channels with them). */
   deleteZone(number: number) {
     const idx = number - 1;
+    this.remember();
     this.table.zones = this.table.zones.filter((_, i) => i !== idx).map((z, i) => ({ ...z, number: i + 1 }));
     for (const c of this.table.channels) {
       if (c.zone === idx) c.zone = null;
@@ -349,11 +440,88 @@ class Channels {
     }
   }
 
-  /** Back to what was read. */
+  /** Every unwritten change dropped: back to what was read (an empty table when nothing was). Undoable. */
   revert() {
-    if (this.base) this.table = clone(this.base);
-    this.source = this.base ? "Edits undone: as read" : "";
+    this.remember();
+    this.table = this.base ? clone(this.base) : { zones: [], channels: [] };
+    this.restored = 0;
+    this.source = this.base ? "Changes discarded: the table as read" : "";
+  }
+
+  // ---- unwritten edits kept across visits (IndexedDB: the table can be 1000 channels) ----
+
+  /** The last visit's unwritten edits back into the table, when there were any and nothing is here yet. */
+  async restore() {
+    try {
+      const saved = await kept.get();
+      if (saved && !this.base && !this.table.channels.length && !this.table.zones.length) {
+        this.base = saved.base;
+        this.table = saved.table;
+        this.source = `Restored from your last visit (${new Date(saved.at).toLocaleString()})`;
+        this.restored = this.pending;
+        if (!this.restored) void kept.clear().catch(() => {});
+      }
+    } catch {
+      /* nothing kept, or storage blocked: nothing to restore */
+    } finally {
+      this.ready = true;
+    }
+  }
+
+  /** Keeps the table while it has unwritten changes, and forgets it once it hasn't (written, read or discarded). */
+  keep() {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    $effect.root(() => {
+      $effect(() => {
+        const n = this.pending;
+        if (!this.ready) return;
+        const snap = n ? { base: $state.snapshot(this.base), table: $state.snapshot(this.table), at: Date.now() } : null;
+        clearTimeout(timer);
+        timer = setTimeout(() => void (snap ? kept.put(snap as Kept) : kept.clear()).catch(() => {}), 250);
+      });
+    });
+    // A page closed with changes not written asks first.
+    window.addEventListener("beforeunload", (e) => {
+      if (this.pending) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    });
   }
 }
 
+type Kept = { base: ChannelSet | null; table: ChannelSet; at: number };
+
+/** One record in IndexedDB: the working table and what it was read as. */
+const kept = (() => {
+  const open = () =>
+    new Promise<IDBDatabase>((ok, fail) => {
+      const r = indexedDB.open("ferrite-console-channels", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => fail(r.error);
+    });
+  const run = async <T>(mode: IDBTransactionMode, f: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
+    const db = await open();
+    try {
+      return await new Promise<T>((ok, fail) => {
+        const q = f(db.transaction("kv", mode).objectStore("kv"));
+        q.onsuccess = () => ok(q.result);
+        q.onerror = () => fail(q.error);
+      });
+    } finally {
+      db.close();
+    }
+  };
+  return {
+    get: () => run<Kept | undefined>("readonly", (s) => s.get("working")),
+    put: (v: Kept) => run("readwrite", (s) => s.put(v, "working")),
+    clear: () => run("readwrite", (s) => s.delete("working")),
+  };
+})();
+
 export const channels = new Channels();
+if (typeof indexedDB !== "undefined" && typeof window !== "undefined") {
+  channels.keep();
+  void channels.restore();
+}

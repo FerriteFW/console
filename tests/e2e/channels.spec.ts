@@ -4,7 +4,7 @@
 import { type Download, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { connect, disconnect, expect, onRadio, openConsole, shot, shotsDir, state, test } from "./helpers";
+import { closeWelcome, connect, disconnect, expect, onRadio, openConsole, shot, shotsDir, state, test } from "./helpers";
 
 let page: Page;
 /** The channel the tests edit, its name as read, and the name written (while it is on the radio). */
@@ -14,17 +14,21 @@ let written: string | null = null;
 
 const row = () => page.locator(`tr[data-n="${num}"]`);
 const dialog = () => page.getByRole("dialog");
+const toolbar = () => page.getByRole("toolbar", { name: "Channels" });
 
 async function readRadio() {
   // Done when the read set is a new one (the button can still look enabled before the read starts).
   await page.evaluate(() => ((window as any).__e2eBase = (window as any).ferrite.channels.base));
-  await page.getByRole("button", { name: "Read from radio" }).click();
+  await toolbar().getByRole("button", { name: "Read from radio" }).click();
+  // Unwritten changes: the page asks first.
+  const drop = page.getByRole("button", { name: "Read and discard" });
+  if (await drop.isVisible()) await drop.click();
   await expect
     .poll(() => page.evaluate(() => (window as any).ferrite.channels.base !== (window as any).__e2eBase), {
       timeout: onRadio() ? 120_000 : 30_000,
     })
     .toBe(true);
-  await expect(page.getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: onRadio() ? 120_000 : 30_000 });
+  await expect(toolbar().getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: onRadio() ? 120_000 : 30_000 });
   await expect.poll(() => state(page, (f) => f.channels.table.channels.length)).toBeGreaterThan(0);
 }
 
@@ -45,7 +49,7 @@ async function save(d: Download, as?: string) {
 /** Write to radio...: the backup downloads, the review shows. Returns the backup's path. */
 async function startWrite() {
   const dl = page.waitForEvent("download", { timeout: onRadio() ? 120_000 : 30_000 });
-  await page.getByRole("button", { name: "Write to radio…" }).click();
+  await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
   const backup = await dl;
   expect(backup.suggestedFilename()).toMatch(/^ferrite-.*-backup\.json$/);
   const path = await save(backup);
@@ -163,7 +167,8 @@ test.describe.serial("round trip", () => {
   test("CHIRP: export, import that file (merge), nothing to write", async ({}, info) => {
     await readRadio();
     const dl = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export" }).click();
+    await toolbar().getByRole("button", { name: /^File/ }).click();
+    await page.getByRole("menuitem", { name: /^Export CHIRP/ }).click();
     const csv = await save(await dl, "export.csv");
     const text = readFileSync(csv, "utf8");
     expect(text.split(/\r?\n/)[0]).toMatch(/^Location,Name,Frequency,Duplex,Offset,Tone,/);
@@ -177,9 +182,117 @@ test.describe.serial("round trip", () => {
     await dialog().getByRole("button", { name: /^Import \d+$/ }).click();
     await expect(dialog()).toHaveCount(0);
     expect(await state(page, (f) => f.channels.table.channels.length)).toBe(count);
-    await startWrite();
-    await expect(dialog()).toContainText("Nothing to write: the radio already holds the table.");
+    // Nothing to write: the table is, field for field, the radio as read, so Write has no change to send.
+    expect(await state(page, (f) => f.channels.pending)).toBe(0);
+    const w = toolbar().getByRole("button", { name: /^Write to radio/ });
+    await expect(w).toHaveText("Write to radio");
+    await expect(w).toBeDisabled();
     await shot(page, info, "17-chirp-nothing-to-write");
-    await closeWrite();
+  });
+});
+
+// Unwritten changes (nothing here is written to the radio): a bulk edit from the bar, its delete undone, and the
+// table's changes kept across a reload, then discarded.
+test.describe.serial("unwritten", () => {
+  /** The table as first read: each test ends with the table like this again. */
+  let first = "";
+  const table = () => state(page, (f) => JSON.stringify(f.channels.table));
+
+  test.beforeAll(async ({ browser }) => {
+    page = await browser.newPage();
+    await openConsole(page, "channels");
+    await connect(page);
+  });
+
+  test.afterAll(async () => {
+    await disconnect(page);
+    await page.close();
+  });
+
+  test("bulk edit: power on two rows, delete them, undo both", async ({}, info) => {
+    await readRadio();
+    first = await table();
+    const two = await state(page, (f) => f.channels.table.channels.slice(0, 2).map((c: any) => ({ n: c.number, power: c.power })));
+    for (const c of two) await page.getByRole("checkbox", { name: `Select channel ${c.n}`, exact: true }).check();
+    const bar = page.getByRole("region", { name: "Selected channels" });
+    await expect(bar).toContainText("2 selected");
+    // A power neither row has.
+    const powers = (await bar.getByLabel("Set power").locator("option").allTextContents()).filter((p) => !p.endsWith("…"));
+    const want = powers.find((p) => !two.some((c) => c.power === p))!;
+    await bar.getByLabel("Set power").selectOption(want);
+    const got = await state(page, (f) => f.channels.table.channels.slice(0, 2).map((c: any) => c.power));
+    expect(got).toEqual([want, want]);
+    await expect(toolbar().getByRole("button", { name: "Write to radio (2 changes)" })).toBeEnabled();
+    for (const c of two) await expect(page.locator(`tr[data-n="${c.n}"]`)).toHaveClass(/changed/);
+    await shot(page, info, "18-bulk-power");
+
+    // Delete from the bar: gone, then back from the notice's Undo (the power change stays).
+    await bar.getByRole("button", { name: "Delete 2" }).click();
+    for (const c of two) await expect(page.locator(`tr[data-n="${c.n}"]`)).toHaveCount(0);
+    await expect(page.locator(".toast", { hasText: "Deleted 2 channels." })).toBeVisible();
+    await shot(page, info, "19-bulk-deleted");
+    await page.locator(".toast", { hasText: "Deleted 2 channels." }).getByRole("button", { name: "Undo" }).click();
+    for (const c of two) await expect(page.locator(`tr[data-n="${c.n}"]`)).toHaveCount(1);
+    expect(await state(page, (f) => f.channels.table.channels.slice(0, 2).map((c: any) => c.power))).toEqual([want, want]);
+    // Ctrl/Cmd+Z: the power change undone too; the table is the radio as read.
+    await page.locator("h1, .status").first().click().catch(() => {});
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect.poll(table).toBe(first);
+    await expect(toolbar().getByRole("button", { name: "Write to radio" })).toBeDisabled();
+  });
+
+  test("restore: unwritten changes come back after a reload, then Discard", async ({}, info) => {
+    if (!first) {
+      await readRadio();
+      first = await table();
+    }
+    num = await state(page, (f) => f.channels.table.channels[0].number);
+    const name = `E2E ${String(Date.now() % 100000).padStart(5, "0")}`;
+    await setName(name);
+    const nav = page.getByRole("navigation", { name: "Sections" }).getByRole("link", { name: /^Channels & Zones/ });
+    await expect(nav).toContainText("1 unwritten");
+    // Kept (IndexedDB) once the edit settles.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            new Promise<string>((ok) => {
+              const r = indexedDB.open("ferrite-console-channels", 1);
+              r.onsuccess = () => {
+                const q = r.result.transaction("kv").objectStore("kv").get("working");
+                q.onsuccess = () => ok(JSON.stringify(q.result?.table ?? null));
+                q.onerror = () => ok("");
+              };
+              r.onerror = () => ok("");
+            }),
+        ),
+      )
+      .toContain(name);
+    // Leaving asks first (beforeunload); the test says yes.
+    const asked: string[] = [];
+    const yes = (d: import("@playwright/test").Dialog) => {
+      asked.push(d.type());
+      void d.accept();
+    };
+    page.on("dialog", yes);
+    await page.reload();
+    await closeWelcome(page);
+    page.off("dialog", yes);
+    expect(asked.every((t) => t === "beforeunload")).toBe(true);
+
+    const notice = page.locator(".restored", { hasText: "Restored 1 unwritten change from your last visit." });
+    await expect(notice).toBeVisible();
+    await expect(row().locator("input.name")).toHaveValue(name);
+    await expect(nav).toContainText("1 unwritten");
+    await shot(page, info, "20-restored");
+    await notice.getByRole("button", { name: "Discard" }).click();
+    await expect(notice).toHaveCount(0);
+    await expect(nav).not.toContainText("unwritten");
+    expect(await table()).toBe(first);
+    // Nothing kept now: a reload has no notice.
+    await page.waitForTimeout(500);
+    await page.reload();
+    await closeWelcome(page);
+    await expect(page.getByText(/^Restored /)).toHaveCount(0);
   });
 });

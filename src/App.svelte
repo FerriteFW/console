@@ -131,6 +131,7 @@
       {#each sections as x (x.id)}
         <a href={hrefOf(x)} class:active={section?.id === x.id} aria-current={section?.id === x.id ? "page" : undefined} onclick={() => (navOpen = false)}>
           <span>{x.name}</span>
+          {#if x.id === "channels" && channels.pending}<span class="badge" title="Changes not written to the radio yet">{channels.pending} unwritten</span>{/if}
         </a>
       {/each}
       <div class="label">More</div>
@@ -250,6 +251,15 @@
     background: var(--blue);
     color: var(--blue-fg);
     font-weight: 700;
+  }
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--amber);
+    color: var(--bg);
+    white-space: nowrap;
   }
   .tabs {
     display: flex;

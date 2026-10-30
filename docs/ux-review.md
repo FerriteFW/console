@@ -19,6 +19,10 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
 - [x] Install as a full-screen wizard (Alex's pick, Oct 29): Connect → Back up (save gate unchanged) → SSB (optional,
   Skip) → Install (Try again from the bootloader) → Done; one connect button; Back to stock its own Firmware tab.
   `InstallWizard.svelte`, `Restore.svelte`.
+- [x] 5, channel edits safe (Oct 29): unwritten changes kept in IndexedDB and restored on the next visit (Write or
+  Discard), a leave warning, "N unwritten" on the sidebar, deletes undone from a notice or with Ctrl/Cmd+Z.
+- [x] 6, Channels as NeonPlug's editor (Oct 29): Read, Write (N changes), File menu, Undo; reads on open; 8 core
+  columns, every field in a side panel; row ticks with a bulk bar; empty states with actions; scrolls in its own box.
 
 ## Open
 
