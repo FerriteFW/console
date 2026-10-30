@@ -2,6 +2,7 @@
   // The shell: sidebar (sections grouped as UV Studio groups its own: Viewer, Tools, Console), the connection bar,
   // and the page. Pages by hash (#/live, #/about, ...) so a reload stays put.
   import ConnectionBar from "./lib/components/ConnectionBar.svelte";
+  import ConnectModal from "./lib/components/ConnectModal.svelte";
   import { DEV_TOOLS } from "./lib/devtools";
   import Wordmark from "./lib/components/Wordmark.svelte";
   import LiveView from "./lib/pages/LiveView.svelte";
@@ -95,6 +96,12 @@
   }
 
   const current = $derived(all.find((p) => p.id === page)!);
+
+  // The welcome (ConnectModal) on every visit, until a radio connects or the visitor closes it.
+  let welcome = $state(!params.has("demo"));
+  $effect(() => {
+    if (radio.phase === "connected" || radio.phase === "updating") welcome = false;
+  });
 </script>
 
 {#if focus}
@@ -104,6 +111,7 @@
     <main><Install focus /></main>
   </div>
 {:else}
+{#if welcome}<ConnectModal onclose={() => (welcome = false)} />{/if}
 <div class="shell" class:nav-open={navOpen}>
   <aside class="side">
     <div class="brand"><Wordmark /></div>
