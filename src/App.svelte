@@ -111,8 +111,19 @@
 
   // The welcome (ConnectModal) on every visit, until a radio connects or the visitor closes it.
   let welcome = $state(!params.has("demo") && location.hash !== "#install");
+  let closedByConnect = false;
   $effect(() => {
-    if (radio.phase === "connected" || radio.phase === "updating") welcome = false;
+    const up = radio.phase === "connected" || radio.phase === "updating";
+    // Closed as soon as the port or radio is open (Live View says "Connecting…" meanwhile); a connect that then
+    // fails before it's up brings the welcome back with the error.
+    if (up) closedByConnect = false;
+    if (welcome && (up || (radio.phase === "connecting" && radio.opened))) {
+      welcome = false;
+      closedByConnect = !up;
+    } else if (closedByConnect && radio.phase === "idle" && radio.error) {
+      welcome = true;
+      closedByConnect = false;
+    }
   });
 </script>
 

@@ -29,6 +29,9 @@ class Radio {
   phase = $state<Phase>("idle");
   kind = $state<TransportKind | null>(null);
   label = $state("");
+  /** The port or radio is open and the session is starting (HELLO, INFO): set as soon as `open` returns, cleared
+   *  at each connect. The welcome closes on it rather than waiting the seconds Bluetooth takes to answer. */
+  opened = $state(false);
   baud = $state<number | null>(null);
   hello = $state<Hello | null>(null);
   info = $state<Info | null>(null);
@@ -158,10 +161,12 @@ class Radio {
     this.error = "";
     this.note = "";
     this.phase = "connecting";
+    this.opened = false;
     const gen = ++this.generation;
     try {
       await loadCore();
       const t = await open();
+      this.opened = true;
       this.t = t;
       this.kind = t.kind;
       this.label = t.label;
