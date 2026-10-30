@@ -241,7 +241,9 @@
 
   <div class="status">
     {#if channels.progress}
-      <div class="bar"><div style:width={`${(100 * channels.progress.done) / Math.max(1, channels.progress.total)}%`}></div></div>
+      <div class="bar" class:busy={!channels.progress.total}>
+        <div style:width={channels.progress.total ? `${(100 * channels.progress.done) / channels.progress.total}%` : undefined}></div>
+      </div>
       <span>{channels.progress.label}</span>
     {:else if channels.source}
       <span>{channels.source}</span>
@@ -529,6 +531,26 @@
   .bar div {
     height: 100%;
     background: var(--blue);
+  }
+  /* Indeterminate: a block sliding across while how much is to come isn't known. */
+  .bar.busy div {
+    width: 30%;
+    animation: slide 1.2s ease-in-out infinite alternate;
+  }
+  @keyframes slide {
+    from {
+      margin-left: 0;
+    }
+    to {
+      margin-left: 70%;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bar.busy div {
+      animation: none;
+      width: 100%;
+      opacity: 0.4;
+    }
   }
   .banner {
     padding: 8px 12px;

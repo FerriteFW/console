@@ -27,6 +27,7 @@ import {
 import { WriteError } from "./link";
 import { radio } from "./radio.svelte";
 
+/** A read's progress; total 0 is an indeterminate bar (how much is to come isn't known yet). */
 export type Progress = { label: string; done: number; total: number };
 /** CHAN-17: the radio's home channel (1-1000), null for none, undefined when not known (not read: a demo radio). */
 export type Home = number | null | undefined;
@@ -162,12 +163,22 @@ class Channels {
     if (!link) throw new Error("Connect to a radio first.");
     const { ZONE, CHANNEL } = P.what;
     radio.busy = "Reading channels";
+    // Something shows at once (an indeterminate bar: total 0), before INFO's answer.
+    this.progress = { label: "Reading zones…", done: 0, total: 0 };
     try {
       const info = await link.info();
-      // LINK-40: several whole records an answer.
-      const zmap = info.zones ? await link.readMany(ZONE, 0, info.zones) : new Map<number, Uint8Array>();
-      const cmap = await link.readMany(CHANNEL, 0, 1000, (at) => {
-        this.progress = { label: `Reading channels: at ${Math.min(at, 1000)} of 1000`, done: at, total: 1000 };
+      // LINK-40: several whole records an answer; the progress moves as each answer arrives.
+      const zmap = info.zones
+        ? await link.readMany(ZONE, 0, info.zones, (_at, got) => {
+            this.progress = { label: `Reading zones: ${got} of ${info.zones}`, done: got, total: info.zones };
+          })
+        : new Map<number, Uint8Array>();
+      this.progress = { label: "Reading channels…", done: 0, total: info.channels || 0 };
+      const cmap = await link.readMany(CHANNEL, 0, 1000, (at, got) => {
+        // By count (INFO's channels); by number only when the radio didn't say how many.
+        this.progress = info.channels
+          ? { label: `Reading channels: ${got} of ${info.channels}`, done: got, total: info.channels }
+          : { label: `Reading channels: at ${Math.min(at, 1000)} of 1000`, done: at, total: 1000 };
       });
       const zones: Uint8Array[] = [];
       for (let i = 0; i < info.zones; i++) {
