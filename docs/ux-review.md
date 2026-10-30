@@ -13,6 +13,9 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
   Settings, APRS, Firmware, then More (Event Log, Terminal, About); APRS and Firmware as tabs; Home with the jobs as
   cards and Update saying whether the radio is behind. Next for the editors: NeonPlug's toolbar (Read, Write,
   File, "N unwritten") on Channels, Settings and APRS settings.
+- [x] Update as a modal wizard (Alex's pick, Oct 29): Check (versions, signature) → Update (progress, keep the cable
+  in; Try again from the bootloader) → Done. The page: your radio, the latest, one Update button; a .btf file and
+  its checks under Advanced. `UpdateWizard.svelte`.
 
 ## Open
 
