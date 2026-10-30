@@ -1,11 +1,12 @@
 <script lang="ts">
-  // The shell: sidebar (sections grouped as UV Studio groups its own: Viewer, Tools, Console), the connection bar,
+  // The shell: the sidebar (the jobs, then More), the connection bar,
   // and the page. Pages by hash (#/live, #/about, ...) so a reload stays put.
   import ConnectionBar from "./lib/components/ConnectionBar.svelte";
   import ConnectModal from "./lib/components/ConnectModal.svelte";
   import { DEV_TOOLS } from "./lib/devtools";
   import Wordmark from "./lib/components/Wordmark.svelte";
   import LiveView from "./lib/pages/LiveView.svelte";
+  import Home from "./lib/pages/Home.svelte";
   import About from "./lib/pages/About.svelte";
   import Channels from "./lib/pages/Channels.svelte";
   import Terminal from "./lib/pages/Terminal.svelte";
@@ -23,7 +24,6 @@
   import AprsMap from "./lib/pages/AprsMap.svelte";
   import AprsSettings from "./lib/pages/AprsSettings.svelte";
   import AprsContacts from "./lib/pages/AprsContacts.svelte";
-  import Soon from "./lib/pages/Soon.svelte";
   import { loadCore } from "./lib/core";
   import { radio } from "./lib/radio.svelte";
   import { aprs } from "./lib/aprs.svelte";
@@ -32,38 +32,48 @@
   import { activity } from "./lib/activity.svelte";
   import { route } from "./lib/route.svelte";
 
-  // `sub`: a group within the group (Tools › APRS), its pages indented under its name.
-  type Page = { id: string; name: string; soon?: string; sub?: string };
-  const groups: { name: string; pages: Page[] }[] = [
+  // The sidebar: the jobs first, then More. A section with `tabs` covers several pages, shown as tabs above them
+  // (APRS, Firmware); its link opens the first.
+  type Page = { id: string; name: string; soon?: string };
+  type Section = { id: string; name: string; tabs?: Page[] };
+  const sections: Section[] = [
+    { id: "home", name: "Home" },
+    { id: "live", name: "Live View" },
+    { id: "channels", name: "Channels & Zones" },
+    { id: "settings", name: "Radio Settings" },
     {
-      name: "Viewer",
-      pages: [
-        { id: "live", name: "Live View" },
-        { id: "activity", name: "Event Log" },
+      id: "aprs",
+      name: "APRS",
+      tabs: [
+        { id: "aprs-messages", name: "Messages" },
+        { id: "aprs-heard", name: "Heard stations" },
+        { id: "aprs-map", name: "Map" },
+        { id: "aprs-contacts", name: "Contacts" },
+        { id: "aprs-settings", name: "Settings" },
       ],
     },
     {
-      name: "Tools",
-      pages: [
-        { id: "channels", name: "Channels & Zones" },
-        { id: "settings", name: "Radio Settings" },
-        { id: "terminal", name: "Terminal" },
+      id: "firmware",
+      name: "Firmware",
+      tabs: [
+        { id: "firmware", name: "Update" },
         { id: "install", name: "Install" },
-        { id: "firmware", name: "Firmware Update" },
-        { id: "aprs-messages", name: "Messages", sub: "APRS" },
-        { id: "aprs-heard", name: "Heard stations", sub: "APRS" },
-        { id: "aprs-contacts", name: "Contacts", sub: "APRS" },
-        { id: "aprs-map", name: "Map", sub: "APRS" },
-        { id: "aprs-settings", name: "APRS Settings", sub: "APRS" },
       ],
     },
-    { name: "Console", pages: [{ id: "about", name: "About" }] },
   ];
-  const all = groups.flatMap((g) => g.pages);
+  const more: Page[] = [
+    { id: "activity", name: "Event Log" },
+    { id: "terminal", name: "Terminal" },
+    { id: "about", name: "About" },
+  ];
+  const all: Page[] = [...sections.flatMap((x) => x.tabs ?? [{ id: x.id, name: x.name }]), ...more];
+  const sectionOf = (id: string) => sections.find((x) => x.id === id || x.tabs?.some((t) => t.id === id));
+  const hrefOf = (x: Section) => `#/${x.tabs ? x.tabs[0].id : x.id}`;
 
   let navOpen = $state(false);
   let coreError = $state("");
-  const page = $derived(all.find((p) => p.id === route.id)?.id ?? "live");
+  const page = $derived(all.find((p) => p.id === route.id)?.id ?? "home");
+  const section = $derived(sectionOf(page));
   // `#install` (no slash): the Install page alone, for setting up a new radio (ferritefw.dev/install).
   let focus = $state(location.hash === "#install");
   $effect(() => {
@@ -95,7 +105,6 @@
     });
   }
 
-  const current = $derived(all.find((p) => p.id === page)!);
 
   // The welcome (ConnectModal) on every visit, until a radio connects or the visitor closes it.
   let welcome = $state(!params.has("demo"));
@@ -116,23 +125,16 @@
   <aside class="side">
     <div class="brand"><Wordmark /></div>
     <nav aria-label="Sections">
-      {#each groups as g (g.name)}
-        <div class="group">
-          <div class="label">{g.name}</div>
-          {#each g.pages as p, k (p.id)}
-            {#if p.sub && p.sub !== g.pages[k - 1]?.sub}<div class="sublabel">{p.sub}</div>{/if}
-            <a
-              class:in-sub={!!p.sub}
-              href={`#/${p.id}`}
-              class:active={p.id === page}
-              aria-current={p.id === page ? "page" : undefined}
-              onclick={() => (navOpen = false)}
-            >
-              <span>{p.name}</span>
-              {#if p.soon}<span class="tag">Soon</span>{/if}
-            </a>
-          {/each}
-        </div>
+      {#each sections as x (x.id)}
+        <a href={hrefOf(x)} class:active={section?.id === x.id} aria-current={section?.id === x.id ? "page" : undefined} onclick={() => (navOpen = false)}>
+          <span>{x.name}</span>
+        </a>
+      {/each}
+      <div class="label">More</div>
+      {#each more as p (p.id)}
+        <a href={`#/${p.id}`} class:active={p.id === page} aria-current={p.id === page ? "page" : undefined} onclick={() => (navOpen = false)}>
+          <span>{p.name}</span>
+        </a>
       {/each}
     </nav>
     <div class="side-foot">
@@ -148,7 +150,16 @@
     </header>
     {#if coreError}<div class="banner">{coreError}</div>{/if}
     <main>
-      {#if page === "live"}
+      {#if section?.tabs}
+        <div class="tabs" role="tablist" aria-label={section.name}>
+          {#each section.tabs as t (t.id)}
+            <a role="tab" href={`#/${t.id}`} class:active={t.id === page} aria-selected={t.id === page}>{t.name}</a>
+          {/each}
+        </div>
+      {/if}
+      {#if page === "home"}
+        <Home />
+      {:else if page === "live"}
         <LiveView />
       {:else if page === "channels"}
         <Channels />
@@ -174,8 +185,6 @@
         <AprsSettings />
       {:else if page === "aprs-contacts"}
         <AprsContacts />
-      {:else}
-        <Soon title={current.name} text={current.soon ?? ""} />
       {/if}
     </main>
   </div>
@@ -213,33 +222,21 @@
   nav {
     display: flex;
     flex-direction: column;
-    gap: 18px;
-  }
-  .group {
-    display: flex;
-    flex-direction: column;
     gap: 2px;
   }
-  .group .label {
-    padding: 0 8px 6px;
+  nav .label {
+    padding: 18px 8px 6px;
     font-size: 11px;
+    color: var(--sub);
   }
   nav a {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 7px 8px;
+    padding: 8px 10px;
     border-radius: 7px;
     color: var(--text);
     text-decoration: none;
-  }
-  .sublabel {
-    padding: 10px 8px 4px;
-    font-size: 11px;
-    color: var(--sub);
-  }
-  nav a.in-sub {
-    padding-left: 20px;
   }
   nav a:hover {
     background: var(--raised);
@@ -249,12 +246,27 @@
     color: var(--blue-fg);
     font-weight: 700;
   }
-  .tag {
-    font-size: 10px;
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .tabs a {
+    padding: 8px 12px;
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
     color: var(--sub);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 0 5px;
+    text-decoration: none;
+  }
+  .tabs a:hover {
+    color: var(--text);
+  }
+  .tabs a.active {
+    color: var(--text);
+    border-bottom-color: var(--blue);
+    font-weight: 600;
   }
   .side-foot {
     margin-top: auto;
