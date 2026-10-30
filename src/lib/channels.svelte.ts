@@ -13,7 +13,9 @@ import {
   newChannel,
   newZone,
   normalizeChannel,
+  normalizeZone,
   restoreFile,
+  settingsHome,
   writePlan,
   type Channel,
   type ChannelSet,
@@ -26,12 +28,21 @@ import { WriteError } from "./link";
 import { radio } from "./radio.svelte";
 
 export type Progress = { label: string; done: number; total: number };
+/** CHAN-17: the radio's home channel (1-1000), null for none, undefined when not known (not read: a demo radio). */
+export type Home = number | null | undefined;
+/** The home channel a write sets (`home N` on the terminal after the records: the settings record isn't the table's). */
+export type HomeOp = { from: number | null; to: number | null };
+/** The table and its home channel, as the undo list keeps them. */
+type Snap = { set: ChannelSet; home: Home };
 /** The write dialog's steps. */
 export type WriteStep =
   | { step: "backup" }
-  | { step: "review"; plan: Plan; fresh: ChannelSet; backupName: string; drifted: boolean }
-  | { step: "writing"; plan: Plan; done: number }
-  | { step: "done"; plan: Plan; verified: boolean; error: string; written: number };
+  | { step: "review"; plan: Plan; home: HomeOp | null; fresh: ChannelSet; backupName: string; drifted: boolean }
+  | { step: "writing"; plan: Plan; home: HomeOp | null; done: number }
+  | { step: "done"; plan: Plan; home: HomeOp | null; verified: boolean; error: string; written: number };
+
+/** How many changes a write makes: the plan's records and the home channel. */
+export const writeCount = (w: { plan: Plan; home: HomeOp | null }) => w.plan.ops.length + (w.home ? 1 : 0);
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 /** JSON with keys sorted: the core's objects come with keys in either struct or sorted order. */
@@ -63,6 +74,10 @@ class Channels {
   base = $state<ChannelSet | null>(null);
   /** The table: the set being edited. */
   table = $state<ChannelSet>({ zones: [], channels: [] });
+  /** The home channel as read (CHAN-17: in the settings record, read with the channels). */
+  baseHome = $state<Home>(undefined);
+  /** The home channel the table wants: it follows its channel through swaps and renumbers (CHAN-18). */
+  home = $state<Home>(undefined);
   /** Where the table came from, for the status line. */
   source = $state("");
   progress = $state<Progress | null>(null);
@@ -72,7 +87,7 @@ class Channels {
   write = $state<WriteStep | null>(null);
   imported = $state<(ChirpImport & { file: string }) | null>(null);
   /** The table before each edit, newest last, for `undo` (not kept across visits). */
-  history = $state.raw<ChannelSet[]>([]);
+  history = $state.raw<Snap[]>([]);
   /** Unwritten changes brought back from the last visit (for the notice), 0 once seen to. */
   restored = $state(0);
   /** False until the last visit's edits are looked for (the page's auto-read waits for it). */
@@ -89,9 +104,15 @@ class Channels {
     const zones = new Set<number>();
     for (const z of this.table.zones) if (!sameJson(base.zones[z.number - 1], z)) zones.add(z.number);
     const zonesDeleted = Math.max(0, base.zones.length - this.table.zones.length);
-    const count = changed.size + deleted + zones.size + zonesDeleted;
-    return { changed, deleted, zones, zonesDeleted, count, any: count > 0 };
+    const home = this.homeChanged;
+    const count = changed.size + deleted + zones.size + zonesDeleted + (home ? 1 : 0);
+    return { changed, deleted, zones, zonesDeleted, home, count, any: count > 0 };
   });
+
+  /** Whether the table's home channel differs from the one read (only when both are known). */
+  get homeChanged() {
+    return this.home !== undefined && this.baseHome !== undefined && this.home !== this.baseHome;
+  }
 
   /** Rows (by number) that differ from what was read: changed, added; and how many were deleted. */
   get dirty() {
@@ -105,7 +126,7 @@ class Channels {
 
   /** The table as it is now onto the undo list: called before each edit. */
   private remember() {
-    this.history = [...this.history.slice(-99), clone($state.snapshot(this.table) as ChannelSet)];
+    this.history = [...this.history.slice(-99), { set: clone($state.snapshot(this.table) as ChannelSet), home: this.home }];
   }
 
   /** The last edit undone. */
@@ -113,7 +134,8 @@ class Channels {
     const prev = this.history.at(-1);
     if (!prev) return;
     this.history = this.history.slice(0, -1);
-    this.table = prev;
+    this.table = prev.set;
+    this.home = prev.home;
   }
 
   private radioMeta(): Record<string, string> {
@@ -133,8 +155,9 @@ class Channels {
     return `ferrite-${who}-${stamp()}`;
   }
 
-  /** Every zone and channel on the radio, read record by record. Holds the link (the Live View pauses). */
-  async readRadio(): Promise<ChannelSet> {
+  /** Every zone and channel on the radio, read record by record, and its home channel (CHAN-17, from the settings
+   *  record). Holds the link (the Live View pauses). */
+  async readRadio(): Promise<{ set: ChannelSet; home: Home }> {
     const link = radio.connectedLink;
     if (!link) throw new Error("Connect to a radio first.");
     const { ZONE, CHANNEL } = P.what;
@@ -155,7 +178,14 @@ class Channels {
       const chans = [...cmap.entries()].sort((x, y) => x[0] - y[0]).map(([, r]) => r);
       const { set, bad } = decodeSet(zones, chans);
       this.notes = bad;
-      return set;
+      let home: Home;
+      try {
+        const rec = await link.readRecord(P.what.SETTINGS, 0);
+        home = rec ? settingsHome(rec) : undefined;
+      } catch {
+        home = undefined; // a radio without the record (the demo radio): the home channel isn't known
+      }
+      return { set, home };
     } finally {
       radio.busy = "";
       this.progress = null;
@@ -168,9 +198,10 @@ class Channels {
     this.#reading ??= (async () => {
       this.error = "";
       try {
-        const set = await this.readRadio();
+        const { set, home } = await this.readRadio();
         this.base = clone(set);
         this.table = clone(set);
+        this.baseHome = this.home = home;
         this.history = [];
         this.restored = 0;
         this.source = `Read from ${radio.label} at ${new Date().toLocaleTimeString()}`;
@@ -184,11 +215,11 @@ class Channels {
   }
 
   /** A fresh read saved as a backup file: the radio as it is now. */
-  async backupRadio(): Promise<{ set: ChannelSet; name: string }> {
-    const set = await this.readRadio();
+  async backupRadio(): Promise<{ set: ChannelSet; home: Home; name: string }> {
+    const { set, home } = await this.readRadio();
     const name = `${this.fileBase()}-backup.json`;
     download(name, backupFile(set, new Date().toISOString(), this.radioMeta()), "application/json");
-    return { set, name };
+    return { set, home, name };
   }
 
   /** The Back up button: a fresh read to a file; the table is left alone. */
@@ -231,10 +262,13 @@ class Channels {
     this.error = "";
     this.write = { step: "backup" };
     try {
-      const { set: fresh, name } = await this.backupRadio();
+      const { set: fresh, home: freshHome, name } = await this.backupRadio();
       const plan = writePlan(fresh, this.table);
       const drifted = !!this.base && !sameJson(this.base, fresh);
-      this.write = { step: "review", plan, fresh, backupName: name, drifted };
+      // The home channel goes only when the table moved it (a swap or renumber here), and only where the radio's differs.
+      const to = this.home ?? null;
+      const home = this.homeChanged && freshHome !== undefined && freshHome !== to ? { from: freshHome, to } : null;
+      this.write = { step: "review", plan, home, fresh, backupName: name, drifted };
     } catch (e) {
       this.write = null;
       this.error = `Nothing written: the backup read failed (${(e as Error).message}).`;
@@ -246,28 +280,37 @@ class Channels {
     const w = this.write;
     const link = radio.connectedLink;
     if (!w || w.step !== "review" || !link || w.plan.problems.length) return;
-    const plan = w.plan;
-    this.write = { step: "writing", plan, done: 0 };
+    const { plan, home } = w;
+    this.write = { step: "writing", plan, home, done: 0 };
     let error = "";
-    let written = plan.ops.length;
+    let written = writeCount(w);
     radio.busy = "Writing channels";
     try {
-      await link.writeSession(new Uint8Array(plan.begin), plan.ops, (done) => {
-        this.write = { step: "writing", plan, done };
-      });
+      if (plan.ops.length) {
+        await link.writeSession(new Uint8Array(plan.begin), plan.ops, (done) => {
+          this.write = { step: "writing", plan, home, done };
+        });
+      }
+      // After the records: `home N` needs channel N on the radio.
+      if (home) {
+        await link.cmd(`home ${home.to ?? "none"}`);
+        this.write = { step: "writing", plan, home, done: writeCount(w) };
+      }
     } catch (e) {
       error = (e as Error).message;
-      if (e instanceof WriteError) written = e.done;
+      written = e instanceof WriteError ? e.done : plan.ops.length;
     } finally {
       radio.busy = "";
     }
     let verified = false;
     try {
-      const back = await this.readRadio();
+      const { set: back, home: backHome } = await this.readRadio();
       this.base = clone(back);
-      verified = !error && sameJson(back, this.table);
+      this.baseHome = backHome;
+      verified = !error && sameJson(back, this.table) && (this.home === undefined || backHome === this.home);
       if (!error) {
         this.table = clone(back);
+        this.home = backHome;
         this.history = [];
         this.restored = 0;
       }
@@ -397,6 +440,7 @@ class Channels {
     const before = this.table.channels.length;
     this.remember();
     this.table.channels = this.table.channels.filter((c) => !gone.has(c.number));
+    if (this.home != null && gone.has(this.home)) this.home = null; // CHAN-18: deleting the channel clears it
     return before - this.table.channels.length;
   }
 
@@ -412,15 +456,48 @@ class Channels {
       if (z.pri1 === from) z.pri1 = to;
       if (z.pri2 === from) z.pri2 = to;
     }
+    if (this.home === from) this.home = to; // CHAN-18: renumbering carries it
     this.table.channels.sort((a, b) => a.number - b.number);
     return "";
   }
 
-  addZone() {
-    const n = this.table.zones.length + 1;
-    if (n > 254) return;
+  /** Two channels trade numbers (the zone editor's ▲ ▼: a zone's order is its channels' numbers), one undo. What
+   *  names a channel by number goes with it: the zones' priority channels and the home channel. */
+  swap(a: number, b: number) {
+    const ca = this.table.channels.find((c) => c.number === a);
+    const cb = this.table.channels.find((c) => c.number === b);
+    if (!ca || !cb || a === b) return;
     this.remember();
-    this.table.zones = [...this.table.zones, newZone(n, `Zone ${n}`)];
+    ca.number = b;
+    cb.number = a;
+    const other = (n: number | null) => (n === a ? b : n === b ? a : n);
+    for (const z of this.table.zones) {
+      z.pri1 = other(z.pri1);
+      z.pri2 = other(z.pri2);
+    }
+    if (this.home != null) this.home = other(this.home);
+    this.table.channels.sort((x, y) => x.number - y.number);
+  }
+
+  /** Channels into a zone (its index; null for no zone): a channel is in one zone at most, so this moves it. */
+  moveToZone(numbers: Iterable<number>, zone: number | null) {
+    this.setMany(numbers, { zone });
+  }
+
+  /** A new zone at the end (zones are numbered in order), named `name` (checked as the radio would): "" when added,
+   *  else why not. */
+  addZone(name?: string, max = 254): string {
+    const n = this.table.zones.length + 1;
+    if (n > max) return `At most ${max} zones.`;
+    let z = newZone(n, name ?? `Zone ${n}`);
+    try {
+      z = normalizeZone(z);
+    } catch (e) {
+      return (e as Error).message;
+    }
+    this.remember();
+    this.table.zones = [...this.table.zones, z];
+    return "";
   }
 
   setZone(number: number, z: Zone) {
@@ -444,6 +521,7 @@ class Channels {
   revert() {
     this.remember();
     this.table = this.base ? clone(this.base) : { zones: [], channels: [] };
+    this.home = this.baseHome;
     this.restored = 0;
     this.source = this.base ? "Changes discarded: the table as read" : "";
   }
@@ -457,6 +535,8 @@ class Channels {
       if (saved && !this.base && !this.table.channels.length && !this.table.zones.length) {
         this.base = saved.base;
         this.table = saved.table;
+        this.baseHome = saved.baseHome;
+        this.home = saved.home;
         this.source = `Restored from your last visit (${new Date(saved.at).toLocaleString()})`;
         this.restored = this.pending;
         if (!this.restored) void kept.clear().catch(() => {});
@@ -475,7 +555,9 @@ class Channels {
       $effect(() => {
         const n = this.pending;
         if (!this.ready) return;
-        const snap = n ? { base: $state.snapshot(this.base), table: $state.snapshot(this.table), at: Date.now() } : null;
+        const snap = n
+          ? { base: $state.snapshot(this.base), table: $state.snapshot(this.table), baseHome: this.baseHome, home: this.home, at: Date.now() }
+          : null;
         clearTimeout(timer);
         timer = setTimeout(() => void (snap ? kept.put(snap as Kept) : kept.clear()).catch(() => {}), 250);
       });
@@ -490,7 +572,7 @@ class Channels {
   }
 }
 
-type Kept = { base: ChannelSet | null; table: ChannelSet; at: number };
+type Kept = { base: ChannelSet | null; table: ChannelSet; baseHome?: Home; home?: Home; at: number };
 
 /** One record in IndexedDB: the working table and what it was read as. */
 const kept = (() => {

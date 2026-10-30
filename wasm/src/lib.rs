@@ -415,6 +415,12 @@ pub fn settings_view(record: &[u8], ex: &str) -> Result<String, JsError> {
     Ok(json(&settings::view(record, &extras(ex)?)))
 }
 
+/// CHAN-17: the home channel the settings record names (1-1000), or none.
+#[wasm_bindgen]
+pub fn settings_home(record: &[u8]) -> Option<u16> {
+    settings::home_channel(record)
+}
+
 /// One setting changed (`id`: "0 7 1", or a text field's name) to a value as the menu shows it: `{record,
 /// extras}`, or the radio's reason.
 #[wasm_bindgen]

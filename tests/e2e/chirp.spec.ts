@@ -123,7 +123,7 @@ for (const fx of FILES) {
     }
 
     /** Takes the zone named `zone` and its channels out of the table (the zone shown, every row ticked and deleted
-     *  from the bulk bar, then the zone's delete button): how many channels, or -1 when the table has no such zone. */
+     *  from the bulk bar, then the zone chosen on the Zones tab and its delete button): how many channels, or -1 when the table has no such zone. */
     async function removeZone(): Promise<number> {
       const t = await table();
       const zi = t.zones.findIndex((z: any) => z.name === zone);
@@ -139,6 +139,7 @@ for (const fx of FILES) {
         await toolbar().getByLabel("Show zone").selectOption("all");
       }
       await page.getByRole("tab", { name: /^Zones/ }).click();
+      await page.getByRole("listbox", { name: "Zones" }).getByRole("option").nth(zi).click();
       await page.getByRole("button", { name: `Delete zone ${zi + 1}`, exact: true }).click();
       await page.getByRole("tab", { name: /^Channels/ }).click();
       return mine.length;

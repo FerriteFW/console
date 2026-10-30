@@ -23,6 +23,10 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
   Discard), a leave warning, "N unwritten" on the sidebar, deletes undone from a notice or with Ctrl/Cmd+Z.
 - [x] 6, Channels as NeonPlug's editor (Oct 29): Read, Write (N changes), File menu, Undo; reads on open; 8 core
   columns, every field in a side panel; row ticks with a bulk bar; empty states with actions; scrolls in its own box.
+- [x] Zones as NeonPlug's zone editor (Oct 30): zones listed left (count/limit, "Zone name…" + Add), the chosen
+  zone right (name, settings, its channels with ▲ ▼ ✕, other channels to Add or "Move here": one zone per
+  channel). ▲ ▼ swap channel numbers (one undo); priority channels and the home channel follow, the home channel
+  written with `home N`. `ZonesEditor.svelte`.
 
 ## Open
 

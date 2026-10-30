@@ -255,6 +255,8 @@ const edited = (s: string): Edited => {
 };
 export type Restored = { record: number[]; extras: Extras; saved: string; radio: Record<string, string> };
 
+/** CHAN-17: the home channel the settings record names (1-1000), or null. */
+export const settingsHome = (record: Uint8Array): number | null => wasm.settings_home(record) ?? null;
 export const settingsView = (record: Uint8Array, extras: Extras): SettingsView => JSON.parse(wasm.settings_view(record, js(extras)));
 /** The record and values with one setting changed, or throws the radio's reason. */
 export const settingsSet = (record: Uint8Array, extras: Extras, id: string, value: string): Edited =>

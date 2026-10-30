@@ -7,6 +7,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import ChannelRow from "../components/ChannelRow.svelte";
   import ChannelDetails from "../components/ChannelDetails.svelte";
+  import ZonesEditor from "../components/ZonesEditor.svelte";
   import WriteDialog from "../components/WriteDialog.svelte";
   import ImportDialog from "../components/ImportDialog.svelte";
   import LibraryDialog from "../components/library/LibraryDialog.svelte";
@@ -14,7 +15,7 @@
   import { channels } from "../channels.svelte";
   import { radio } from "../radio.svelte";
   import { DEV_TOOLS } from "../devtools";
-  import { channelChoices, loadCore, normalizeZone, type Choices, type Zone } from "../core";
+  import { channelChoices, loadCore, type Choices } from "../core";
 
   let choices = $state<Choices | null>(null);
   loadCore().then(() => (choices = channelChoices()));
@@ -52,7 +53,6 @@
   });
   const active = $derived(activeN === null ? null : (t.channels.find((c) => c.number === activeN) ?? null));
   const toneWords = $derived(choices ? ["off", ...choices.ctcss, ...choices.dcs.flatMap((d) => [`D${d}N`, `D${d}I`])] : []);
-  const inZone = (i: number) => t.channels.filter((c) => c.zone === i).length;
   const shownPicked = $derived(shown.filter((c) => selected.has(c.number)).length);
   const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -171,35 +171,6 @@
       else if (!dialogUp && activeN !== null) activeN = null;
     }
   }
-
-  // ---- zones ----
-
-  function zoneSet<K extends keyof Zone>(z: Zone, k: K, v: Zone[K]) {
-    const next = { ...$state.snapshot(z), [k]: v } as Zone;
-    let out = next;
-    try {
-      out = normalizeZone(next);
-    } catch {
-      /* kept as typed */
-    }
-    channels.setZone(z.number, out);
-  }
-  function zoneProblem(z: Zone): string {
-    try {
-      normalizeZone($state.snapshot(z) as Zone);
-      return "";
-    } catch (e) {
-      return (e as Error).message;
-    }
-  }
-  const pri = (v: string) => (v.trim() === "" ? null : Number(v));
-
-  function deleteZone(z: Zone) {
-    const n = inZone(z.number - 1);
-    channels.deleteZone(z.number);
-    zoneFilter = "all";
-    say(`Deleted zone ${z.number} "${z.name}"${n ? `; its ${plural(n, "channel")} now in no zone` : ""}.`, true);
-  }
 </script>
 
 <svelte:window onkeydown={keydown} onclick={(e) => menuOpen && !(e.target as HTMLElement).closest(".file") && (menuOpen = false)} />
@@ -277,7 +248,7 @@
       <span class="sub">· {plural(t.channels.length, "channel")}, {plural(t.zones.length, "zone")}</span>
       {#if dirty.any}
         <span class="dirty"
-          >· not written: {plural(dirty.changed.size, "channel")} changed or added{#if dirty.deleted}, {dirty.deleted} deleted{/if}{#if dirty.zones.size || dirty.zonesDeleted}, {plural(dirty.zones.size + dirty.zonesDeleted, "zone")}{/if}</span
+          >· not written: {plural(dirty.changed.size, "channel")} changed or added{#if dirty.deleted}, {dirty.deleted} deleted{/if}{#if dirty.zones.size || dirty.zonesDeleted}, {plural(dirty.zones.size + dirty.zonesDeleted, "zone")}{/if}{#if dirty.home}, the home channel{/if}</span
         >
       {/if}
     {/if}
@@ -301,8 +272,6 @@
         <button class="btn" disabled={busy || t.channels.length >= 1000} onclick={() => library.show()} title="Fixed sets, airports and Canadian licensed sites near a place">
           Add from library…
         </button>
-      {:else}
-        <button class="btn" disabled={busy || t.zones.length >= 254} onclick={() => channels.addZone()}>+ Add zone</button>
       {/if}
     </div>
   </div>
@@ -408,44 +377,7 @@
         </div>
       {/if}
     {:else}
-      <p class="sub zones-note">Zones are numbered in order; a new one is the next number. Deleting one moves its channels to no zone.</p>
-      <div class="scroll">
-        <table class="grid zones">
-          <thead>
-            <tr>
-              <th>#</th><th>Name</th><th>Channels</th><th title="In the scan-all set">Scan all</th><th title="Shown in ◀▶ on home">Shown</th>
-              <th>By distance</th><th>Resume</th><th title="Seconds, or the radio's">Dwell</th><th>Priority 1</th><th>Priority 2</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each t.zones as z (z.number)}
-              {@const prob = zoneProblem(z)}
-              <tr class:changed={channels.base && dirty.zones.has(z.number)} class:bad={!!prob}>
-                <td class="num">{z.number}</td>
-                <td><input class="name" value={z.name} maxlength="16" onchange={(e) => zoneSet(z, "name", e.currentTarget.value)} aria-label="Zone name" /></td>
-                <td class="sub">{inZone(z.number - 1)}</td>
-                <td class="ck"><input type="checkbox" checked={z.scan_all} onchange={(e) => zoneSet(z, "scan_all", e.currentTarget.checked)} aria-label="Scan all" /></td>
-                <td class="ck"><input type="checkbox" checked={z.shown} onchange={(e) => zoneSet(z, "shown", e.currentTarget.checked)} aria-label="Shown" /></td>
-                <td class="ck"><input type="checkbox" checked={z.by_distance} onchange={(e) => zoneSet(z, "by_distance", e.currentTarget.checked)} aria-label="By distance" /></td>
-                <td>
-                  <select value={z.resume} onchange={(e) => zoneSet(z, "resume", e.currentTarget.value)} aria-label="Resume">
-                    {#each choices.resumes as r (r)}<option>{r}</option>{/each}
-                  </select>
-                </td>
-                <td><input class="small" value={z.dwell} onchange={(e) => zoneSet(z, "dwell", e.currentTarget.value)} aria-label="Dwell" /></td>
-                <td><input class="small" value={z.pri1 ?? ""} placeholder="–" onchange={(e) => zoneSet(z, "pri1", pri(e.currentTarget.value))} aria-label="Priority channel 1" /></td>
-                <td><input class="small" value={z.pri2 ?? ""} placeholder="–" onchange={(e) => zoneSet(z, "pri2", pri(e.currentTarget.value))} aria-label="Priority channel 2" /></td>
-                <td class="act">
-                  {#if prob}<span class="warn" title={prob}>!</span>{/if}
-                  <button class="del" title="Delete this zone (undoable)" aria-label={`Delete zone ${z.number}`} onclick={() => deleteZone(z)}>✕</button>
-                </td>
-              </tr>
-            {:else}
-              <tr><td colspan="11" class="empty">No zones in the table.</td></tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
+      <ZonesEditor {choices} onsay={say} />
     {/if}
   {/if}
 </div>
@@ -626,10 +558,6 @@
   .tabs {
     display: flex;
     gap: 4px;
-  }
-  .zones-note {
-    margin: 0;
-    font-size: 13px;
   }
   .tabs button {
     margin-bottom: -1px;
@@ -923,6 +851,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    width: max-content;
     max-width: calc(100vw - 32px);
     padding: 8px 10px 8px 14px;
     border: 1px solid var(--blue);

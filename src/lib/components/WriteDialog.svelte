@@ -1,7 +1,7 @@
 <script lang="ts">
   // The write's steps: the backup read (saved as a file), the diff with ferrite's own checks, the write on confirm,
   // and the read back.
-  import { channels } from "../channels.svelte";
+  import { channels, writeCount } from "../channels.svelte";
   import type { Change } from "../core";
 
   const w = $derived(channels.write);
@@ -53,7 +53,7 @@
             </ul>
           </div>
         {/if}
-        {#if !w.plan.changes.length}
+        {#if !w.plan.changes.length && !w.home}
           <p>Nothing to write: the radio already holds the table.</p>
         {:else}
           <div class="diff">
@@ -75,28 +75,37 @@
                 {/each}
               </ul>
             {/each}
+            {#if w.home}
+              <h3 class="changed">Home channel</h3>
+              <ul>
+                <li class="home">
+                  <span class="what">Home</span>
+                  <span class="fields"><span class="f"><s>{w.home.from ?? "none"}</s> → <b>{w.home.to ?? "none"}</b></span></span>
+                </li>
+              </ul>
+            {/if}
           </div>
         {/if}
         <div class="actions">
           <button class="btn" onclick={() => channels.closeWrite()}>Cancel</button>
           <button
             class="btn primary"
-            disabled={!!w.plan.problems.length || !w.plan.ops.length}
+            disabled={!!w.plan.problems.length || !writeCount(w)}
             onclick={() => channels.commitWrite()}
           >
-            Write {w.plan.ops.length} {w.plan.ops.length === 1 ? "change" : "changes"}
+            Write {writeCount(w)} {writeCount(w) === 1 ? "change" : "changes"}
           </button>
         </div>
       {:else if w.step === "writing"}
-        <p>Writing {w.done} of {w.plan.ops.length}… The radio shows its progress; BACK there cancels.</p>
-        <div class="bar"><div style:width={`${(100 * w.done) / Math.max(1, w.plan.ops.length)}%`}></div></div>
+        <p>Writing {w.done} of {writeCount(w)}… The radio shows its progress; BACK there cancels.</p>
+        <div class="bar"><div style:width={`${(100 * w.done) / Math.max(1, writeCount(w))}%`}></div></div>
         {#if channels.progress}<p class="sub">{channels.progress.label}</p>{/if}
       {:else}
         {#if w.error}
-          <p class="err">Stopped after {w.written} of {w.plan.ops.length}: {w.error}</p>
+          <p class="err">Stopped after {w.written} of {writeCount(w)}: {w.error}</p>
           <p class="sub">The table keeps your edits; the radio's set has been read again, so Write shows what is left.</p>
         {:else if w.verified}
-          <p class="ok">Written: {w.plan.ops.length} {w.plan.ops.length === 1 ? "change" : "changes"}. Read back: the radio holds the table.</p>
+          <p class="ok">Written: {writeCount(w)} {writeCount(w) === 1 ? "change" : "changes"}. Read back: the radio holds the table.</p>
         {:else}
           <p class="note">Written, but the read back differs from the table: the table now shows what the radio holds.</p>
         {/if}

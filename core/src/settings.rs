@@ -84,6 +84,11 @@ pub fn settings_of(rec: &[u8]) -> Settings {
     s
 }
 
+/// CHAN-17: the home channel a record names, as the channel number people see (1-1000), or None.
+pub fn home_channel(rec: &[u8]) -> Option<u16> {
+    settings_of(rec).home_ch.map(|n| n + 1)
+}
+
 /// The record's length in this Console's ferrite (the radio's INFO says its own: LINK-21, version-tied).
 pub fn record_len() -> usize {
     record_of(&Settings::DEFAULT).len()
@@ -1306,6 +1311,14 @@ mod tests {
     fn diff(old: &[u8], new: &[u8]) -> Vec<Change> {
         super::diff(old, &ex0(), new, &ex0())
     }
+    /// CHAN-17: the home channel read from the record, numbered as people see it.
+    #[test]
+    fn home_channel_from_the_record() {
+        assert_eq!(home_channel(&record_of(&Settings::DEFAULT)), None);
+        let s = Settings { home_ch: Some(10), ..Settings::DEFAULT };
+        assert_eq!(home_channel(&record_of(&s)), Some(11));
+    }
+
     fn plan(base: &[u8], want: &[u8]) -> Plan {
         super::plan(base, &ex0(), want, &ex0())
     }
