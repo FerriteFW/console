@@ -51,11 +51,12 @@
 {/if}
 
 <style>
+  /* Fixed and above the welcome (ConnectModal, z-index 50): Cable or Bluetooth pressed there opens this. */
   .pick {
-    position: absolute;
-    top: 100%;
+    position: fixed;
+    top: 64px;
     right: 20px;
-    z-index: 20;
+    z-index: 60;
     margin-top: 6px;
     width: min(420px, calc(100vw - 40px));
     padding: 12px;
