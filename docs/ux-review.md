@@ -27,6 +27,12 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
   zone right (name, settings, its channels with ▲ ▼ ✕, other channels to Add or "Move here": one zone per
   channel). ▲ ▼ swap channel numbers (one undo); priority channels and the home channel follow, the home channel
   written with `home N`. `ZonesEditor.svelte`.
+- [x] Channel positions (Oct 30, LINK-53): read with the channels from a radio that has them (HELLO caps 64); a
+  Position field in the side panel (degrees or a grid square, shown to 5 decimals with its grid square, Clear,
+  inline errors); 📍 in the Name cell; "Clear position" on the bulk bar; ordinary unwritten changes (undo, restore,
+  the Write diff's `position`); written after the records, read back. An older radio: kept in the table and
+  `.ferrite`, Write says it can't store them. RepeaterBook CSV Latitude/Longitude, the library's airports and TAFL
+  sites carry them.
 
 ## Open
 

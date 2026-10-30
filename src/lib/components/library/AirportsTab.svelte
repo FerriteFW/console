@@ -70,6 +70,7 @@
           power: "Low",
           rx_only: true,
           zone: zoneName(target, f.a.c, zones),
+          pos: f.a.l, // the airport's position (LINK-53: the channel's)
         });
       }
     }

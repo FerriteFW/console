@@ -266,6 +266,103 @@ pub struct ChanView {
     /// Flag bits the table doesn't show, kept as read.
     #[serde(default)]
     pub keep: u8,
+    /// Where the channel is (CHAN-2), read and written apart from the record (LINK-53); left out when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pos: Option<Position>,
+}
+
+/// A channel's position (CHAN-2, LINK-53) in 1e-7 degree, north and east positive, as the radio holds it. In JSON
+/// (the table, `.ferrite`'s channels.json) it is `[lat, lon]` in degrees with up to seven decimals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Position {
+    pub lat: i32,
+    pub lon: i32,
+}
+
+/// The radio's limits (the terminal's `pos=`, LINK-53's check).
+const LAT_MAX: i64 = 900_000_000;
+const LON_MAX: i64 = 1_800_000_000;
+
+/// What a position field takes, in the terminal's words (TERM-9's `pos=`).
+pub const POSITION_HELP: &str = "lat, lon in degrees (45.4215, -75.6972) or a grid square (FN25dk)";
+
+impl Position {
+    /// Degrees to the radio's 1e-7 (rounded); None outside -90..90 and -180..180 or not a number.
+    pub fn from_degrees(lat: f64, lon: f64) -> Option<Self> {
+        let e7 = |d: f64, max: i64| {
+            let v = (d * 1e7).round();
+            (v.is_finite() && v.abs() <= max as f64).then_some(v as i32)
+        };
+        Some(Position { lat: e7(lat, LAT_MAX)?, lon: e7(lon, LON_MAX)? })
+    }
+
+    /// (latitude, longitude) in degrees.
+    pub fn degrees(self) -> (f64, f64) {
+        (self.lat as f64 / 1e7, self.lon as f64 / 1e7)
+    }
+
+    /// The radio's record pair (LINK-53's 8 bytes).
+    pub fn e7(self) -> (i32, i32) {
+        (self.lat, self.lon)
+    }
+
+    /// The six-character Maidenhead grid square ("FN25dk"), from ferrite's own code (GPS-21).
+    pub fn grid(self) -> String {
+        String::from_utf8_lossy(&ferrite_app::grid(ferrite_app::data::Pos { lat: self.lat, lon: self.lon }))
+            .into_owned()
+    }
+
+    /// Degrees to five decimals, as the table shows them: "45.42150, -75.69720".
+    pub fn text(self) -> String {
+        let (a, b) = self.degrees();
+        format!("{a:.5}, {b:.5}")
+    }
+
+    /// A typed position: "45.4215, -75.6972" (degrees, north and east positive; a space or none after the comma;
+    /// more than seven decimals rounded, as a map's copied coordinates have), a 4- or 6-character grid square (its
+    /// centre, from ferrite's own code: GPS-21), or empty / "none" for no position (Ok(None)).
+    pub fn parse(text: &str) -> Result<Option<Self>, String> {
+        let t = text.trim();
+        if t.is_empty() || t.eq_ignore_ascii_case("none") {
+            return Ok(None);
+        }
+        let bad = || format!("Position: {POSITION_HELP}");
+        if let Some((a, b)) = t.split_once(',') {
+            let deg = |w: &str| {
+                let w = w.trim().trim_end_matches('°');
+                let digits = w.strip_prefix(['-', '+']).unwrap_or(w);
+                let ok = !digits.is_empty()
+                    && digits.bytes().all(|c| c.is_ascii_digit() || c == b'.')
+                    && digits.bytes().filter(|&c| c == b'.').count() <= 1
+                    && digits.bytes().any(|c| c.is_ascii_digit());
+                ok.then(|| w.parse::<f64>().ok()).flatten()
+            };
+            let (lat, lon) = (deg(a).ok_or_else(bad)?, deg(b).ok_or_else(bad)?);
+            if lat.abs() > 90.0 {
+                return Err("Position: latitude is -90 to 90 degrees".into());
+            }
+            if lon.abs() > 180.0 {
+                return Err("Position: longitude is -180 to 180 degrees".into());
+            }
+            return Position::from_degrees(lat, lon).map(Some).ok_or_else(bad);
+        }
+        ferrite_app::grid_pos(t.as_bytes()).map(|p| Some(Position { lat: p.lat, lon: p.lon })).ok_or_else(bad)
+    }
+}
+
+impl Serialize for Position {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let (a, b) = self.degrees();
+        [a, b].serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for Position {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let [a, b] = <[f64; 2]>::deserialize(d)?;
+        Position::from_degrees(a, b)
+            .ok_or_else(|| serde::de::Error::custom("pos: [lat, lon] in degrees, within 90 and 180"))
+    }
 }
 
 fn pick(list: &[&str], v: &str, what: &str) -> Result<usize, String> {
@@ -306,7 +403,13 @@ impl ChanView {
             end_tone: END_TONES[c.end_tone() as usize].into(),
             tail: TAILS[c.tail() as usize].into(),
             keep: c.flags & !FLAGS_SHOWN,
+            pos: None,
         }
+    }
+
+    /// The view as the radio would hold it (each field through [`ChanView::channel`] and back), its position kept.
+    pub fn normal(&self) -> Result<ChanView, String> {
+        Ok(ChanView { pos: self.pos, ..ChanView::of(&self.channel()?) })
     }
 
     /// A new channel at `number` (1-1000) on `rx`: the radio's VFO defaults, squelch Global (the slot's level).
@@ -550,6 +653,41 @@ mod tests {
         assert_eq!(write(&mut r, what::POSITION, c.num, &position_record(None)).0, 0);
         assert_eq!(read(&mut r, what::POSITION, c.num), Err(Status::NotFound as u8), "cleared");
         assert_eq!(position_from_record(&[0; 7]), None);
+    }
+
+    /// CHAN-2, LINK-53: a position typed as degrees (with or without a space, a map's long decimals rounded) or a
+    /// grid square (ferrite's own centre, GPS-21), shown to five decimals with its grid square; JSON is degrees.
+    #[test]
+    fn positions_typed_and_shown() {
+        let p = Position::parse("45.4215, -75.6972").unwrap().unwrap();
+        assert_eq!(p, Position { lat: 454_215_000, lon: -756_972_000 });
+        assert_eq!(Position::parse("45.4215,-75.6972").unwrap(), Some(p));
+        assert_eq!(Position::parse(" +45.4215 , -75.6972° ").unwrap(), Some(p));
+        assert_eq!(
+            Position::parse("45.42153272870819, -75.69718564455287").unwrap(),
+            Some(Position { lat: 454_215_327, lon: -756_971_856 })
+        );
+        let g = ferrite_app::grid_pos(b"FN25dk").unwrap();
+        assert_eq!(Position::parse("fn25DK").unwrap(), Some(Position { lat: g.lat, lon: g.lon }));
+        assert_eq!(Position::parse("FN25").unwrap().unwrap().grid(), "FN25mm");
+        assert_eq!(p.grid(), "FN25dk");
+        assert_eq!(p.text(), "45.42150, -75.69720");
+        assert_eq!(Position::parse("").unwrap(), None);
+        assert_eq!(Position::parse("none").unwrap(), None);
+        assert!(Position::parse("91, 0").unwrap_err().contains("latitude"));
+        assert!(Position::parse("0, -180.5").unwrap_err().contains("longitude"));
+        for bad in ["45.4, x", "1e3, 0", "FN2", "ZZ00", "45.4", "-, 1", "1.2.3, 4"] {
+            assert!(Position::parse(bad).is_err(), "{bad}");
+        }
+        assert_eq!(serde_json::to_string(&p).unwrap(), "[45.4215,-75.6972]");
+        assert_eq!(serde_json::from_str::<Position>("[45.4215,-75.6972]").unwrap(), p);
+        assert!(serde_json::from_str::<Position>("[0,181]").is_err());
+        assert_eq!(position_record(Some(p.e7())), position_record(Some((454_215_000, -756_972_000))));
+        // The table's JSON: no `pos` key without one; normalising keeps it.
+        let mut v = ChanView::of(&sample());
+        assert!(!serde_json::to_string(&v).unwrap().contains("pos"));
+        v.pos = Some(p);
+        assert_eq!(v.normal().unwrap().pos, Some(p));
     }
 
     /// CHAN-31: the editor takes only the name set and says which; imports map with [`map_name`].

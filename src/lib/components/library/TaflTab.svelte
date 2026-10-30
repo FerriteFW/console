@@ -17,7 +17,7 @@
   let mode = $state<"NFM" | "FM">("NFM");
   let target = $state<Target>({ kind: "each", name: "TAFL", existing: 0 });
 
-  type Entry = { key: string; name: string; khz: number; km: number; group: string };
+  type Entry = { key: string; name: string; khz: number; km: number; group: string; pos: [number, number] };
   /** Near entries, one per name and frequency (the nearest), grouped. */
   const entries = $derived.by((): Entry[] => {
     const d = library.tafl;
@@ -30,7 +30,7 @@
       const key = `${r.c}|${r.f}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ key, name: r.c, khz: r.f, km });
+      out.push({ key, name: r.c, khz: r.f, km, pos: r.l });
     }
     const groups = taflGroups(out.map((e) => e.name));
     return out.map((e, k) => ({ ...e, group: groups[k] }));
@@ -78,6 +78,7 @@
       power: "Low",
       rx_only: rxOnly,
       zone,
+      pos: e.pos, // the site's licensed position (LINK-53: the channel's)
     }));
     library.add(items, `TAFL (${sel.length} ${sel.length === 1 ? "licence" : "licences"})`);
     picked = new Set();

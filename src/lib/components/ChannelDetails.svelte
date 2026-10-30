@@ -1,7 +1,7 @@
 <script lang="ts">
   // The side panel: every field of one channel, edited through the same core checks as the table's row (normalised
   // as the radio would hold it; a value that doesn't parse stays as typed and the problem shows here).
-  import { checkChannel, type Channel, type Choices, type Zone } from "../core";
+  import { checkChannel, parsePosition, positionView, type Channel, type Choices, type Zone } from "../core";
   import { channels } from "../channels.svelte";
 
   let {
@@ -19,6 +19,26 @@
   const set = <K extends keyof Channel>(k: K, v: Channel[K]) => channels.edit(c.number, k, v);
   const text = (k: keyof Channel) => (e: Event) => set(k, (e.currentTarget as HTMLInputElement).value as never);
   const flag = (k: keyof Channel) => (e: Event) => set(k, (e.currentTarget as HTMLInputElement).checked as never);
+
+  // CHAN-2, LINK-53: the position as degrees to five decimals and its grid square; typed as degrees or a grid
+  // square (the core parses both, with ferrite's own grid code). One that doesn't parse stays as typed, with why.
+  const where = $derived(positionView(c.pos));
+  let posNote = $state("");
+  function setPos(e: Event) {
+    const el = e.currentTarget as HTMLInputElement;
+    try {
+      const p = parsePosition(el.value);
+      posNote = "";
+      set("pos", p.pos ?? undefined);
+      el.value = p.text; // as stored, even when the position didn't change
+    } catch (err) {
+      posNote = (err as Error).message;
+    }
+  }
+  function clearPos() {
+    posNote = "";
+    set("pos", undefined);
+  }
 
   function renumber(e: Event) {
     const el = e.currentTarget as HTMLInputElement;
@@ -122,6 +142,32 @@
         {#if c.zone !== null && c.zone >= zones.length}<option value={String(c.zone)}>{c.zone + 1} (missing)</option>{/if}
       </select>
     </label>
+    {#key c.number}
+      <div class="pos">
+        <label>
+          <span>Position</span>
+          <span class="row">
+            <input
+              class="mono"
+              value={where.text}
+              onchange={setPos}
+              aria-label="Channel position"
+              aria-invalid={!!posNote}
+              placeholder="lat, lon or grid square"
+              title="Degrees, north and east positive (45.4215, -75.6972), or a grid square (FN25dk)"
+            />
+            <button class="btn sm" onclick={clearPos} disabled={!c.pos} aria-label="Clear the position">Clear</button>
+          </span>
+        </label>
+        {#if posNote}
+          <small class="err" role="alert">{posNote}</small>
+        {:else if c.pos}
+          <small class="sub" data-testid="position-grid">📍 Grid square {where.grid}</small>
+        {:else}
+          <small class="sub">None: for Nearby and distance on the radio</small>
+        {/if}
+      </div>
+    {/key}
     <div class="two">
       <label>
         <span>End tone</span>
@@ -235,6 +281,29 @@
   }
   .err {
     color: var(--red);
+  }
+  .sub {
+    color: var(--sub);
+  }
+  .pos {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  /* A span in the label (phrasing content), so not the label's caption style. */
+  .pos .row {
+    display: flex;
+    gap: 6px;
+    color: var(--text);
+    font-size: 13px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .pos .row input {
+    flex: 1;
+  }
+  .pos .btn {
+    height: 32px;
   }
   fieldset {
     border: 1px solid var(--line);

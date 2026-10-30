@@ -11,12 +11,14 @@
 //! - Skip `S` is skip, `P` priority. Power is High, Mid or Low (a watt figure: 4 W and up High, 1.5 W up Mid).
 //! - Comment carries the zone's name: exported, and on import a Comment that names a zone puts the channel in it.
 //! - Modes FM, NFM, AM, USB, LSB, CW; others (WFM, DV, DMR ...) are skipped with a note.
+//! - Latitude and Longitude (or Lat, Long, Lon, Lng), as some RepeaterBook exports have, are the channel's position
+//!   (LINK-53); CHIRP has no such column, so an export leaves positions out.
 //!
 //! An import goes into the table one of three ways (the dialog picks): merge by number, replace every channel, or
 //! [`into_new_zone`]: the file's channels, in their order, at free numbers in a new zone (a RepeaterBook or CHIRP
 //! export numbers from 0 or 1, so merging it would overwrite the owner's first channels).
 
-use crate::channels::{mhz_text, parse_mhz, ChanView, ZoneView};
+use crate::channels::{mhz_text, parse_mhz, ChanView, Position, ZoneView};
 use crate::plan::Set;
 use crate::radioside::MAX_ZONES;
 use ferrite_app::chan::MAX_CHANNELS;
@@ -253,6 +255,10 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
         let i = COLUMNS.iter().position(|c| *c == name).and_then(|i| cols[i]);
         i.and_then(|i| r.get(i)).map_or(String::new(), |s| s.trim().to_string())
     };
+    // RepeaterBook's exports (some) carry the site's coordinates: the channel's position (CHAN-2, LINK-53).
+    // CHIRP's own CSV has no such column.
+    let any_col = |names: &[&str]| names.iter().find_map(|n| col(n));
+    let (lat_col, lon_col) = (any_col(&["Latitude", "Lat"]), any_col(&["Longitude", "Long", "Lon", "Lng"]));
     let locs: Vec<Option<u32>> = rows[1..].iter().map(|r| get(r, "Location").parse().ok()).collect();
     let shift = u32::from(locs.iter().flatten().min() == Some(&0));
     let mut out = Import::default();
@@ -362,6 +368,16 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
         let comment = get(r, "Comment");
         v.zone =
             zones.iter().position(|z| !comment.is_empty() && z.name.eq_ignore_ascii_case(&comment)).map(|i| i as u8);
+        if let (Some(a), Some(b)) = (lat_col, lon_col) {
+            let deg = |i: usize| r.get(i).and_then(|s| s.trim().parse::<f64>().ok());
+            match (deg(a), deg(b)) {
+                (Some(lat), Some(lon)) if lat != 0.0 || lon != 0.0 => match Position::from_degrees(lat, lon) {
+                    Some(p) => v.pos = Some(p),
+                    None => note(format!("position {lat}, {lon}: not on the map: left out")),
+                },
+                _ => {} // blank (or 0, 0): no position
+            }
+        }
         if let Some(e) = crate::plan::check_channel(&v, zones.len() as u8) {
             note(format!("channel {number}: {e}: skipped"));
             out.skipped += 1;
@@ -371,7 +387,7 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
             note(format!("channel {number} appears twice: the later line kept"));
             out.channels.remove(i);
         }
-        out.channels.push(ChanView::of(&v.channel().map_err(|e| format!("line {line}: {e}"))?));
+        out.channels.push(v.normal().map_err(|e| format!("line {line}: {e}"))?);
     }
     out.channels.sort_by_key(|c| c.number);
     Ok(out)
@@ -622,6 +638,26 @@ mod tests {
         assert_eq!((c[7].offset.as_str(), c[7].duplex.as_str()), ("5.00000", "+"));
         assert_eq!(c.iter().filter(|c| c.rx.starts_with("14")).count(), 7);
         assert!(c.iter().all(|c| c.power == "High" && c.mode == "FM" && c.zone.is_none()));
+    }
+
+    /// A RepeaterBook export with the sites' coordinates (tests/e2e/fixtures/repeaterbook-latlon.csv, fictional):
+    /// Latitude and Longitude are the channels' positions (LINK-53), rounded to the radio's 1e-7 degree; a row
+    /// without them has none. "Lat" and "Long" headers work too; CHIRP's export writes none.
+    #[test]
+    fn repeaterbook_positions() {
+        let i = import(include_str!("../../tests/e2e/fixtures/repeaterbook-latlon.csv"), &[]).unwrap();
+        assert_eq!((i.channels.len(), i.notes.len()), (3, 0), "{:?}", i.notes);
+        assert_eq!(i.channels[0].pos, Some(Position { lat: 454_215_296, lon: -756_971_931 }));
+        assert_eq!(i.channels[1].pos, Some(Position { lat: 453_088_000, lon: -758_987_000 }));
+        assert_eq!(i.channels[2].pos, None);
+        let short = "Location,Name,Frequency,Lat,Long\r\n1,A,146.52,49.2827,-123.1207\r\n2,B,146.55,91,0\r\n";
+        let s = import(short, &[]).unwrap();
+        assert_eq!(s.channels[0].pos, Position::from_degrees(49.2827, -123.1207));
+        assert_eq!(s.channels[1].pos, None);
+        assert!(s.notes[0].contains("not on the map"), "{:?}", s.notes);
+        // Export leaves them out (CHIRP has no column), so its own round trip has none.
+        let csv = export(&i.channels, &[]);
+        assert!(!csv.contains("45.42") && import(&csv, &[]).unwrap().channels.iter().all(|c| c.pos.is_none()));
     }
 
     fn table(numbers: impl IntoIterator<Item = u16>, zones: &[&str]) -> Set {

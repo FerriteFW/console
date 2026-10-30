@@ -4,7 +4,9 @@
 //! refusal shows before anything is sent.
 
 use crate::answers::status_text;
-use crate::channels::{channel_from_record, channel_record, zone_from_record, zone_record, ChanView, ZoneView};
+use crate::channels::{
+    channel_from_record, channel_record, zone_from_record, zone_record, ChanView, Position, ZoneView,
+};
 use crate::radioside::{RadioSide, MAX_ZONES};
 use crate::records::{begin_payload, delete_payload, write_payloads};
 use ferrite_app::chan::{Channel, ChannelStore, Name, NO_ZONE};
@@ -120,6 +122,10 @@ pub struct Plan {
     pub begin: Vec<u8>,
     pub ops: Vec<Op>,
     pub problems: Vec<Problem>,
+    /// LINK-53: the channels (as the radio numbers them, 1-1000) whose position changes, set or cleared after the
+    /// ops; their diff is the `position` field in `changes`. Sent only to a radio whose `HELLO` says
+    /// `caps::POSITION`.
+    pub positions: Vec<u16>,
 }
 
 /// A refusal in ferrite's words: an `invalid` answer's reason, else the status's name.
@@ -156,11 +162,11 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
         (Ok(b), Ok(w)) => (b, w),
         (Err(p), _) => {
             problems.push(Problem { error: format!("the radio's own set: {}", p.error), ..p });
-            return Plan { changes, begin: begin_payload(0), ops, problems };
+            return Plan { changes, begin: begin_payload(0), ops, problems, positions: Vec::new() };
         }
         (_, Err(p)) => {
             problems.push(p);
-            return Plan { changes, begin: begin_payload(0), ops, problems };
+            return Plan { changes, begin: begin_payload(0), ops, problems, positions: Vec::new() };
         }
     };
     let (bz, bc) = &base_parts;
@@ -223,20 +229,38 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
             payloads: vec![delete_payload(what::CHANNEL, *num)],
         });
     }
+    let mut positions = Vec::new();
     for (num, (c, v)) in &new {
         if c.zone != NO_ZONE && c.zone as usize >= wz.len() {
             problems.push(Problem::channel(v.number, format!("zone {}: there is no such zone", c.zone as u32 + 1)));
         }
         let was = old.get(num);
+        // LINK-53: the position goes apart from the record, after it; it shows as a field of its own.
+        let from = was.and_then(|(_, ov)| ov.pos);
+        let pos = (from != v.pos).then(|| {
+            positions.push(v.number);
+            Field { field: "position".into(), from: pos_text(from), to: pos_text(v.pos) }
+        });
         if was.is_some_and(|(oc, _)| oc == c) {
+            if let Some(f) = pos {
+                changes.push(Change {
+                    what: "channel",
+                    number: v.number,
+                    kind: "changed",
+                    name: v.name.clone(),
+                    fields: vec![f],
+                });
+            }
             continue;
         }
+        let mut fs = was.map_or_else(Vec::new, |(oc, _)| fields(&ChanView::of(oc), &ChanView::of(c)));
+        fs.extend(pos);
         changes.push(Change {
             what: "channel",
             number: v.number,
             kind: if was.is_some() { "changed" } else { "added" },
             name: v.name.clone(),
-            fields: was.map_or_else(Vec::new, |(oc, _)| fields(&ChanView::of(oc), &ChanView::of(c))),
+            fields: fs,
         });
         ops.push(Op {
             kind: "write",
@@ -267,7 +291,12 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
     }
 
     problems.extend(dry_run(&base_parts, &ops, &want_parts));
-    Plan { changes, begin: begin_payload(ops.len() as u16), ops, problems }
+    Plan { changes, begin: begin_payload(ops.len() as u16), ops, problems, positions }
+}
+
+/// A position as the diff shows it: "45.42150, -75.69720 (FN25dk)", or empty for none.
+fn pos_text(p: Option<Position>) -> String {
+    p.map_or_else(String::new, |p| format!("{} ({})", p.text(), p.grid()))
 }
 
 /// The plan through ferrite's own radio side, seeded with the radio's set: every refusal, with ferrite's reason;
@@ -378,6 +407,9 @@ pub struct BackupRecord {
     pub name: String,
     /// The record as the link carries it, hex.
     pub record: String,
+    /// A channel's position (CHAN-2, LINK-53), `[lat, lon]` in degrees; left out when it has none (and on zones).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pos: Option<Position>,
 }
 
 pub const BACKUP_FORMAT: &str = "ferrite-console-channels";
@@ -407,12 +439,18 @@ pub fn backup(set: &Set, saved: &str, radio: BTreeMap<String, String>) -> Result
                 number: v.number as u16,
                 name: v.name.clone(),
                 record: hex(&zone_record(n.as_bytes(), c)),
+                pos: None,
             })
             .collect(),
         channels: chans
             .iter()
             .zip(&set.channels)
-            .map(|(c, v)| BackupRecord { number: v.number, name: v.name.clone(), record: hex(&channel_record(c)) })
+            .map(|(c, v)| BackupRecord {
+                number: v.number,
+                name: v.name.clone(),
+                record: hex(&channel_record(c)),
+                pos: v.pos,
+            })
             .collect(),
     };
     Ok(serde_json::to_string_pretty(&b).unwrap_or_default())
@@ -438,9 +476,14 @@ pub fn restore(text: &str) -> Result<(Set, Backup), String> {
         |r: &BackupRecord, w: &str| unhex(&r.record).ok_or_else(|| format!("{w} {}: its record isn't hex", r.number));
     let zr = zones.iter().map(|z| rec(z, "zone")).collect::<Result<Vec<_>, _>>()?;
     let cr = b.channels.iter().map(|c| rec(c, "channel")).collect::<Result<Vec<_>, _>>()?;
-    let (set, bad) = Set::from_records(&zr, &cr);
+    let (mut set, bad) = Set::from_records(&zr, &cr);
     if let Some(e) = bad.first() {
         return Err(e.clone());
+    }
+    // Positions (LINK-53) beside the records, by number; a file from before them has none.
+    let pos: BTreeMap<u16, Position> = b.channels.iter().filter_map(|c| Some((c.number, c.pos?))).collect();
+    for c in &mut set.channels {
+        c.pos = pos.get(&c.number).copied();
     }
     Ok((set, b))
 }
@@ -501,6 +544,52 @@ mod tests {
         assert_eq!(ch.kind, "changed");
         let f: Vec<_> = ch.fields.iter().map(|f| (f.field.as_str(), f.from.as_str(), f.to.as_str())).collect();
         assert_eq!(f, [("name", "North hill", "North hill rpt"), ("power", "Low", "High")]);
+    }
+
+    /// LINK-53: a position set, moved or cleared is a change of its own (the `position` field; no record op when
+    /// the channel is otherwise as the radio has it), and `positions` lists the channels to send.
+    #[test]
+    fn positions_in_the_plan() {
+        let mut b = base();
+        b.channels[2].pos = Position::from_degrees(49.0, -123.0);
+        let mut w = b.clone();
+        w.channels[0].pos = Position::parse("FN25dk").unwrap();
+        w.channels[1].name = "North hill rpt".into();
+        w.channels[1].pos = Position::from_degrees(45.4215, -75.6972);
+        w.channels[2].pos = None;
+        let p = plan(&b, &w);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(p.positions, [1, 10, 20]);
+        let kinds: Vec<_> = p.ops.iter().map(|o| (o.kind, o.number)).collect();
+        assert_eq!(kinds, [("write", 10)], "only the renamed channel's record");
+        let f = |n: u16| {
+            let c = p.changes.iter().find(|c| c.number == n).unwrap();
+            c.fields.iter().map(|f| format!("{}: {} -> {}", f.field, f.from, f.to)).collect::<Vec<_>>()
+        };
+        assert_eq!(f(1), ["position:  -> 45.43750, -75.70833 (FN25dk)"]);
+        assert_eq!(f(10), ["name: North hill -> North hill rpt", "position:  -> 45.42150, -75.69720 (FN25dk)"]);
+        assert_eq!(f(20), ["position: 49.00000, -123.00000 (CN89ma) -> "]);
+        assert!(plan(&w, &w).positions.is_empty());
+    }
+
+    /// The backup keeps positions beside the records (`pos`: [lat, lon] in degrees) and reads them back; a file
+    /// from before positions (no `pos`) still reads, with none.
+    #[test]
+    fn backup_keeps_positions() {
+        let mut s = base();
+        s.channels[1].pos = Position::from_degrees(45.4215, -75.6972);
+        let text = backup(&s, "2026-10-30T00:00:00Z", BTreeMap::new()).unwrap();
+        assert!(text.contains("\"pos\": [\n        45.4215,\n        -75.6972\n      ]"), "{text}");
+        assert_eq!(text.matches("\"pos\"").count(), 1, "only where there is one");
+        assert_eq!(restore(&text).unwrap().0, s);
+        let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        for c in v["channels"].as_array_mut().unwrap() {
+            c.as_object_mut().unwrap().remove("pos");
+        }
+        let old = restore(&v.to_string()).unwrap().0;
+        assert!(old.channels.iter().all(|c| c.pos.is_none()));
+        v["channels"][0]["pos"] = serde_json::json!([95.0, 0.0]);
+        assert!(restore(&v.to_string()).unwrap_err().contains("pos"));
     }
 
     /// Removing the last zone: its channels must move first, and the zone goes last.

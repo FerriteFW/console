@@ -1,0 +1,4 @@
+Location,Name,Frequency,Duplex,Offset,Tone,rToneFreq,cToneFreq,DtcsCode,DtcsPolarity,RxDtcsCode,CrossMode,Mode,TStep,Skip,Power,Comment,URCALL,RPT1CALL,RPT2CALL,DVCODE,Latitude,Longitude
+1,Ottawa,146.880000,-,0.600000,Tone,100.0,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Ottawa, Ontario VE3ZZA OPEN (fictional)",,,,,45.4215296,-75.6971931
+2,Kanata,147.150000,+,0.600000,Tone,100.0,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Kanata, Ontario VE3ZZB OPEN (fictional)",,,,,45.3088,-75.8987
+3,Gatineau,444.100000,+,5.000000,Tone,110.9,88.5,023,NN,023,Tone->Tone,FM,5.00,,50W,"Gatineau, Quebec VE2ZZC OPEN (fictional)",,,,,,

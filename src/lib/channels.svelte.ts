@@ -14,6 +14,8 @@ import {
   newZone,
   normalizeChannel,
   normalizeZone,
+  positionFromRecord,
+  positionRecord,
   restoreFile,
   settingsHome,
   writePlan,
@@ -33,17 +35,34 @@ export type Progress = { label: string; done: number; total: number };
 export type Home = number | null | undefined;
 /** The home channel a write sets (`home N` on the terminal after the records: the settings record isn't the table's). */
 export type HomeOp = { from: number | null; to: number | null };
+/** A read: the set, its home channel, and whether the radio stores positions (LINK-53: HELLO caps 64). */
+export type ReadResult = { set: ChannelSet; home: Home; canPos: boolean };
 /** The table and its home channel, as the undo list keeps them. */
 type Snap = { set: ChannelSet; home: Home };
 /** The write dialog's steps. */
 export type WriteStep =
   | { step: "backup" }
-  | { step: "review"; plan: Plan; home: HomeOp | null; fresh: ChannelSet; backupName: string; drifted: boolean }
-  | { step: "writing"; plan: Plan; home: HomeOp | null; done: number }
-  | { step: "done"; plan: Plan; home: HomeOp | null; verified: boolean; error: string; written: number };
+  | { step: "review"; plan: Plan; home: HomeOp | null; canPos: boolean; fresh: ChannelSet; backupName: string; drifted: boolean }
+  | { step: "writing"; plan: Plan; home: HomeOp | null; canPos: boolean; done: number }
+  | { step: "done"; plan: Plan; home: HomeOp | null; canPos: boolean; verified: boolean; error: string; written: number };
 
-/** How many changes a write makes: the plan's records and the home channel. */
-export const writeCount = (w: { plan: Plan; home: HomeOp | null }) => w.plan.ops.length + (w.home ? 1 : 0);
+/** How many changes a write makes: the plan's records, the positions (to a radio that stores them) and the home
+ *  channel. */
+export const writeCount = (w: { plan: Plan; home: HomeOp | null; canPos: boolean }) =>
+  w.plan.ops.length + (w.canPos ? w.plan.positions.length : 0) + (w.home ? 1 : 0);
+/** Position changes a write leaves out: the radio's firmware can't store them (no caps 64). */
+export const skippedPositions = (w: { plan: Plan; canPos: boolean }) => (w.canPos ? 0 : w.plan.positions.length);
+
+/** LINK-53: a radio that can't store positions keeps none, so Console keeps them: each channel read gets the
+ *  position `from` has for it (same number, frequency and name). */
+function carryPositions(set: ChannelSet, from: ChannelSet | null) {
+  if (!from) return;
+  const by = new Map(from.channels.map((c) => [c.number, c]));
+  for (const c of set.channels) {
+    const f = by.get(c.number);
+    if (!c.pos && f?.pos && f.rx === c.rx && f.name === c.name) c.pos = [...f.pos];
+  }
+}
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 /** JSON with keys sorted: the core's objects come with keys in either struct or sorted order. */
@@ -67,6 +86,9 @@ export function download(name: string, text: string, type: string) {
 
 /** The channels part's JSON, as far as Console counts it (core/src/plan.rs `Backup`). */
 export type ChannelsFile = { format: string; version: number; zones: unknown[]; channels: unknown[] };
+
+/** A channel's `pos` as an object to spread: none leaves the key out (the core's JSON has no `pos` without one). */
+const posOf = (p: [number, number] | undefined): { pos?: [number, number] } => (p ? { pos: p } : {});
 
 export function stamp(d = new Date()) {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -161,10 +183,10 @@ class Channels {
 
   /** Every zone and channel on the radio, read record by record, and its home channel (CHAN-17, from the settings
    *  record). Holds the link (the Live View pauses). */
-  async readRadio(): Promise<{ set: ChannelSet; home: Home }> {
+  async readRadio(): Promise<ReadResult> {
     const link = radio.connectedLink;
     if (!link) throw new Error("Connect to a radio first.");
-    const { ZONE, CHANNEL } = P.what;
+    const { ZONE, CHANNEL, POSITION } = P.what;
     radio.busy = "Reading channels";
     // Something shows at once (an indeterminate bar: total 0), before INFO's answer.
     this.progress = { label: "Reading zones…", done: 0, total: 0 };
@@ -192,6 +214,21 @@ class Channels {
       const chans = [...cmap.entries()].sort((x, y) => x[0] - y[0]).map(([, r]) => r);
       const { set, bad } = decodeSet(zones, chans);
       this.notes = bad;
+      // LINK-53: positions, only from a radio that has them (an older one refuses what 7). A read lists only the
+      // channels that have one.
+      const canPos = (link.caps & P.caps.POSITION) !== 0;
+      if (canPos) {
+        this.progress = { label: "Reading positions…", done: 0, total: 0 };
+        const pmap = await link.readMany(POSITION, 0, 1000, (at, got) => {
+          // How many have one isn't known before the end: the count so far, the bar by channel number.
+          this.progress = { label: `Reading positions: ${got}`, done: Math.min(at, 1000), total: 1000 };
+        });
+        for (const c of set.channels) {
+          const r = pmap.get(c.number - 1);
+          const p = r ? positionFromRecord(r) : null;
+          if (p) c.pos = p;
+        }
+      }
       let home: Home;
       try {
         const rec = await link.readRecord(P.what.SETTINGS, 0);
@@ -199,7 +236,7 @@ class Channels {
       } catch {
         home = undefined; // a radio without the record (the demo radio): the home channel isn't known
       }
-      return { set, home };
+      return { set, home, canPos };
     } finally {
       radio.busy = "";
       this.progress = null;
@@ -212,7 +249,8 @@ class Channels {
     this.#reading ??= (async () => {
       this.error = "";
       try {
-        const { set, home } = await this.readRadio();
+        const { set, home, canPos } = await this.readRadio();
+        if (!canPos) carryPositions(set, $state.snapshot(this.table) as ChannelSet);
         this.base = clone(set);
         this.table = clone(set);
         this.baseHome = this.home = home;
@@ -229,11 +267,11 @@ class Channels {
   }
 
   /** A fresh read saved as a backup file: the radio as it is now. */
-  async backupRadio(): Promise<{ set: ChannelSet; home: Home; name: string }> {
-    const { set, home } = await this.readRadio();
+  async backupRadio(): Promise<ReadResult & { name: string }> {
+    const { set, home, canPos } = await this.readRadio();
     const name = `${this.fileBase()}-backup.json`;
     download(name, backupFile(set, new Date().toISOString(), this.radioMeta()), "application/json");
-    return { set, home, name };
+    return { set, home, canPos, name };
   }
 
   /** The table as the channels part's JSON (the backup format: `.ferrite`'s channels.json), unwritten changes too. */
@@ -263,13 +301,15 @@ class Channels {
     this.error = "";
     this.write = { step: "backup" };
     try {
-      const { set: fresh, home: freshHome, name } = await this.backupRadio();
+      const { set: fresh, home: freshHome, canPos, name } = await this.backupRadio();
+      // A radio without positions: the diff's positions are against those Console kept (the table as read).
+      if (!canPos) carryPositions(fresh, this.base ? (clone(this.base) as ChannelSet) : null);
       const plan = writePlan(fresh, this.table);
       const drifted = !!this.base && !sameJson(this.base, fresh);
       // The home channel goes only when the table moved it (a swap or renumber here), and only where the radio's differs.
       const to = this.home ?? null;
       const home = this.homeChanged && freshHome !== undefined && freshHome !== to ? { from: freshHome, to } : null;
-      this.write = { step: "review", plan, home, fresh, backupName: name, drifted };
+      this.write = { step: "review", plan, home, canPos, fresh, backupName: name, drifted };
     } catch (e) {
       this.write = null;
       this.error = `Nothing written: the backup read failed (${(e as Error).message}).`;
@@ -281,21 +321,34 @@ class Channels {
     const w = this.write;
     const link = radio.connectedLink;
     if (!w || w.step !== "review" || !link || w.plan.problems.length) return;
-    const { plan, home } = w;
-    this.write = { step: "writing", plan, home, done: 0 };
+    const { plan, home, canPos } = w;
+    this.write = { step: "writing", plan, home, canPos, done: 0 };
     let error = "";
     let written = writeCount(w);
     radio.busy = "Writing channels";
     try {
       if (plan.ops.length) {
         await link.writeSession(new Uint8Array(plan.begin), plan.ops, (done) => {
-          this.write = { step: "writing", plan, home, done };
+          this.write = { step: "writing", plan, home, canPos, done };
         });
+      }
+      // LINK-53: positions after the records they belong to (a new channel must be there first); to a radio
+      // that can't store them, nothing (the review said so).
+      if (canPos && plan.positions.length) {
+        const want = new Map(this.table.channels.map((c) => [c.number, c.pos]));
+        const recs = plan.positions.map((n) => ({ index: n - 1, record: positionRecord(want.get(n)) }));
+        try {
+          await link.writePositions(recs, (done) => {
+            this.write = { step: "writing", plan, home, canPos, done: plan.ops.length + done };
+          });
+        } catch (e) {
+          throw new Error(`positions: ${(e as Error).message}`);
+        }
       }
       // After the records: `home N` needs channel N on the radio.
       if (home) {
         await link.cmd(`home ${home.to ?? "none"}`);
-        this.write = { step: "writing", plan, home, done: writeCount(w) };
+        this.write = { step: "writing", plan, home, canPos, done: writeCount(w) };
       }
     } catch (e) {
       error = (e as Error).message;
@@ -305,7 +358,8 @@ class Channels {
     }
     let verified = false;
     try {
-      const { set: back, home: backHome } = await this.readRadio();
+      const { set: back, home: backHome, canPos: backPos } = await this.readRadio();
+      if (!backPos) carryPositions(back, $state.snapshot(this.table) as ChannelSet);
       this.base = clone(back);
       this.baseHome = backHome;
       verified = !error && sameJson(back, this.table) && (this.home === undefined || backHome === this.home);
@@ -319,7 +373,7 @@ class Channels {
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
     }
-    this.write = { step: "done", plan, verified, error, written };
+    this.write = { step: "done", plan, home, canPos, verified, error, written };
   }
 
   closeWrite() {
@@ -348,7 +402,7 @@ class Channels {
       byNum.set(
         c.number,
         was
-          ? { ...c, squelch: was.squelch, busy: was.busy, reverse: was.reverse, aprs: was.aprs, hidden: was.hidden, end_tone: was.end_tone, tail: was.tail, keep: was.keep }
+          ? { ...c, squelch: was.squelch, busy: was.busy, reverse: was.reverse, aprs: was.aprs, hidden: was.hidden, end_tone: was.end_tone, tail: was.tail, keep: was.keep, ...posOf(c.pos ?? was.pos) }
           : c,
       );
     }

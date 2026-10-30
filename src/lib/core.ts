@@ -66,7 +66,9 @@ export type Timing = {
 };
 export type Protocol = {
   msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "AUDIO" | "AUDIO_DATA", number>;
-  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS", number>;
+  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION", number>;
+  /** LINK-35.2: HELLO's caps bits the UI asks about by name (link.ts has the transport ones). */
+  caps: Record<"POSITION", number>;
   event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
   knobMax: number;
   keys: string[];
@@ -133,6 +135,8 @@ export type Channel = {
   end_tone: string;
   tail: string;
   keep: number;
+  /** CHAN-2, LINK-53: where the channel is, [lat, lon] in degrees (1e-7 at most); absent when it has none. */
+  pos?: [number, number];
 };
 export type Zone = {
   number: number;
@@ -164,7 +168,8 @@ export type Field = { field: string; from: string; to: string };
 export type Change = { what: "zone" | "channel"; number: number; kind: "added" | "changed" | "deleted"; name: string; fields: Field[] };
 export type Problem = { what: string; number: number; error: string };
 export type PlanOp = { kind: "write" | "delete"; what: "zone" | "channel" | "settings" | "aprs"; number: number; msg: number; payloads: number[][] };
-export type Plan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[] };
+/** `positions`: the channels whose position changes (LINK-53), sent after the ops to a radio that can store them. */
+export type Plan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[]; positions: number[] };
 export type ChirpImport = { channels: Channel[]; notes: string[]; skipped: number };
 
 const js = JSON.stringify;
@@ -176,6 +181,17 @@ export const normalizeZone = (z: Zone): Zone => JSON.parse(wasm.normalize_zone(j
 export const checkChannel = (c: Channel, zones: number): string | undefined => wasm.check_channel(js(c), zones) ?? undefined;
 export const newChannel = (number: number, rxMhz: string): Channel => JSON.parse(wasm.new_channel(number, rxMhz));
 export const newZone = (number: number, name: string): Zone => JSON.parse(wasm.new_zone(number, name));
+/** A position as typed or stored: [lat, lon] in degrees (null for none), its text to five decimals, its grid square. */
+export type PositionView = { pos: [number, number] | null; text: string; grid: string };
+/** CHAN-2: a typed position ("45.4215, -75.6972", "FN25dk"; empty or "none" for none); throws with why not. */
+export const parsePosition = (text: string): PositionView => JSON.parse(wasm.parse_position(text));
+export const positionView = (pos: [number, number] | null | undefined): PositionView => JSON.parse(wasm.position_view(js(pos ?? null)));
+/** LINK-53: `WRITE_MANY` what 7's record for a position (0 bytes clears it), and a read one back. */
+export const positionRecord = (pos: [number, number] | null | undefined): Uint8Array => wasm.position_record(js(pos ?? null));
+export const positionFromRecord = (rec: Uint8Array): [number, number] | null => {
+  const p = wasm.position_from_record(rec);
+  return p ? JSON.parse(p) : null;
+};
 export const writePlan = (base: ChannelSet, want: ChannelSet): Plan => JSON.parse(wasm.write_plan(js(base), js(want)));
 export const backupFile = (set: ChannelSet, saved: string, radio: Record<string, string>) => wasm.backup_file(js(set), saved, js(radio));
 export const restoreFile = (text: string): { set: ChannelSet; saved: string; radio: Record<string, string> } =>
@@ -201,6 +217,8 @@ export type LibraryItem = {
   rx_only?: boolean;
   zone: string;
   tone?: string | null;
+  /** [lat, lon] in degrees: the channel's position (airports, TAFL sites). */
+  pos?: [number, number] | null;
 };
 export type LibraryAdded = { channels: Channel[]; zones: Zone[]; notes: string[]; skipped: number; made_rx_only: number };
 export type Place = { lat: number; lon: number; grid: string };

@@ -5,7 +5,7 @@
 //! writes the fixtures again (then review the diff and the doc).
 
 use crate::aprs_settings;
-use crate::channels::{ChanView, ZoneView};
+use crate::channels::{ChanView, Position, ZoneView};
 use crate::plan::{self, Set};
 use crate::radioside::RadioSide;
 use crate::records::Reader;
@@ -29,7 +29,8 @@ fn radio() -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Two zones and three channels: a simplex calling channel, a repeater with a tone, one with no zone.
+/// Two zones and three channels: a simplex calling channel, a repeater with a tone and its site's position, one
+/// with no zone.
 fn set() -> Set {
     let mut z1 = ZoneView::new(1, "Local");
     z1.scan_all = true;
@@ -46,7 +47,8 @@ fn set() -> Set {
     b.offset = "0.6".into();
     b.tx_tone = "100.0".into();
     b.power = "Mid".into();
-    let b = ChanView::of(&b.channel().unwrap());
+    let mut b = ChanView::of(&b.channel().unwrap());
+    b.pos = Position::parse("49.35, -123.07").unwrap(); // the repeater's site (LINK-53)
     let mut c = ChanView::new(20, 44_600_000);
     c.name = "Calling 70 cm".into();
     c.skip = true;

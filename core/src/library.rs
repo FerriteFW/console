@@ -43,6 +43,9 @@ pub struct Item {
     /// A CTCSS or DCS word for both directions (TERM-35.2's form), if the set has one.
     #[serde(default)]
     pub tone: Option<String>,
+    /// Where it is, `[lat, lon]` in degrees (airports, TAFL sites): the channel's position (CHAN-2, LINK-53).
+    #[serde(default)]
+    pub pos: Option<crate::channels::Position>,
 }
 
 /// What [`add`] gives: the channels and zones to put in the table, and notes.
@@ -135,6 +138,7 @@ pub fn add(items: &[Item], table: &Set) -> Added {
         v.step = step_for(rx).into();
         v.zone = zone;
         v.rx_only = it.rx_only;
+        v.pos = it.pos;
         if let Some(t) = &it.tone {
             v.tx_tone = t.clone();
             v.rx_tone = t.clone();
@@ -206,7 +210,7 @@ pub fn add(items: &[Item], table: &Set) -> Added {
 
 /// The view as the radio would hold it (frequencies to five decimals, tones as words).
 fn normal(v: &ChanView) -> ChanView {
-    v.channel().map(|c| ChanView::of(&c)).unwrap_or_else(|_| v.clone())
+    v.normal().unwrap_or_else(|_| v.clone())
 }
 
 // ---- fixed sets ----
@@ -256,6 +260,7 @@ pub fn fixed_items(set: &FixedSet, picks: &[usize], zone: &str) -> Vec<Item> {
             rx_only: set.rx_only || f.rx_only,
             zone: zone.into(),
             tone: f.ctcss.map(|t| format!("{t:.1}")).or_else(|| f.dcs.map(|d| format!("D{d:03}N"))),
+            pos: None,
         })
         .collect()
 }

@@ -2,7 +2,7 @@
   // One channel in the table: the core columns, edited in place (every other field is in ChannelDetails, the side
   // panel). Each change goes through the core (normalised as the radio would hold it, then ferrite's own checks for
   // the problem marker); a field that doesn't parse stays as typed, marked.
-  import { checkChannel, type Channel, type Choices, type Zone } from "../core";
+  import { checkChannel, positionView, type Channel, type Choices, type Zone } from "../core";
   import { channels } from "../channels.svelte";
 
   let {
@@ -26,6 +26,8 @@
   } = $props();
 
   const problem = $derived(checkChannel(c, zones.length));
+  // CHAN-2, LINK-53: a marker for a channel with a position, the position in its title.
+  const where = $derived(c.pos ? positionView(c.pos) : null);
 
   const set = <K extends keyof Channel>(k: K, v: Channel[K]) => channels.edit(c.number, k, v);
   const text = (k: keyof Channel) => (e: Event) => set(k, (e.currentTarget as HTMLInputElement).value as never);
@@ -49,7 +51,10 @@
   <td class="num sticky2">
     <button class="open" onclick={onopen} aria-label={`Details for channel ${c.number}`} title="All of this channel's fields">{c.number}</button>
   </td>
-  <td><input class="name" value={c.name} maxlength="16" onchange={text("name")} aria-label="Name" /></td>
+  <td class="namecell">
+    <input class="name" value={c.name} maxlength="16" onchange={text("name")} aria-label="Name" />
+    {#if where}<span class="pin" role="img" title={`Position ${where.text} (${where.grid})`} aria-label={`Position ${where.text}`}>📍</span>{/if}
+  </td>
   <td><input class="freq" value={c.rx} onchange={text("rx")} aria-label="RX MHz" /></td>
   <td class="pair">
     <select class="dup" value={c.duplex} onchange={text("duplex")} aria-label="Duplex">

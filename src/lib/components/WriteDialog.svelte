@@ -1,7 +1,7 @@
 <script lang="ts">
   // The write's steps: the backup read (saved as a file), the diff with ferrite's own checks, the write on confirm,
   // and the read back.
-  import { channels, writeCount } from "../channels.svelte";
+  import { channels, skippedPositions, writeCount } from "../channels.svelte";
   import type { Change } from "../core";
 
   const w = $derived(channels.write);
@@ -27,6 +27,9 @@
     pri2: "priority 2",
     keep: "other flags",
   };
+  /** LINK-53: the radio can't store positions: the write leaves them out and says so once. */
+  const skipped = $derived(w && w.step !== "backup" ? skippedPositions(w) : 0);
+  const canGo = $derived(!!w && w.step === "review" && !w.plan.problems.length && (writeCount(w) > 0 || skipped > 0));
 </script>
 
 {#if w}
@@ -52,6 +55,12 @@
               {#each w.plan.problems as p, i (i)}<li>{p.what === "set" ? "" : `${p.what} ${p.number}: `}{p.error}</li>{/each}
             </ul>
           </div>
+        {/if}
+        {#if skipped}
+          <p class="note" data-testid="positions-skipped">
+            This radio's firmware can't store positions yet: update Ferrite. {skipped === 1 ? "The position change stays" : `The ${skipped} position changes stay`}
+            in the table and in .ferrite files; the rest is written.
+          </p>
         {/if}
         {#if !w.plan.changes.length && !w.home}
           <p>Nothing to write: the radio already holds the table.</p>
@@ -88,12 +97,8 @@
         {/if}
         <div class="actions">
           <button class="btn" onclick={() => channels.closeWrite()}>Cancel</button>
-          <button
-            class="btn primary"
-            disabled={!!w.plan.problems.length || !writeCount(w)}
-            onclick={() => channels.commitWrite()}
-          >
-            Write {writeCount(w)} {writeCount(w) === 1 ? "change" : "changes"}
+          <button class="btn primary" disabled={!canGo} onclick={() => channels.commitWrite()}>
+            {#if !writeCount(w) && skipped}Keep the positions in the table{:else}Write {writeCount(w)} {writeCount(w) === 1 ? "change" : "changes"}{/if}
           </button>
         </div>
       {:else if w.step === "writing"}
@@ -104,8 +109,12 @@
         {#if w.error}
           <p class="err">Stopped after {w.written} of {writeCount(w)}: {w.error}</p>
           <p class="sub">The table keeps your edits; the radio's set has been read again, so Write shows what is left.</p>
+        {:else if w.verified && !writeCount(w) && skipped}
+          <p class="ok">Nothing written: the positions stay in the table until the radio's firmware can store them.</p>
         {:else if w.verified}
-          <p class="ok">Written: {writeCount(w)} {writeCount(w) === 1 ? "change" : "changes"}. Read back: the radio holds the table.</p>
+          <p class="ok">
+            Written: {writeCount(w)} {writeCount(w) === 1 ? "change" : "changes"}. Read back: the radio holds the table{#if skipped}, positions aside (kept in the table){/if}.
+          </p>
         {:else}
           <p class="note">Written, but the read back differs from the table: the table now shows what the radio holds.</p>
         {/if}

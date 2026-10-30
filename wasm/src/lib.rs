@@ -111,7 +111,8 @@ pub fn protocol() -> String {
                  "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY,
                  "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP,
                  "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA },
-        "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS },
+        "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION },
+        "caps": { "POSITION": ferrite_console_core::link::caps::POSITION },
         "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "HEARD": event::HEARD,
                    "MSG": event::MSG, "MSG_STATE": event::MSG_STATE, "UI": event::UI, "QUIET_MS": event::QUIET_MS, "DICT": liveview::DICT },
         "knobMax": key::KNOB_MAX,
@@ -237,7 +238,44 @@ pub fn decode_set(zones: &str, channels: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn normalize_channel(view: &str) -> Result<String, JsError> {
     let v: channels::ChanView = from_json(view, "channel")?;
-    v.channel().map(|c| json(&channels::ChanView::of(&c))).map_err(|e| JsError::new(&e))
+    v.normal().map(|c| json(&c)).map_err(|e| JsError::new(&e))
+}
+
+/// CHAN-2, LINK-53: a typed position ("45.4215, -75.6972", a grid square; empty or "none" for none) as JSON
+/// `{pos: [lat, lon] | null, text, grid}` (degrees; the text to five decimals), or why it isn't one.
+#[wasm_bindgen]
+pub fn parse_position(text: &str) -> Result<String, JsError> {
+    channels::Position::parse(text).map(position_json).map_err(|e| JsError::new(&e))
+}
+
+/// A stored position (`[lat, lon]` in degrees, JSON) as `{pos, text, grid}`, for showing it.
+#[wasm_bindgen]
+pub fn position_view(pos: &str) -> Result<String, JsError> {
+    let p: Option<channels::Position> = from_json(pos, "position")?;
+    Ok(position_json(p))
+}
+
+fn position_json(p: Option<channels::Position>) -> String {
+    serde_json::json!({
+        "pos": p,
+        "text": p.map(|p| p.text()).unwrap_or_default(),
+        "grid": p.map(|p| p.grid()).unwrap_or_default(),
+    })
+    .to_string()
+}
+
+/// LINK-53: a `WRITE_MANY` record of `what` 7 for a position (`[lat, lon]` in degrees, JSON; `null` clears: 0
+/// bytes).
+#[wasm_bindgen]
+pub fn position_record(pos: &str) -> Result<Vec<u8>, JsError> {
+    let p: Option<channels::Position> = from_json(pos, "position")?;
+    Ok(channels::position_record(p.map(|p| p.e7())))
+}
+
+/// LINK-53: a `READ_MANY` record of `what` 7 as `[lat, lon]` in degrees (JSON), or undefined if it isn't one.
+#[wasm_bindgen]
+pub fn position_from_record(rec: &[u8]) -> Option<String> {
+    channels::position_from_record(rec).map(|(lat, lon)| json(&channels::Position { lat, lon }))
 }
 
 #[wasm_bindgen]

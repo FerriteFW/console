@@ -350,6 +350,12 @@
               <option value="">Mode…</option>
               {#each choices.modes as m (m)}<option value={m}>{m}</option>{/each}
             </select>
+            <button
+              class="btn quiet"
+              disabled={!t.channels.some((c) => c.pos && selected.has(c.number))}
+              onclick={() => channels.setMany(selected, { pos: undefined })}
+              title="Remove the position from the selected channels">Clear position</button
+            >
             <span class="spacer"></span>
             <button class="btn quiet" onclick={() => selected.clear()}>Clear</button>
             <button class="btn danger" onclick={() => remove([...selected])}>Delete {selected.size}</button>
@@ -838,6 +844,17 @@
   }
   .grid :global(input.name) {
     width: 150px;
+  }
+  .grid :global(td.namecell) {
+    white-space: nowrap;
+  }
+  .grid :global(.pin) {
+    display: inline-block;
+    width: 16px;
+    margin-left: 2px;
+    font-size: 12px;
+    cursor: default;
+    vertical-align: middle;
   }
   .grid :global(input.freq) {
     width: 92px;

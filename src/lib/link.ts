@@ -586,6 +586,48 @@ export class Link {
   }
 
   /**
+   * LINK-53: channel positions written (`WRITE_MANY` of what 7): each the channel's index (its number minus 1) and
+   * its 8-byte record, or 0 bytes to clear it. 21 to a frame (MAX_PAYLOAD 240); `busy` goes again from the first
+   * not applied; a refusal throws with the radio's reason. `progress(done)` as frames are answered. Only for a radio
+   * whose HELLO says caps 64.
+   */
+  writePositions(recs: { index: number; record: Uint8Array }[], progress?: (done: number) => void): Promise<void> {
+    return this.exclusive(async () => {
+      let i = 0;
+      let end = performance.now() + P.timing.busy_retry_ms;
+      while (i < recs.length) {
+        const part: typeof recs = [];
+        let size = 1;
+        for (let k = i; k < recs.length && size + 3 + recs[k].record.length <= 240; k++) {
+          part.push(recs[k]);
+          size += 3 + recs[k].record.length;
+        }
+        const body = new Uint8Array(size);
+        body[0] = P.what.POSITION;
+        let o = 1;
+        for (const r of part) {
+          body.set([r.index & 0xff, r.index >> 8, r.record.length], o);
+          body.set(r.record, o + 3);
+          o += 3 + r.record.length;
+        }
+        const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+        const applied = status === 0 ? part.length : rest.length ? rest[0] : 0;
+        i += applied;
+        progress?.(i);
+        if (status === 0) {
+          end = performance.now() + P.timing.busy_retry_ms;
+          continue;
+        }
+        if (status === 7 && performance.now() < end) {
+          await sleep(P.timing.busy_sleep_ms);
+          continue;
+        }
+        throw new RadioError(P.msg.WRITE_MANY, status, rest.slice(1));
+      }
+    });
+  }
+
+  /**
    * Every record of `what` held at indexes first..end, several whole records an answer (READ_MANY, LINK-40), as a
    * map index → bytes. `progress(at, got)` with the index it has reached and how many records are in, as each
    * answer arrives (on a streamed read too: Bluetooth's take seconds).
