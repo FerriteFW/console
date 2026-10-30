@@ -125,11 +125,25 @@
   /** The APRS card's own line (the M3 card, decision 313): the chip's priority, the unread messages and who sent the
    *  last, what became of our last beacon, the bottom line. Absent from a radio before it. */
   const aprsCard = $derived((ui.other.find((l) => l.kind === "aprs_card")?.kv as Kv | undefined) ?? null);
+  /** The card's station rows (`r1`-`r3`: "call|age|right", APRS-17.2.2). */
+  function aprsRows(k: Kv): { call: string; age: string; right: string }[] {
+    return ["r1", "r2", "r3"]
+      .map((key) => s(k[key]))
+      .filter(Boolean)
+      .map((v) => {
+        const [call = "", age = "", right = ""] = v.split("|");
+        return { call, age, right };
+      });
+  }
   /** The state word, or the tone hint in its place ("Heard 88.5", TSRCH-13). */
   const stateText = (c: Kv) => s(c.hint) || s(c.state);
   const stateColour = (st: string) =>
     st === "TX" ? "var(--red)" : st.startsWith("RX") || st === "MON" ? "var(--green)" : st === "heard" ? "var(--amber)" : "var(--sub)";
 </script>
+
+{#snippet station(r: { call: string; age: string; right: string }, first: boolean)}
+  <div class="aprsrow st"><span class="l"><b class:t={first}>{r.call}</b> <span class="age">{r.age}</span></span><span class="r">{r.right}</span></div>
+{/snippet}
 
 <div class="screen" data-readback-screen style:width={`${W}px`} style:height={`${H}px`} aria-label="The radio's screen, from the UI readback">
   <!-- status bar -->
@@ -170,14 +184,47 @@
                 <span class="htext">{headText(c)}</span>
                 {#if st && st !== "idle"}<span class="state" style:color={stateColour(st)}>{stateText(c)}</span>{/if}
               </div>
-              {#if c.kind === "aprs"}
+              {#if c.kind === "aprs" && aprsCard}
+                <!-- The M3 card (APRS-17.2, decision 313), row for row as home.rs `aprs_card` draws the large one: the
+                     frequency at the compact size with the counts at its right; the newest station; unread messages
+                     or the next station; our last beacon's fate or a third station; the beacon row with the power. -->
+                {@const rows = aprsRows(aprsCard)}
+                {@const kiss = c.holder === "kiss"}
+                {@const msg = n(aprsCard.unread) > 0}
+                <div class="aprsm-top">
+                  <span class="freq2">{big}</span>
+                  <span class="f2">{#if kiss}{s(c.port)}{:else}<b class="t">{n(c.heard)} heard</b>{#if c.hour !== undefined} · {n(c.hour)} /hr{/if}{/if}</span>
+                </div>
+                {#if kiss || rows.length === 0}
+                  <div class="aprsrow"><span class="l">{aprsLine(c)}</span></div>
+                {:else}
+                  {@render station(rows[0], true)}
+                {/if}
+                {#if msg}
+                  <div class="aprsrow"><span class="l msg">✉ {n(aprsCard.unread)} new from {s(aprsCard.from)}</span></div>
+                {:else if rows.length > 1 && !kiss}
+                  {@render station(rows[1], false)}
+                {:else}
+                  <div class="aprsrow"><span class="l">&nbsp;</span></div>
+                {/if}
+                {#if s(aprsCard.fate) && !kiss}
+                  <div class="aprsrow"><span class="l" class:warn={/not heard back/i.test(s(aprsCard.fate))}>{s(aprsCard.fate)}</span></div>
+                {:else if c.holder === "beacon"}
+                  <div class="aprsrow"><span class="l">{s(c.line)}</span></div>
+                {:else if !kiss && rows.length > (msg ? 1 : 2)}
+                  {@render station(rows[msg ? 1 : 2], false)}
+                {:else}
+                  <div class="aprsrow"><span class="l">&nbsp;</span></div>
+                {/if}
+                <div class="aprsrow">
+                  <span class="l" class:warn={n(aprsCard.nofix) === 1}>{s(aprsCard.bottom)}</span>
+                  <span class="r">{#if n(aprsCard.nofix) === 1}<span class="warn">no fix </span>{/if}<span class:warn={c.state === "Muted"}>{aprsPower(c)}</span></span>
+                </div>
+              {:else if c.kind === "aprs"}
+                <!-- A radio from before the M3 card (no aprs_card line). -->
                 <div class="freq">{big}<small>{small}</small></div>
                 <div class="aprsrow"><span class="l">{aprsLine(c)}</span><span class="r" class:warn={c.state === "Muted"}>{aprsPower(c)}</span></div>
-                {#if aprsCard && n(aprsCard.unread)}
-                  <div class="aprsrow"><span class="l">{n(aprsCard.unread)} new from {s(aprsCard.from)}</span></div>
-                {/if}
-                {#if aprsCard && s(aprsCard.fate)}<div class="aprsrow"><span class="l">{s(aprsCard.fate)}</span></div>{/if}
-                <div class="aprsrow"><span class="l">{s(aprsCard?.bottom) || s(c.beacon)}</span><span class="r b">{aprsRight(c, true)}</span></div>
+                <div class="aprsrow"><span class="l">{s(c.beacon)}</span><span class="r b">{aprsRight(c, true)}</span></div>
               {:else}
                 {#if s(c.name)}<div class="cname">{s(c.name)}</div>{/if}
                 {#if c.kind === "broadcast"}
@@ -566,8 +613,27 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .aprsrow .r.warn {
+  .aprsrow .r.warn,
+  .aprsrow .warn {
     color: var(--amber);
+  }
+  .aprsm-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 4px;
+    white-space: nowrap;
+  }
+  .aprsrow.st .age {
+    color: var(--sub);
+  }
+  .aprsrow .t,
+  .aprsm-top .t {
+    color: var(--text);
+  }
+  .aprsrow .msg {
+    color: var(--violet);
   }
   .b {
     font-weight: 700;
