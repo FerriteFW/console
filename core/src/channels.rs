@@ -106,6 +106,23 @@ pub fn channel_from_record(rec: &[u8]) -> Option<Channel> {
     (r.n == rec.len()).then_some(c)
 }
 
+/// LINK-53 (decision 325): a channel position's record for `WRITE_MANY` of `what::POSITION`: latitude and longitude
+/// in 1e-7 degree (north and east positive), little-endian, 8 bytes; None clears it (an empty record). Only for a
+/// radio whose `HELLO` says `caps::POSITION`.
+pub fn position_record(pos: Option<(i32, i32)>) -> Vec<u8> {
+    match pos {
+        Some((lat, lon)) => lat.to_le_bytes().into_iter().chain(lon.to_le_bytes()).collect(),
+        None => Vec::new(),
+    }
+}
+
+/// LINK-53: a position from a `READ_MANY` of `what::POSITION` record, (latitude, longitude) in 1e-7 degree; None if
+/// the record isn't 8 bytes.
+pub fn position_from_record(rec: &[u8]) -> Option<(i32, i32)> {
+    let r: &[u8; 8] = rec.try_into().ok()?;
+    Some((i32::from_le_bytes([r[0], r[1], r[2], r[3]]), i32::from_le_bytes([r[4], r[5], r[6], r[7]])))
+}
+
 /// A zone's record, as the radio's `zone_save` writes it.
 pub fn zone_record(name: &[u8], c: &ZoneCfg) -> Vec<u8> {
     let mut s = Bytes(Vec::with_capacity(ZONE_LEN));
@@ -512,6 +529,27 @@ mod tests {
         let (s, why) = write(&mut r, what::CHANNEL, c.num, &channel_record(&v.channel().unwrap()));
         assert_eq!(s, Status::Invalid as u8);
         assert!(String::from_utf8_lossy(&why).contains("756-1300 MHz"));
+    }
+
+    /// LINK-53: a position Console builds goes in through ferrite's own link session, reads back the same, and an
+    /// empty record clears it; one out of range is refused with ferrite's reason.
+    #[test]
+    fn position_through_ferrites_link() {
+        let mut r = RadioSide::new();
+        let c = sample();
+        r.seed(&[], &[c]);
+        assert_eq!(read(&mut r, what::POSITION, c.num), Err(Status::NotFound as u8), "none yet");
+        let p = (454_215_000, -756_972_000);
+        assert_eq!(write(&mut r, what::POSITION, c.num, &position_record(Some(p))).0, 0);
+        let back = read(&mut r, what::POSITION, c.num).unwrap();
+        assert_eq!(position_from_record(&back), Some(p));
+        assert_eq!(read(&mut r, what::CHANNEL, c.num).unwrap(), channel_record(&c), "the channel as it was");
+        let (s, why) = write(&mut r, what::POSITION, c.num, &position_record(Some((910_000_000, 0))));
+        assert_eq!(s, Status::Invalid as u8);
+        assert!(String::from_utf8_lossy(&why).contains("latitude"));
+        assert_eq!(write(&mut r, what::POSITION, c.num, &position_record(None)).0, 0);
+        assert_eq!(read(&mut r, what::POSITION, c.num), Err(Status::NotFound as u8), "cleared");
+        assert_eq!(position_from_record(&[0; 7]), None);
     }
 
     /// CHAN-31: the editor takes only the name set and says which; imports map with [`map_name`].

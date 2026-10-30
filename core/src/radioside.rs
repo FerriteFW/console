@@ -4,7 +4,7 @@
 //! so every check and refusal is the firmware's own, never a copy.
 
 use ferrite_app::chan::{ChanWrite, Channel, ChannelStore, Name, MAX_CHANNELS, NO_ZONE};
-use ferrite_app::data::{Data, Op, ZoneCfg};
+use ferrite_app::data::{Data, Op, Pos, ZoneCfg};
 use ferrite_app::link::Session;
 use ferrite_app::screens::alert::AlertInfo;
 use ferrite_app::settings::Settings;
@@ -22,6 +22,8 @@ pub const MAX_ZONES: usize = 254;
 pub struct MemStore {
     pub chans: RefCell<BTreeMap<u16, Channel>>,
     pub zones: RefCell<Vec<(Name, ZoneCfg)>>,
+    /// Channel positions (CHAN-2, LINK-53), by number.
+    pub pos: RefCell<BTreeMap<u16, Pos>>,
     version: Cell<u32>,
 }
 
@@ -36,16 +38,27 @@ impl MemStore {
                 }
                 c.insert(ch.num, ch);
             }
-            ChanWrite::PutPos { ch, .. } => {
+            ChanWrite::PutPos { ch, pos } => {
                 c.insert(ch.num, ch);
+                self.set_pos(ch.num, pos);
             }
+            ChanWrite::Pos { num, pos } if c.contains_key(&num) => self.set_pos(num, pos),
+            ChanWrite::Pos { .. } => {}
             ChanWrite::Delete(n) => {
                 c.remove(&n);
+                self.pos.borrow_mut().remove(&n);
             }
             ChanWrite::DeleteZone(z) => c.values_mut().filter(|x| x.zone == z).for_each(|x| x.zone = NO_ZONE),
             ChanWrite::EraseAll => c.clear(),
         }
         self.bump();
+    }
+
+    fn set_pos(&self, num: u16, pos: Option<Pos>) {
+        match pos {
+            Some(p) => self.pos.borrow_mut().insert(num, p),
+            None => self.pos.borrow_mut().remove(&num),
+        };
     }
 
     fn bump(&self) {
@@ -85,6 +98,9 @@ impl ChannelStore for MemStore {
     }
     fn by_number(&self, i: u16) -> Option<Channel> {
         self.chans.borrow().values().nth(i as usize).copied()
+    }
+    fn position(&self, num: u16) -> Option<Pos> {
+        self.pos.borrow().get(&num).copied().filter(|_| self.chans.borrow().contains_key(&num))
     }
     fn data(&self) -> &dyn Data {
         self
