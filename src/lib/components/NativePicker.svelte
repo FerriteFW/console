@@ -1,7 +1,10 @@
 <script lang="ts">
-  // The desktop app's port and radio picker: a popover under the connection bar (picker.svelte.ts).
+  // The desktop app's port and radio picker (picker.svelte.ts): inside the welcome (`inline`) when Cable or Bluetooth
+  // was pressed there, else its own modal, drawn at the app's top level so nothing can cover it.
   import { picker } from "../picker.svelte";
   import { radio } from "../radio.svelte";
+
+  let { inline = false }: { inline?: boolean } = $props();
 
   const title = $derived(picker.kind === "bluetooth" ? "Pick a radio" : "Pick the cable's port");
   const empty = $derived(
@@ -22,8 +25,7 @@
 
 <svelte:window onkeydown={onkey} />
 
-{#if picker.kind}
-  <div class="pick" role="dialog" aria-label={title}>
+{#snippet body()}
     <div class="head">
       <strong>{title}</strong>
       {#if picker.scanning}<span class="scan">Scanning…</span>{/if}
@@ -47,23 +49,43 @@
       {#if picker.kind === "cable"}<button class="btn" onclick={() => picker.refresh()}>Refresh</button>{/if}
       <button class="btn" onclick={() => picker.close()}>Cancel</button>
     </div>
-  </div>
+{/snippet}
+
+{#if picker.kind}
+  {#if inline}
+    <div class="pick inline" role="group" aria-label={title}>{@render body()}</div>
+  {:else}
+    <div class="overlay">
+      <div class="pick" role="dialog" aria-modal="true" aria-label={title}>{@render body()}</div>
+    </div>
+  {/if}
 {/if}
 
 <style>
-  /* Fixed and above the welcome (ConnectModal, z-index 50): Cable or Bluetooth pressed there opens this. */
-  .pick {
+  .overlay {
     position: fixed;
-    top: 64px;
-    right: 20px;
-    z-index: 60;
-    margin-top: 6px;
-    width: min(420px, calc(100vw - 40px));
+    inset: 0;
+    z-index: 70;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 16px;
+    background: rgb(0 0 0 / 0.6);
+  }
+  .pick {
+    width: min(440px, 100%);
     padding: 12px;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--surface);
     box-shadow: var(--shadow);
+  }
+  .pick.inline {
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
   }
   .head {
     display: flex;

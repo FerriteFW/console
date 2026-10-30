@@ -3,6 +3,8 @@
   // and the page. Pages by hash (#/live, #/about, ...) so a reload stays put.
   import ConnectionBar from "./lib/components/ConnectionBar.svelte";
   import ConnectModal from "./lib/components/ConnectModal.svelte";
+  import NativePicker from "./lib/components/NativePicker.svelte";
+  import { isTauri } from "./lib/transport/native";
   import { DEV_TOOLS } from "./lib/devtools";
   import Wordmark from "./lib/components/Wordmark.svelte";
   import LiveView from "./lib/pages/LiveView.svelte";
@@ -192,6 +194,9 @@
   </div>
 </div>
 {/if}
+
+<!-- The desktop app's port and radio picker, last so it sits over every wizard; inside the welcome while that's open. -->
+{#if isTauri() && (focus || !welcome)}<NativePicker />{/if}
 
 <style>
   .focus-shell {

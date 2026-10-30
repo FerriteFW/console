@@ -6,6 +6,9 @@
   import type { TransportKind } from "../transport";
   import { DEV_TOOLS } from "../devtools";
   import Wordmark from "./Wordmark.svelte";
+  import NativePicker from "./NativePicker.svelte";
+  import { picker } from "../picker.svelte";
+  import { isTauri } from "../transport/native";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -55,6 +58,9 @@
         <button class="btn" type="button" onclick={() => radio.disconnect()}>Cancel</button>
       </form>
       {#if radio.pinError}<p class="err" role="alert">{radio.pinError}</p>{/if}
+    {:else if isTauri() && picker.kind}
+      <!-- The desktop app: the ports or radios in place of the two ways (Cancel goes back to them). -->
+      <NativePicker inline />
     {:else}
       <h2 id="connect-title">Connect your radio</h2>
       <div class="ways">

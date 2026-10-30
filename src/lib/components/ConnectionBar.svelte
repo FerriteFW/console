@@ -5,7 +5,6 @@
   import { bridgeEnabled, bridgeUrl } from "../transport/bridge";
   import { DEV_TOOLS } from "../devtools";
   import { isTauri } from "../transport/native";
-  import NativePicker from "./NativePicker.svelte";
 
   // The development bridge (tools/bridge.py) and the demo radio: developer builds only (devtools.ts).
   const bridge = bridgeEnabled();
@@ -96,7 +95,6 @@
     >
   </div>
 </div>
-{#if isTauri()}<NativePicker />{/if}
 {#if radio.error}
   <div class="err" role="alert">{radio.error} <button class="x" aria-label="Dismiss" onclick={() => (radio.error = "")}>×</button></div>
 {/if}
