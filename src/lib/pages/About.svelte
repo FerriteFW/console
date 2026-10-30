@@ -11,8 +11,8 @@
     keys from the computer now, channel programming next.
   </p>
   <p class="sub">
-    Get the radio: <a href="https://www.radtels.com/products/radtel-rt-950-pro-27mhz-tx-rx-10w-walkie-talkie-am-fm-usb-lsb-cw-receive-gps-aprs-wireless-bluetooth-phone-programming-noaa-two-way-radio?ref=FERRITEFW&variant=44669996794064" target="_blank" rel="noopener sponsored">Radtel RT-950 Pro</a>
-    (affiliate link: buying through it supports Ferrite, at no extra cost to you).
+    How to use the radio: the <a href="https://manual.ferritefw.dev" target="_blank" rel="noopener">user guide</a>.
+    Get the radio: <a href="https://www.radtels.com/products/radtel-rt-950-pro-27mhz-tx-rx-10w-walkie-talkie-am-fm-usb-lsb-cw-receive-gps-aprs-wireless-bluetooth-phone-programming-noaa-two-way-radio?ref=FERRITEFW&variant=44669996794064" target="_blank" rel="noopener sponsored">Radtel RT-950 Pro</a>.
   </p>
   <dl>
     <dt>Version</dt>

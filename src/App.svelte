@@ -127,7 +127,10 @@
         </div>
       {/each}
     </nav>
-    <div class="side-foot">For Ferrite on the Radtel RT-950 Pro</div>
+    <div class="side-foot">
+      <a class="guide" href="https://manual.ferritefw.dev" target="_blank" rel="noopener">User guide ↗</a>
+      For Ferrite on the Radtel RT-950 Pro
+    </div>
   </aside>
 
   <div class="main">
@@ -250,6 +253,12 @@
     color: var(--dim);
     font-size: 11px;
     padding: 0 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .side-foot .guide {
+    font-size: 13px;
   }
   .main {
     min-width: 0;
