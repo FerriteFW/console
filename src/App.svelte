@@ -13,6 +13,7 @@
   import Settings from "./lib/pages/Settings.svelte";
   import Firmware from "./lib/pages/Firmware.svelte";
   import Install from "./lib/pages/Install.svelte";
+  import Restore from "./lib/pages/Restore.svelte";
   import { install } from "./lib/install.svelte";
   import { firmware } from "./lib/firmware.svelte";
   import { settings } from "./lib/settings.svelte";
@@ -58,6 +59,7 @@
       tabs: [
         { id: "firmware", name: "Update" },
         { id: "install", name: "Install" },
+        { id: "restore", name: "Back to stock" },
       ],
     },
   ];
@@ -74,7 +76,8 @@
   let coreError = $state("");
   const page = $derived(all.find((p) => p.id === route.id)?.id ?? "home");
   const section = $derived(sectionOf(page));
-  // `#install` (no slash): the Install page alone, for setting up a new radio (ferritefw.dev/install).
+  // `#install` (no slash): the Install wizard alone, for setting up a new radio (ferritefw.dev/install); closing it
+  // goes to the Install tab.
   let focus = $state(location.hash === "#install");
   $effect(() => {
     const f = () => (focus = location.hash === "#install");
@@ -107,7 +110,7 @@
 
 
   // The welcome (ConnectModal) on every visit, until a radio connects or the visitor closes it.
-  let welcome = $state(!params.has("demo"));
+  let welcome = $state(!params.has("demo") && location.hash !== "#install");
   $effect(() => {
     if (radio.phase === "connected" || radio.phase === "updating") welcome = false;
   });
@@ -171,6 +174,8 @@
         <Firmware />
       {:else if page === "install"}
         <Install />
+      {:else if page === "restore"}
+        <Restore />
       {:else if page === "about"}
         <About />
       {:else if page === "activity"}

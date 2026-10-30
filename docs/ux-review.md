@@ -16,6 +16,9 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
 - [x] Update as a modal wizard (Alex's pick, Oct 29): Check (versions, signature) → Update (progress, keep the cable
   in; Try again from the bootloader) → Done. The page: your radio, the latest, one Update button; a .btf file and
   its checks under Advanced. `UpdateWizard.svelte`.
+- [x] Install as a full-screen wizard (Alex's pick, Oct 29): Connect → Back up (save gate unchanged) → SSB (optional,
+  Skip) → Install (Try again from the bootloader) → Done; one connect button; Back to stock its own Firmware tab.
+  `InstallWizard.svelte`, `Restore.svelte`.
 
 ## Open
 

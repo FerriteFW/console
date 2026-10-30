@@ -1,4 +1,4 @@
-// The Install page (#install) against the bridge's fakes (tools/fakeboot.py): the bootloader, the reader's console
+// The Install wizard (#install) and Firmware › Back to stock (#/restore) against the bridge's fakes (tools/fakeboot.py): the bootloader, the reader's console
 // and its dump (the Rust reader's fdumpz with coded chunks, BACKUP-9.6; hwtest's fdump), and Ferrite's STOCK_RESTORE; the simulator answers HELLO. The backup, saving it, the SSB patch
 // from a synthetic stock file, the install; back to stock; the refusals. Never on a radio: Alex runs the radio checks
 // by hand (docs/TESTING.md).
@@ -114,8 +114,9 @@ async function serveRelease(page: Page, badSum = false, reader = readerBtf) {
 const HERE = "R28JM FRR1S 27V4T WPTH0";
 const named = (uid: string) => `rt950pro-backup-${uid.replaceAll(" ", "")}-20261022.bin`;
 
-/** `picker`: a stand-in for Chrome's save dialog that counts its writes; otherwise none (the download). */
-async function open(page: Page, picker = false) {
+/** `picker`: a stand-in for Chrome's save dialog that counts its writes; otherwise none (the download). `at`: the
+ * Install wizard (#install) or the Back to stock page. */
+async function open(page: Page, picker = false, at: "install" | "restore" = "install") {
   await page.addInitScript((fake) => {
     const w = window as unknown as Record<string, unknown>;
     if (!fake) {
@@ -141,18 +142,26 @@ async function open(page: Page, picker = false) {
       },
     });
   }, picker);
-  await page.goto(`/?bridge=${encodeURIComponent(process.env.FERRITE_E2E_BRIDGE!)}#install`);
-  await expect(page.getByRole("heading", { name: "Install Ferrite", level: 1 })).toBeVisible();
-  await page.getByRole("button", { name: "Bridge" }).click();
+  if (at === "install") {
+    await page.goto(`/?bridge=${encodeURIComponent(process.env.FERRITE_E2E_BRIDGE!)}#install`);
+    await expect(wizard(page).getByRole("heading", { name: "Install Ferrite" })).toBeVisible();
+    await wizard(page).getByRole("button", { name: "Bridge" }).click();
+  } else {
+    await page.goto(`/?bridge=${encodeURIComponent(process.env.FERRITE_E2E_BRIDGE!)}#/restore`);
+    await page.getByRole("button", { name: "Look around without a radio" }).click();
+    await card(page, "Back to stock").getByRole("button", { name: "Bridge" }).click();
+  }
   await expect(page.locator('[data-k="port"]')).toContainText("Bridge");
 }
 
 const card = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
-const state = (page: Page, name: string) => card(page, name).locator("[data-state]").first();
+const wizard = (page: Page) => page.getByRole("dialog", { name: "Install Ferrite" });
+/** The wizard's step on screen (Connect, Back up, SSB, Install, Done). */
+const step = (page: Page) => wizard(page).locator('[aria-current="step"]');
 
 async function backUp(page: Page) {
-  await card(page, "Back up").getByRole("button", { name: "Back up the radio" }).click();
-  await expect(card(page, "Back up").getByRole("button", { name: "Save backup…" })).toBeVisible({ timeout: 90_000 });
+  await wizard(page).getByRole("button", { name: "Back up the radio" }).click();
+  await expect(wizard(page).getByRole("button", { name: "Save the backup…" })).toBeVisible({ timeout: 90_000 });
 }
 
 test("install: back up, save, SSB from the stock file, install with the patch", async ({ page }, info) => {
@@ -162,12 +171,12 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   setMode({ flash: flashPath, corrupt_every: 37, cut_every: 53 });
   await serveRelease(page);
   await open(page);
-  await expect(page.locator('[data-k="release"]')).toHaveText("Ferrite v9.8.7");
-  await expect(state(page, "Install Ferrite")).toHaveAttribute("data-state", "locked");
+  await expect(page.locator('[data-k="release"]')).toContainText("Ferrite v9.8.7"); // the Install tab's Advanced
+  await expect(step(page)).toHaveText("Back up");
   await shot(page, info, "70-install-start");
 
   await backUp(page);
-  const b = card(page, "Back up");
+  const b = wizard(page);
   await expect(b.locator('[data-k="uid"]')).not.toHaveText("not reported");
   await expect(b.locator('[data-k="verified"]')).toContainText("matches the radio's");
   // The Rust reader's fdumpz: every kind of chunk crossed (erased, DEFLATE inflated by the browser, raw).
@@ -177,30 +186,31 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   expect(dump.kinds["4"]).toBeGreaterThan(0);
   expect(dump.kinds["0"]).toBeGreaterThan(0);
   // Nothing else until the file is saved (BACKUP-2).
-  await expect(card(page, "Install Ferrite").getByRole("button", { name: "Install Ferrite" })).toHaveCount(0);
+  await expect(step(page)).toHaveText("Back up");
+  await expect(b.getByRole("button", { name: "Install Ferrite" })).toHaveCount(0);
   await shot(page, info, "71-install-backup");
 
-  const [dl] = await Promise.all([page.waitForEvent("download"), b.getByRole("button", { name: "Save backup…" }).click()]);
+  const [dl] = await Promise.all([page.waitForEvent("download"), b.getByRole("button", { name: "Save the backup…" }).click()]);
   expect(dl.suggestedFilename()).toMatch(/^rt950pro-backup-[0-9A-Z]{20}-\d{8}\.bin$/);
   const saved = readFileSync(await dl.path());
   expect(saved.length).toBe(2 << 20);
   expect(sha(saved)).toBe(sha(flash));
   await b.getByRole("button", { name: "I have saved it" }).click();
-  await expect(b.locator('[data-k="saved"]')).toContainText("Saved");
-  await expect(state(page, "Back up")).toHaveAttribute("data-state", "done");
+  await expect(b.locator('[data-k="saved"]')).toContainText("saved");
+  await expect(step(page)).toHaveText("SSB");
 
   await page.getByLabel("Stock firmware file").setInputFiles({ name: "RT_950Pro_test.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
   await expect(page.locator('[data-k="ssb"]')).toContainText("1200 records");
   await expect(page.locator('[data-k="ssb"]')).toContainText("not one Ferrite knows");
+  await b.getByRole("button", { name: "Continue" }).click();
 
-  const ins = card(page, "Install Ferrite");
-  await expect(ins).toContainText("with your SSB patch");
-  await ins.getByRole("button", { name: "Install Ferrite" }).click();
+  await expect(step(page)).toHaveText("Install");
+  await expect(b).toContainText("with your SSB patch");
+  await expect(b.locator('[data-k="release"]')).toHaveText("Ferrite v9.8.7");
+  await b.getByRole("button", { name: "Install Ferrite" }).click();
   await expect(page.getByRole("region", { name: "Installed" })).toContainText("The radio runs Ferrite v", { timeout: 60_000 });
   // Done updating: the cable is Console's usual connection again, not held by Install (Alex, Oct 22).
-  await expect(card(page, "Connect")).toContainText("Connected to Ferrite as usual", { timeout: 20_000 });
-  // Back to stock sits apart, folded away, after a finished install.
-  await expect(card(page, "Back to stock").getByRole("button", { name: "Back to stock", exact: true })).toBeHidden();
+  await expect(page.getByRole("region", { name: "Installed" })).toContainText("connected to it as usual", { timeout: 20_000 });
   await shot(page, info, "72-install-done");
 
   const rs = results();
@@ -221,14 +231,14 @@ test("install: Chrome's save dialog saves the backup once and reads it back", as
   await open(page, true);
   await backUp(page);
   expect(dumpResult().z).toBe(false);
-  const b = card(page, "Back up");
+  const b = wizard(page);
   let downloads = 0;
   page.on("download", () => downloads++);
-  await b.getByRole("button", { name: "Save backup…" }).click();
-  await expect(b.locator('[data-k="saved"]')).toContainText(/Saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}\.bin/);
+  await b.getByRole("button", { name: "Save the backup…" }).click();
+  await expect(b.locator('[data-k="saved"]')).toContainText(/saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}\.bin/);
   expect(await page.evaluate(() => (window as unknown as { __writes: number }).__writes)).toBe(1);
   expect(downloads).toBe(0);
-  await expect(state(page, "Back up")).toHaveAttribute("data-state", "done");
+  await expect(step(page)).toHaveText("SSB");
 });
 
 test("install: a pending phone update is refused after the backup; a bad checksum isn't used", async ({ page }) => {
@@ -237,20 +247,22 @@ test("install: a pending phone update is refused after the backup; a bad checksu
   setMode({ flash: flashPath, no_fdumpz: true }); // a reader that answers `?` to fdumpz: plain fdump instead
   await serveRelease(page, true);
   await open(page);
-  await expect(card(page, "Install Ferrite")).toContainText("doesn't match its checksum");
+  const w = wizard(page);
+  await expect(page.getByText("doesn't match its checksum").first()).toBeAttached();
   await backUp(page);
-  await expect(card(page, "Back up")).toContainText("A stock phone or Bluetooth update is waiting");
+  await expect(w).toContainText("A stock phone or Bluetooth update is waiting");
   expect(dumpResult().z).toBe(false);
-  const [dl] = await Promise.all([page.waitForEvent("download"), card(page, "Back up").getByRole("button", { name: "Save backup…" }).click()]);
+  const [dl] = await Promise.all([page.waitForEvent("download"), w.getByRole("button", { name: "Save the backup…" }).click()]);
   await dl.path();
   // Once: the button is gone, only "Download again" downloads again (a second file was finding 2 of Oct 22).
-  await expect(card(page, "Back up").getByRole("button", { name: "Save backup…" })).toHaveCount(0);
-  await expect(card(page, "Back up").getByRole("button", { name: "Download again" })).toBeVisible();
+  await expect(w.getByRole("button", { name: "Save the backup…" })).toHaveCount(0);
+  await expect(w.getByRole("button", { name: "Download again" })).toBeVisible();
   // Proving the save by picking the file again works too.
   await page.getByLabel("Saved backup").setInputFiles({ name: "saved.bin", mimeType: "application/octet-stream", buffer: chip(true) });
-  await expect(card(page, "Back up").locator('[data-k="saved"]')).toContainText("saved.bin");
-  await expect(page.locator('[data-k="install-block"]')).toContainText("update is waiting");
-  await expect(card(page, "Install Ferrite").getByRole("button", { name: "Install Ferrite" })).toBeDisabled();
+  await expect(w.locator('[data-k="saved"]')).toContainText("saved.bin");
+  await w.getByRole("button", { name: "Skip" }).click();
+  await expect(w.locator('[data-k="install-block"]')).toContainText("update is waiting");
+  await expect(w.getByRole("button", { name: "Install Ferrite" })).toBeDisabled();
   expect(results().length).toBe(1); // the reader only
 });
 
@@ -260,7 +272,7 @@ test("back to stock: the backup into Ferrite's ranges, never calibration or the 
   writeFileSync(flashPath, flash);
   setMode({ flash: flashPath });
   await serveRelease(page);
-  await open(page);
+  await open(page, false, "restore");
   const back = card(page, "Back to stock");
   await expect(back.locator('[data-k="restore-block"]')).toHaveText("Drop in your backup.");
   await page.getByLabel("Backup file").setInputFiles({ name: "backup.bin", mimeType: "application/octet-stream", buffer: flash });
@@ -295,7 +307,7 @@ test("back to stock: another radio's backup is refused though its calibration is
   writeFileSync(flashPath, chip());
   setMode({ flash: flashPath });
   await serveRelease(page);
-  await open(page);
+  await open(page, false, "restore");
   // Byte-identical calibration (as on Alex's two radios, Oct 22): only the ID tells them apart (decision 263).
   await page.getByLabel("Backup file").setInputFiles({ name: named("248H2 49248 H24CS K6CSG"), mimeType: "application/octet-stream", buffer: chip() });
   await expect(card(page, "Back to stock").locator('[data-k="restore-id"]')).toContainText("248H2 49248 H24CS K6CSG");
@@ -312,7 +324,7 @@ test("back to stock: a damaged backup (calibration differs) is refused before an
   writeFileSync(flashPath, chip());
   setMode({ flash: flashPath });
   await serveRelease(page);
-  await open(page);
+  await open(page, false, "restore");
   const other = chip();
   other.fill(0x11, 0xf000, 0x10000);
   await page.getByLabel("Backup file").setInputFiles({ name: named(HERE), mimeType: "application/octet-stream", buffer: other });
