@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The desktop app for Linux and Windows, built in Docker on the Xeon (tools/desktop/Dockerfile): copies the last
-# commit of this repo and of ../ferrite there (what's committed, not the working tree), builds, and brings the
+# commit of this repo and of ../ferrite there (what's committed, not the working tree) plus the bundled firmware
+# (scripts/bundle-firmware.mjs, from ../ferrite/target), builds, and brings the
 # bundles back to target/desktop/. `mac` builds the macOS app (.app and .dmg) here instead (macOS only; unsigned:
 # fine on the Mac that built it). Usage: tools/desktop-build.sh [linux|windows|mac|all] [--host USER@HOST]
 # (all = linux and windows; mac separately)
@@ -34,6 +35,10 @@ for i in $(seq 12); do $ssh -o ConnectTimeout=5 "$host" true 2>/dev/null && brea
 $ssh "$host" "mkdir -p $dir && rm -rf $dir/ferrite $dir/ferrite-console/src $dir/ferrite-console/src-tauri/src && mkdir -p $dir/ferrite $dir/ferrite-console"
 git -C "$here/../ferrite" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite"
 git -C "$here" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite-console"
+# The bundled firmware (the tx release and the reader: scripts/bundle-firmware.mjs) is generated, never committed,
+# so it goes along from here.
+node "$here/scripts/bundle-firmware.mjs" >/dev/null
+tar -C "$here" -c public/firmware | $ssh "$host" "tar -x -C $dir/ferrite-console"
 $ssh "$host" bash -s -- "$dir" "$what" <<'REMOTE'
 set -euo pipefail
 dir=$HOME/$1 what=$2
