@@ -26,3 +26,11 @@ serde_json = "1"
 opt-level = "s"
 lto = true
 codegen-units = 1
+
+# The browser's core (scripts/build-wasm.mjs, which also drops the function names): smallest code, 2.6 MB to 1.5 MB
+# (749 to 608 KB gzipped). "z" runs slower but far inside what the link needs (measured: a UI round trip 14 to 16 us,
+# a readback parse 7 to 11 us, a 1,000-channel write plan 8.5 to 11 ms). Panics already abort on wasm32.
+# wasm-opt -Oz was tried: 9% fewer raw bytes, 3% more gzipped.
+[profile.wasm]
+inherits = "release"
+opt-level = "z"

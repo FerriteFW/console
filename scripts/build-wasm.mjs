@@ -17,8 +17,12 @@ if (have !== want) {
   process.exit(1);
 }
 const run = (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" });
-run("cargo", ["build", "-p", "ferrite-console-wasm", "--target", "wasm32-unknown-unknown", "--release"]);
+// The `wasm` profile (Cargo.toml): release, cut for size.
+run("cargo", ["build", "-p", "ferrite-console-wasm", "--target", "wasm32-unknown-unknown", "--profile", "wasm"]);
 run("wasm-bindgen", [
-  "target/wasm32-unknown-unknown/release/ferrite_console_wasm.wasm",
+  "target/wasm32-unknown-unknown/wasm/ferrite_console_wasm.wasm",
   "--target", "web", "--out-dir", "src/core-wasm", "--out-name", "core",
+  // A third of the file, only for stack traces. Stripped here, not by cargo (strip = "symbols"), which would drop
+  // target_features too and turn wasm-bindgen's returns back to the slower, larger glue without multivalue.
+  "--remove-name-section", "--remove-producers-section",
 ]);
