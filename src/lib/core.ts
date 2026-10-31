@@ -96,7 +96,7 @@ export type Session = wasm.Session;
 export const DemoRadio = wasm.DemoRadio;
 export type DemoRadio = wasm.DemoRadio;
 
-/** LINK-13.4: one receive-audio block's samples (8 kHz, 16-bit); empty for a keep-alive. */
+/** LINK-13.4: one receive-audio block's samples (12 kHz µ-law decoded, 16-bit); empty for a keep-alive. */
 export const audioDecode = (p: Uint8Array): Int16Array => wasm.audio_decode(p);
 export const statusText = (s: number, rest: Uint8Array = new Uint8Array()) => wasm.status_text(s, rest);
 export const helloPayload = (name: string) => wasm.hello_payload(name);

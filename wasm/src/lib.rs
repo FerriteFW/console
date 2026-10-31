@@ -94,8 +94,8 @@ impl Default for DemoRadio {
     }
 }
 
-/// LINK-13.4: one `AUDIO_DATA` block's samples (8 kHz, 16-bit), decoded by ferrite's own coder from the block's
-/// own state; empty for a keep-alive or a malformed one.
+/// LINK-13.4: one `AUDIO_DATA` block's samples (12 kHz, 16-bit), decoded by ferrite's own coder (G.711 µ-law,
+/// decision 330); empty for a keep-alive or a malformed one.
 #[wasm_bindgen]
 pub fn audio_decode(p: &[u8]) -> Vec<i16> {
     ferrite_console_core::audio::decode(p)

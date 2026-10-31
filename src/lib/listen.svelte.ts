@@ -1,6 +1,6 @@
 // Listen (LINK-13.4, LINK-13.5): the radio's receive audio over the cable, played in the browser. Off at every
-// connect and never remembered: it starts only when asked here. The radio's 8 kHz blocks (decoded by the core,
-// ferrite's own coder) go to an AudioWorklet that keeps a jitter buffer and steps them up to the device's rate;
+// connect and never remembered: it starts only when asked here. The radio's 12 kHz µ-law blocks (decoded by the
+// core, ferrite's own coder) go to an AudioWorklet that keeps a jitter buffer and steps them up to the device's rate;
 // a gap (nothing heard, a lost block) plays as silence.
 import { audioDecode, P } from "./core";
 import { CAP_AUDIO, type Link } from "./link";
@@ -124,7 +124,7 @@ class Listen {
   }
 
   private block(p: Uint8Array) {
-    if (p.length < 7) {
+    if (p.length <= 4) {
       if (performance.now() - this.quietAt > 500) this.slot = ""; // a keep-alive: nothing heard
       return;
     }
