@@ -73,9 +73,9 @@
   <NearMap {each} {onadded} />
 {:else}
   <div class="lists" class:both={nearby.multi}>
+    {#if nearby.showRpt}<RepeatersTab />{/if}
     {#if nearby.showLic}<SitesTab />{/if}
     {#if nearby.showAir}<AirportsTab />{/if}
-    {#if nearby.showRpt}<RepeatersTab />{/if}
   </div>
   <AddBar {each} {onadded} />
   {#if nearby.showLic}<DataFooter data={sites} here={siteHere} inline={nearby.multi} />{/if}
