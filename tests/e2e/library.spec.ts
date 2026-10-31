@@ -205,14 +205,9 @@ test.describe.serial("near a place", () => {
     // Both sources' attribution lines.
     await expect(lib()).toContainText("Open Government Licence – Canada");
     await expect(lib()).toContainText("Federal Communications Commission");
-    // Digital only is hidden until asked for.
+    // Digital only never shows (Ferrite has no digital modes): no row, no switch for it.
     await expect(list).not.toContainText("ecomm");
-    const dig = lib().getByRole("checkbox", { name: /Show digital only \(1\)/ });
-    await dig.check();
-    await expect(list).toContainText("ecomm");
-    await expect(list).toContainText("Digital");
-    await dig.uncheck();
-    await expect(list).not.toContainText("ecomm");
+    await expect(lib().getByRole("checkbox", { name: /digital/i })).toHaveCount(0);
 
     // BC Ferries (3 frequencies, NFM, one a mobile's) and the fire department (FM).
     await filter.fill("ferries");

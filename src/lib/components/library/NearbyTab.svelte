@@ -42,7 +42,7 @@
   const counts = $derived.by(() => {
     const c: Record<string, number> = {};
     const seen = new Set<string>();
-    for (const e of nearby.siteEntries) {
+    for (const e of nearby.siteAll) {
       const id = `${e.src}|${e.name}|${e.pos}`;
       if (seen.has(id)) continue;
       seen.add(id);
@@ -52,7 +52,7 @@
   });
   const on = (src: string) => nearby.layers[src] !== false;
   const each = $derived(nearby.show === "lic" ? "One zone per name group" : nearby.show === "air" ? "One zone per airport" : "One zone per group or airport");
-  const siteHere = $derived(new Set(nearby.siteEntries.map((e) => e.src)));
+  const siteHere = $derived(new Set(nearby.siteAll.map((e) => e.src)));
   const airHere = $derived(new Set(nearby.airports.length ? ["airports"] : []));
 </script>
 

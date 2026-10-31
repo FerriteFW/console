@@ -3,14 +3,13 @@
   // switched on: NearbyTab) near the place on one Leaflet map (bundled; OpenStreetMap tiles, attributed). It fills
   // the big dialog; Picked is a slim column on its right (below it on a narrow window). One marker per site (a name at a position) with its frequency count;
   // nearby markers cluster into a count until zoomed in (cluster.ts). A marker opens a small popup with a box per
-  // frequency. Digital-only sites hide unless asked for. Your pin is
+  // frequency. Your pin is
   // the place; the circle is the search: drag its edge or use the slider and the results load again (debounced).
   // Sites outside the circle fade until they do. The Picked column lists the picks (shared with the lists:
   // nearby.svelte.ts) with the zone target and Add.
   import { untrack } from "svelte";
   import { library } from "../../library.svelte";
   import { airportSites, sites, sourceName } from "../../sites.svelte";
-  import { MODE_DIGITAL } from "../../sitedata";
   import { MOBILE, mhz, modeLabel, nearby } from "../../nearby.svelte";
   import { gridCluster } from "../../cluster";
   import { ATTRIBUTION, loadLeaflet, TILES, type LatLng, type LCircle, type Leaflet, type LGroup, type LMap, type LMarker } from "../../leaflet";
@@ -19,7 +18,7 @@
 
   let { each, onadded }: { each: string; onadded: () => void } = $props();
 
-  type Row = { key: string; mhz: string; label: string; mobile: boolean; digital: boolean };
+  type Row = { key: string; mhz: string; label: string; mobile: boolean };
   type Site = { id: string; kind: "lic" | "air"; src: string; name: string; pos: LatLng; km: number; rows: Row[] };
 
   const on = (src: string) => nearby.layers[src] !== false;
@@ -32,7 +31,7 @@
       const id = `s|${e.name}|${e.pos[0]}|${e.pos[1]}`;
       let s = by.get(id);
       if (!s) by.set(id, (s = { id, kind: "lic", src: e.src, name: e.name, pos: e.pos, km: e.km, rows: [] }));
-      s.rows.push({ key: e.key, mhz: mhz(e.f), label: modeLabel(e.m), mobile: e.mobile, digital: e.m === MODE_DIGITAL });
+      s.rows.push({ key: e.key, mhz: mhz(e.f), label: modeLabel(e.m), mobile: e.mobile });
       s.km = Math.min(s.km, e.km);
     }
     const out = [...by.values()];
@@ -46,15 +45,13 @@
           name: a.c,
           pos: a.l,
           km: a.km,
-          rows: a.freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false, digital: false })),
+          rows: a.freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false })),
         });
       }
     }
     return out;
   });
-  const digitalOnly = (s: Site) => s.rows.every((r) => r.digital);
-  /** What the map shows: digital-only sites hidden unless asked for. */
-  const shownSites = $derived(nearby.digital ? mapSites : mapSites.filter((s) => !digitalOnly(s)));
+  const shownSites = $derived(mapSites);
   const byId = $derived(new Map(shownSites.map((s) => [s.id, s])));
   const picked = (s: Site) => s.rows.some((r) => nearby.has(r.key));
 
@@ -198,7 +195,7 @@
     for (const grp of groups) {
       if (grp.length === 1) {
         const s = grp[0];
-        const kind = picked(s) ? "pick" : s.kind === "air" ? "air" : digitalOnly(s) ? "dig" : "lic";
+        const kind = picked(s) ? "pick" : s.kind === "air" ? "air" : "lic";
         const n = s.rows.length;
         const mk = l.marker(s.pos, {
           icon: l.divIcon({ className: "nm-icon", html: `<span class="nm-pin ${kind}${s.km > km ? " out" : ""}">${n > 1 ? n : ""}</span>`, iconSize: [24, 24], iconAnchor: [12, 12] }),
@@ -263,9 +260,8 @@
   const sitesDown = $derived(nearby.showLic && !!nearby.siteResult && !nearby.siteResult.sources.length && siteFailed.length > 0 && siteFailed.length >= sites.sources.length);
   const airDown = $derived(nearby.showAir && !!nearby.airportResult && !nearby.airportResult.sources.length && airFailed.length > 0);
   const loading = $derived(!!library.place && ((nearby.showLic && !nearby.siteResult) || (nearby.showAir && !nearby.airportResult)));
-  const siteHere = $derived(new Set(nearby.siteEntries.map((e) => e.src)));
+  const siteHere = $derived(new Set(nearby.siteAll.map((e) => e.src)));
   const airHere = $derived(new Set(nearby.airports.length ? ["airports"] : []));
-  const nHiddenDigital = $derived(mapSites.filter(digitalOnly).length);
 </script>
 
 <div class="nm">
@@ -283,9 +279,6 @@
       {:else}
         {shownSites.length} {shownSites.length === 1 ? "site" : "sites"} on the map within {library.radius} km.
       {/if}
-      {#if nearby.showLic && nearby.nDigital}
-        <label class="dig"><input type="checkbox" bind:checked={nearby.digital} /> Show digital only ({nHiddenDigital})</label>
-      {/if}
       {#if sitesDown}<span class="bad"><b>Licensed sites aren't available right now.</b> {siteFailed[0].error}. <button class="link" onclick={() => sites.retry()}>Try again</button></span>{/if}
       {#if airDown}<span class="bad"><b>Airports aren't available right now.</b> {airFailed[0].error}. <button class="link" onclick={() => airportSites.retry()}>Try again</button></span>{/if}
       {#if nearby.showLic && !sitesDown && siteFailed.length}<span class="bad">{siteFailed.map((f) => `${sourceName(f.src, sites.source(f.src)?.title)}: ${f.error}`).join(" · ")}</span>{/if}
@@ -297,7 +290,7 @@
         <span><i class="dot you"></i>The place</span>
         {#if nearby.showLic}<span><i class="dot lic"></i>Licensed</span>{/if}
         {#if nearby.showAir}<span><i class="dot air"></i>Airport</span>{/if}
-        {#if nearby.showLic && nearby.digital}<span><i class="dot dig"></i>Digital only</span>{/if}<span><i class="dot pick"></i>Picked</span>
+        <span><i class="dot pick"></i>Picked</span>
       </div>
       {#if popSites.length && popAt}
         <div class="pop" bind:this={popEl} style:left="{popAt.left}px" style:top="{popAt.top}px" role="dialog" aria-label="Frequencies at {popSites[0].name}">
@@ -308,7 +301,7 @@
               <header>
                 <b>{s.name}</b>
                 <span>
-                  {s.kind === "air" ? "Airport" : `Licensed site · ${sourceName(s.src)}`}{digitalOnly(s) ? " · digital only" : ""} · {s.km < 10 ? s.km.toFixed(1) : Math.round(s.km)} km
+                  {s.kind === "air" ? "Airport" : `Licensed site · ${sourceName(s.src)}`} · {s.km < 10 ? s.km.toFixed(1) : Math.round(s.km)} km
                   {#if s.rows.length > 1}· <button class="link" onclick={() => nearby.set(s.rows.map((q) => q.key), !all)}>{all ? "None" : "All"}</button>{/if}
                 </span>
               </header>
@@ -318,7 +311,7 @@
                     <label>
                       <input type="checkbox" checked={nearby.has(q.key)} onchange={() => nearby.toggle(q.key)} aria-label="{s.name} {q.mhz} {q.label}" />
                       <span class="mono">{q.mhz}</span>
-                      <span class="tag" class:dim={q.digital}>{q.label}</span>
+                      <span class="tag">{q.label}</span>
                       {#if q.mobile}<span class="tag mob" title={MOBILE}>mobile</span>{/if}
                     </label>
                   </li>
@@ -379,19 +372,11 @@
   .dot.air {
     background: var(--map-air);
   }
-  .dot.dig {
-    background: var(--map-dig);
-  }
   .dot.pick {
     background: var(--map-pick);
   }
   .dot.you {
     background: var(--blue);
-  }
-  .dig {
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
   }
   .radius {
     display: inline-flex;
@@ -532,9 +517,6 @@
     border-radius: 4px;
     padding: 0 4px;
   }
-  .tag.dim {
-    opacity: 0.7;
-  }
   .tag.mob {
     border-style: dashed;
   }
@@ -640,9 +622,6 @@
   }
   .map :global(.nm-pin.air) {
     background: var(--map-air);
-  }
-  .map :global(.nm-pin.dig) {
-    background: var(--map-dig);
   }
   .map :global(.nm-pin.pick) {
     background: var(--map-pick);

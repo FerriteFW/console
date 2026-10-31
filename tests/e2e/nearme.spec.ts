@@ -64,7 +64,7 @@ test("map: the default, big; Licensed | Airports | Both; chips; picks shared wit
   await expect(marker(d, "point roberts").first()).toBeVisible({ timeout: 20_000 });
   await expect(marker(d, "richmond works").first()).toBeVisible();
   await expect(marker(d, "CYVR")).toHaveCount(0);
-  // Digital only hidden until asked for.
+  // Digital only never shows.
   await expect(marker(d, "ecomm")).toHaveCount(0);
   await shot(p, info, "42-nearme-map");
 

@@ -2,12 +2,11 @@
   // Licensed sites near a place, as a list: Canada (ISED's TAFL) and the US (the FCC's ULS), tiled from
   // data.ferritefw.dev (sites.svelte.ts). Licensee names grouped by their first words, one entry per name and
   // frequency. RX only by default: these are other people's licensed channels. Each row's mode comes from the data
-  // (NFM or FM; digital only is hidden unless asked for; unknown takes the "unknown mode" choice). The rows, the
+  // (NFM or FM; digital only never shows; unknown takes the "unknown mode" choice). The rows, the
   // picks are nearby.svelte.ts's, shared with the map and the Airports list; Add and the data footers are Near me's
   // (NearbyTab). Canada and the US switched off there leave the list too.
   import { library } from "../../library.svelte";
   import { sites, sourceName } from "../../sites.svelte";
-  import { MODE_DIGITAL } from "../../sitedata";
   import { MOBILE, mhz, modeLabel, nearby, type SiteEntry } from "../../nearby.svelte";
 
   const result = $derived(nearby.siteResult);
@@ -15,7 +14,6 @@
   let open = $state<Set<string>>(new Set());
 
   const entries = $derived(nearby.siteShown);
-  const nDigital = $derived(nearby.nDigital);
   /** The sources with rows here (a place near the border has both). */
   const here = $derived(new Set(entries.map((e) => e.src)));
   const shown = $derived.by(() => {
@@ -62,9 +60,6 @@
   <div class="head">
     <input class="find" type="search" placeholder="Filter: name or MHz" bind:value={filter} aria-label="Filter licensed sites" />
     <span>{entries.length} near · {nPicked} picked</span>
-    <label class="dig">
-      <input type="checkbox" bind:checked={nearby.digital} title="Sites licensed for digital or data only (no analog voice)" /> Show digital only ({nDigital})
-    </label>
     <span class="spacer"></span>
     <button class="btn quiet sm" onclick={() => nearby.set(shown.flatMap(([, es]) => es.map((e) => e.key)), true)}>All shown</button>
     <button class="btn quiet sm" onclick={() => nearby.set(entries.map((e) => e.key), false)}>None</button>
@@ -84,7 +79,7 @@
           {:else}
             {@const e = es[0]}
             <span class="one">
-              <b>{e.name}</b> <span class="mhz">{mhz(e.f)}</span> <span class="tag" class:dim={e.m === MODE_DIGITAL}>{modeLabel(e.m)}</span>
+              <b>{e.name}</b> <span class="mhz">{mhz(e.f)}</span> <span class="tag">{modeLabel(e.m)}</span>
               {#if e.mobile}<span class="tag mob" title={MOBILE}>mobile</span>{/if}
               {#if here.size > 1}<span class="sub">{sourceName(e.src)}</span>{/if}
               <span class="sub">{e.km.toFixed(1)} km</span>
@@ -96,7 +91,7 @@
             <label class="en">
               <input type="checkbox" checked={nearby.has(e.key)} onchange={() => nearby.toggle(e.key)} />
               <span>{e.name}</span><span class="mhz">{mhz(e.f)}</span>
-              <span><span class="tag" class:dim={e.m === MODE_DIGITAL}>{modeLabel(e.m)}</span>{#if e.mobile}&nbsp;<span class="tag mob" title={MOBILE}>mobile</span>{/if}</span>
+              <span><span class="tag">{modeLabel(e.m)}</span>{#if e.mobile}&nbsp;<span class="tag mob" title={MOBILE}>mobile</span>{/if}</span>
               <span class="sub">{here.size > 1 ? `${sourceName(e.src)} · ` : ""}{e.km.toFixed(1)} km</span>
             </label>
           {/each}
@@ -104,7 +99,7 @@
       </div>
     {:else}
       <p class="sub pad">
-        Nothing within {library.radius} km{filter ? " matches" : ""}.{#if !nearby.digital && nDigital}&nbsp;{nDigital} digital-only {nDigital === 1 ? "site is" : "sites are"} hidden.{/if}
+        Nothing within {library.radius} km{filter ? " matches" : ""}.
       </p>
     {/each}
   </div>
@@ -135,11 +130,6 @@
   }
   .find {
     width: 200px;
-  }
-  .dig {
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
   }
   .sm {
     padding: 3px 10px;
@@ -193,9 +183,6 @@
     border: 1px solid var(--line);
     border-radius: 4px;
     padding: 0 4px;
-  }
-  .tag.dim {
-    opacity: 0.7;
   }
   .tag.mob {
     border-style: dashed;

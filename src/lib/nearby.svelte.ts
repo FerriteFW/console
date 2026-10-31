@@ -3,7 +3,7 @@
 // the US are sub-filters of Licensed. Add takes only the picks shown (its count is what the user can see); picks of
 // a hidden kind stay picked for when it shows again. Picks are per frequency: a licensed entry (`s|name|half kHz`, its
 // nearest site) or an airport's frequency (`a|ICAO|lat|lon|kHz`). Add turns every pick into channels, each layer
-// shaped its own way: licensed sites NFM or FM from the data (digital and unknown as the "unknown mode" choice), RX
+// shaped its own way: licensed sites NFM or FM from the data (unknown as the "unknown mode" choice; digital only never shows: Ferrite has no digital modes), RX
 // only by choice, merged per zone and frequency; airports AM, RX only always, named "CYVR TWR" (airportName); both
 // with their positions (LINK-53) and the zone target.
 import { library, type FixedSet } from "./library.svelte";
@@ -19,7 +19,7 @@ export type Airport = { key: string; c: string; l: [number, number]; km: number;
 
 /** Half kHz to MHz, 4 decimals (a trailing 0 dropped). */
 export const mhz = (f: number) => (f / 2000).toFixed(4).replace(/0$/, "");
-export const modeLabel = (m: number) => (m === MODE_NFM ? "NFM" : m === MODE_FM ? "FM" : m === MODE_DIGITAL ? "Digital" : "Mode ?");
+export const modeLabel = (m: number) => (m === MODE_NFM ? "NFM" : m === MODE_FM ? "FM" : "Mode ?");
 export const MOBILE = "A mobile's frequency: often a repeater's input, or the centre of a mobile area";
 
 /** A data set's result for the library's place and radius (not an earlier place's while the new one loads). */
@@ -59,9 +59,8 @@ class Nearby {
   showAir = $derived(this.#show !== "lic");
 
   picks = $state<Set<string>>(new Set());
-  /** Licensed sites: RX only (other licensees' channels), digital only shown, the mode for an unknown one. */
+  /** Licensed sites: RX only (other licensees' channels), the mode for an unknown one. */
   rxOnly = $state(true);
-  digital = $state(false);
   mode = $state<"NFM" | "FM">("NFM");
   /** Airports: also the common airband frequencies (the fixed Airband set). */
   common = $state(false);
@@ -72,7 +71,7 @@ class Nearby {
   siteResult = $derived(current(sites));
   airportResult = $derived(current(airportSites));
 
-  /** Licensed entries near the place, one per name and frequency (the nearest), grouped; digital ones too. */
+  /** Licensed entries near the place, one per name and frequency (the nearest), grouped. Digital only is left out: Ferrite has no digital modes. */
   siteAll = $derived.by((): SiteEntry[] => {
     const d = this.siteResult;
     const p = library.place;
@@ -81,6 +80,7 @@ class Nearby {
     const out: Omit<SiteEntry, "group">[] = [];
     for (const { i, km } of near(p, library.radius, d.coords, 5000)) {
       const r = d.sites[i];
+      if (r.m === MODE_DIGITAL) continue;
       const key = `s|${r.name}|${r.f}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -89,11 +89,8 @@ class Nearby {
     const groups = taflGroups(out.map((e) => e.name));
     return out.map((e, k) => ({ ...e, group: groups[k] }));
   });
-  nDigital = $derived(this.siteAll.filter((e) => e.m === MODE_DIGITAL).length);
-  /** What shows: digital only hidden unless asked for. */
-  siteEntries = $derived(this.digital ? this.siteAll : this.siteAll.filter((e) => e.m !== MODE_DIGITAL));
   /** The entries the list shows: a source switched off goes too. */
-  siteShown = $derived(this.siteEntries.filter((e) => this.layers[e.src] !== false));
+  siteShown = $derived(this.siteAll.filter((e) => this.layers[e.src] !== false));
 
   /** Airports near the place (rows are one per frequency: here by name and position, frequencies in order). */
   airports = $derived.by((): Airport[] => {
@@ -127,7 +124,7 @@ class Nearby {
     this.showAir ? this.airports.map((a) => ({ a, freqs: a.freqs.filter((q) => this.picks.has(q.key)) })).filter((x) => x.freqs.length) : [],
   );
   nCommon = $derived(this.showAir && this.common ? (this.commonSet?.frequencies.length ?? 0) : 0);
-  /** Picks near the place that Add leaves out because their kind, source or digital sites are hidden. */
+  /** Picks near the place that Add leaves out because their kind or source is hidden. */
   nHidden = $derived.by(() => {
     const sites = this.siteAll.filter((e) => this.picks.has(e.key)).length - this.pickedSites.length;
     let air = 0;
