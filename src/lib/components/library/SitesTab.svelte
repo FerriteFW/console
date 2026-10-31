@@ -9,7 +9,7 @@
   // leave the list too.
   import { library } from "../../library.svelte";
   import { sites, sourceName } from "../../sites.svelte";
-  import { CATEGORIES, CAT_PUBLIC_SAFETY } from "../../sitedata";
+  import { CATEGORIES, CAT_BUSINESS, CAT_PUBLIC_SAFETY } from "../../sitedata";
   import { MOBILE, mhz, modeLabel, nearby, type SiteEntry } from "../../nearby.svelte";
 
   const result = $derived(nearby.siteResult);
@@ -17,7 +17,8 @@
   /** Categories switched off (all on to start). */
   let off = $state<Set<number>>(new Set());
   /** Category codes in the order they show: public safety first, then the rest by code. */
-  const ORDER = [CAT_PUBLIC_SAFETY, ...CATEGORIES.map((_, k) => k).filter((k) => k !== CAT_PUBLIC_SAFETY)];
+  /** Public safety first, Business (the long tail) last, the rest in code order. */
+  const ORDER = [CAT_PUBLIC_SAFETY, ...CATEGORIES.map((_, k) => k).filter((k) => k !== CAT_PUBLIC_SAFETY && k !== CAT_BUSINESS), CAT_BUSINESS];
 
   type Group = { id: string; name: string; km: number; es: SiteEntry[] };
   const entries = $derived(nearby.siteShown);

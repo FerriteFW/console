@@ -1,8 +1,8 @@
 <script lang="ts">
   // "Add channels": the channel library beside CHIRP import. Fixed sets; Near me: licensed sites and airports near a
-  // place (ported from NeonPlug), on the map or as a list (NearbyTab); repeaters not yet (see the tab). Near me makes
-  // the dialog nearly as big as the window (a desktop app's feel: the map gets the room), in both its views so
-  // switching between them doesn't jump.
+  // place (ported from NeonPlug), on the map or as a list (NearbyTab); repeaters not yet (see the tab). The dialog
+  // is always nearly as big as the window (a desktop app's feel: the map gets the room), so switching tabs never
+  // resizes it.
   // Added channels go into the table as new rows, checked by ferrite's own code; Write then shows them in the diff
   // as usual.
   import { library } from "../../library.svelte";
@@ -27,7 +27,7 @@
 
 {#if library.open}
   <div class="overlay" role="presentation" onclick={(e) => e.target === e.currentTarget && close()}>
-    <div class="dialog card" class:big={library.tab === "near"} role="dialog" aria-modal="true" aria-labelledby="lib-title">
+    <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="lib-title">
       <header>
         <h2 id="lib-title">Add channels</h2>
         <span class="sub">{channels.table.channels.length} in the table · room for {room} more · {channels.table.zones.length} zones</span>
@@ -80,19 +80,12 @@
     padding: 16px;
   }
   .dialog {
-    width: min(1100px, 100%);
-    height: min(760px, calc(100vh - 32px));
+    width: min(96vw, calc(100vw - 32px), 1800px);
+    height: min(92vh, calc(100vh - 32px), 1200px);
     display: flex;
     flex-direction: column;
     gap: 12px;
     padding: 14px 16px;
-  }
-  .dialog.big {
-    width: min(96vw, calc(100vw - 32px), 1800px);
-    height: min(92vh, calc(100vh - 32px), 1200px);
-  }
-  .big .body {
-    grid-template-columns: 190px 1fr;
   }
   header {
     display: flex;
@@ -192,12 +185,10 @@
     font-size: 12px;
   }
   @media (max-width: 760px) {
-    .dialog,
-    .dialog.big {
+    .dialog {
       height: calc(100vh - 32px);
     }
-    .body,
-    .big .body {
+    .body {
       grid-template-columns: 1fr;
       grid-template-rows: auto 1fr;
     }

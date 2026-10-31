@@ -70,6 +70,7 @@ export const MODE_UNKNOWN = 3;
 
 /** Categories (`k`), by code: the licensee's kind. */
 export const CATEGORIES = ["Business", "Public safety", "Transit", "Utilities", "Marine", "Schools", "Government"] as const;
+export const CAT_BUSINESS = 0;
 export const CAT_PUBLIC_SAFETY = 1;
 
 /** One site and frequency (a licensed site's, an airport's). `type`: the frequency's use (airports: "TWR"), or "";

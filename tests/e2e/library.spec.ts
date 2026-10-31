@@ -211,8 +211,8 @@ test.describe.serial("near a place", () => {
 
     // Categories as chips with counts, public safety first; each a heading in the list. All on to start.
     const cats = lib().getByRole("group", { name: "Categories" });
-    await expect(cats.getByRole("button")).toHaveText(["Public safety 1", "Business 2", "Marine 3", "Government 3"]);
-    await expect(list.locator("h4")).toHaveText(["Public safety", "Business", "Marine", "Government"]);
+    await expect(cats.getByRole("button")).toHaveText(["Public safety 1", "Marine 3", "Government 3", "Business 2"]);
+    await expect(list.locator("h4")).toHaveText(["Public safety", "Marine", "Government", "Business"]);
     // Organizations: "city van works" and "van city" are one (City of Van), its two frequencies under one box.
     const van = list.getByRole("button", { name: /city of van\b.*2 frequencies/ });
     await expect(van).toBeVisible();
