@@ -209,10 +209,35 @@ test.describe.serial("near a place", () => {
     await expect(list).not.toContainText("ecomm");
     await expect(lib().getByRole("checkbox", { name: /digital/i })).toHaveCount(0);
 
+    // Categories as chips with counts, public safety first; each a heading in the list. All on to start.
+    const cats = lib().getByRole("group", { name: "Categories" });
+    await expect(cats.getByRole("button")).toHaveText(["Public safety 1", "Business 2", "Marine 3", "Government 3"]);
+    await expect(list.locator("h4")).toHaveText(["Public safety", "Business", "Marine", "Government"]);
+    // Organizations: "city van works" and "van city" are one (City of Van), its two frequencies under one box.
+    const van = list.getByRole("button", { name: /city of van\b.*2 frequencies/ });
+    await expect(van).toBeVisible();
+    await expect(list.getByRole("checkbox", { name: "Group city of van" })).toBeVisible();
+    await van.click();
+    await shot(page, info, "35a-library-sites-categories");
+    await van.click();
+    // One entry per organization and frequency: BC Ferries' 156.80 at two sites is one entry, its nearest's.
+    await list.getByRole("button", { name: /bc ferries.*3 frequencies/ }).click();
+    await expect(list.locator("label.en", { hasText: "156.80" })).toHaveCount(1);
+    await expect(list.locator("label.en", { hasText: "156.80" })).toContainText("2 sites · 0.1 km");
+    await list.getByRole("button", { name: /bc ferries.*3 frequencies/ }).click();
+    // A chip off hides its category; the filter matches a category's name too.
+    await cats.getByRole("button", { name: /^Marine/ }).click();
+    await expect(cats.getByRole("button", { name: /^Marine/ })).toHaveAttribute("aria-pressed", "false");
+    await expect(list).not.toContainText("bc ferries");
+    await cats.getByRole("button", { name: /^Marine/ }).click();
+    await filter.fill("public");
+    await expect(list.locator("h4")).toHaveText(["Public safety"]);
+    await expect(list).toContainText("vancouver fire");
+
     // BC Ferries (3 frequencies, NFM, one a mobile's) and the fire department (FM).
     await filter.fill("ferries");
     await lib().getByRole("button", { name: "All shown" }).click();
-    await list.getByRole("button", { name: /3 entries/ }).click();
+    await list.getByRole("button", { name: /3 frequencies/ }).click();
     await expect(list.locator(".tag.mob")).toHaveCount(1);
     await shot(page, info, "36-library-sites");
     await filter.fill("fire");

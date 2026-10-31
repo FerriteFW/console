@@ -1,8 +1,9 @@
 // Add channels › Near me: the rows the lists show (List) and the map shows (Map), and the one set of picks both
 // views share. What shows is one choice: Licensed, Airports or Both (`show`, remembered in this browser); Canada and
 // the US are sub-filters of Licensed. Add takes only the picks shown (its count is what the user can see); picks of
-// a hidden kind stay picked for when it shows again. Picks are per frequency: a licensed entry (`s|name|half kHz`, its
-// nearest site) or an airport's frequency (`a|ICAO|lat|lon|kHz`). Add turns every pick into channels, each layer
+// a hidden kind stay picked for when it shows again. Picks are per frequency: a licensed entry (one per organization
+// and frequency, `s|category|org|half kHz`, its nearest site's position and mode) or an airport's frequency
+// (`a|ICAO|lat|lon|kHz`). Organizations are the licensees' names grouped by the core (orgGroups) within each category. Add turns every pick into channels, each layer
 // shaped its own way: licensed sites NFM or FM from the data (unknown as the "unknown mode" choice; digital only never shows: Ferrite has no digital modes), RX
 // only by choice, merged per zone and frequency; airports AM, RX only always, named "CYVR TWR" (airportName); both
 // with their positions (LINK-53) and the zone target.
@@ -10,10 +11,13 @@ import { library, type FixedSet } from "./library.svelte";
 import { channels } from "./channels.svelte";
 import { airportSites, sites, Sites, type Near } from "./sites.svelte";
 import { MODE_DIGITAL, MODE_FM, MODE_NFM } from "./sitedata";
-import { airportName, airportType, libraryFixedItems, near, taflGroups, type LibraryItem } from "./core";
+import { airportName, airportType, libraryFixedItems, near, orgGroups, type LibraryItem } from "./core";
 import { zoneName, type Target } from "./components/library/ZoneTarget.svelte";
 
-export type SiteEntry = { key: string; src: string; name: string; f: number; m: number; mobile: boolean; km: number; group: string; pos: [number, number] };
+/** A licensed entry: an organization's frequency, from its nearest site (`name`: that licensee); `sites`: how many share it. */
+export type SiteEntry = { key: string; src: string; name: string; f: number; m: number; mobile: boolean; km: number; group: string; k: number; sites: number; pos: [number, number] };
+/** A licensee's frequency at its nearest site (the map's markers), with the entry it picks (`key`). */
+export type SiteRow = { key: string; src: string; name: string; f: number; m: number; mobile: boolean; km: number; pos: [number, number] };
 export type AirportFreq = { key: string; khz: number; type: string };
 export type Airport = { key: string; c: string; l: [number, number]; km: number; freqs: AirportFreq[] };
 
@@ -71,24 +75,42 @@ class Nearby {
   siteResult = $derived(current(sites));
   airportResult = $derived(current(airportSites));
 
-  /** Licensed entries near the place, one per name and frequency (the nearest), grouped. Digital only is left out: Ferrite has no digital modes. */
-  siteAll = $derived.by((): SiteEntry[] => {
+  /** Licensed sites near the place, nearest first: the entries (one per organization and frequency) and the rows (one
+   * per licensee and frequency). Digital only is left out: Ferrite has no digital modes (the data leaves it out too). */
+  #sites = $derived.by((): { entries: SiteEntry[]; rows: SiteRow[] } => {
     const d = this.siteResult;
     const p = library.place;
-    if (!d || !p) return [];
-    const seen = new Set<string>();
-    const out: Omit<SiteEntry, "group">[] = [];
-    for (const { i, km } of near(p, library.radius, d.coords, 5000)) {
+    if (!d || !p) return { entries: [], rows: [] };
+    const hits = near(p, library.radius, d.coords, 5000).filter(({ i }) => d.sites[i].m !== MODE_DIGITAL);
+    // Each category's licensees, grouped as organizations.
+    const names = new Map<number, Set<string>>();
+    for (const { i } of hits) {
       const r = d.sites[i];
-      if (r.m === MODE_DIGITAL) continue;
-      const key = `s|${r.name}|${r.f}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ key, src: r.src, name: r.name, f: r.f, m: r.m, mobile: r.mobile, km, pos: [r.lat, r.lon] });
+      let s = names.get(r.k);
+      if (!s) names.set(r.k, (s = new Set()));
+      s.add(r.name);
     }
-    const groups = taflGroups(out.map((e) => e.name));
-    return out.map((e, k) => ({ ...e, group: groups[k] }));
+    const org = new Map<string, string>();
+    for (const [k, s] of names) {
+      const list = [...s];
+      orgGroups(list).forEach((g, j) => org.set(`${k}|${list[j]}`, g));
+    }
+    const entries = new Map<string, SiteEntry>();
+    const rows = new Map<string, SiteRow>();
+    for (const { i, km } of hits) {
+      const r = d.sites[i];
+      const group = org.get(`${r.k}|${r.name}`) ?? r.name;
+      const key = `s|${r.k}|${group}|${r.f}`;
+      const e = entries.get(key);
+      if (e) e.sites++;
+      else entries.set(key, { key, src: r.src, name: r.name, f: r.f, m: r.m, mobile: r.mobile, km, group, k: r.k, sites: 1, pos: [r.lat, r.lon] });
+      const rk = `${r.name}|${r.f}`;
+      if (!rows.has(rk)) rows.set(rk, { key, src: r.src, name: r.name, f: r.f, m: r.m, mobile: r.mobile, km, pos: [r.lat, r.lon] });
+    }
+    return { entries: [...entries.values()], rows: [...rows.values()] };
   });
+  siteAll = $derived(this.#sites.entries);
+  siteRows = $derived(this.#sites.rows);
   /** The entries the list shows: a source switched off goes too. */
   siteShown = $derived(this.siteAll.filter((e) => this.layers[e.src] !== false));
 

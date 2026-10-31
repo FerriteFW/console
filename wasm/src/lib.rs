@@ -524,11 +524,11 @@ pub fn airport_name(icao: &str, type_name: &str, khz: u32, repeat: bool) -> Stri
     library::airport_name(icao, type_name, khz, repeat)
 }
 
-/// TAFL's name groups (JSON names in, JSON group names out, one per name).
+/// Licensees' organization groups (JSON names in, JSON group names out, one per name).
 #[wasm_bindgen]
-pub fn tafl_groups(names: &str) -> Result<String, JsError> {
+pub fn org_groups(names: &str) -> Result<String, JsError> {
     let n: Vec<String> = from_json(names, "names")?;
-    Ok(json(&library::tafl_groups(&n, 2)))
+    Ok(json(&library::org_groups(&n, 2)))
 }
 
 // Radio Settings: the settings record (bytes) as the radio's menu shows it, changed and checked by ferrite's own

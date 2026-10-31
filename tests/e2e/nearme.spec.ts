@@ -120,7 +120,7 @@ test("map: the default, big; Licensed | Airports | Both; chips; picks shared wit
   await expect(airports).toBeVisible();
   expect((await list.boundingBox())!.y).toBeLessThan((await airports.boundingBox())!.y);
   await d.getByLabel("Filter licensed sites").fill("ferries");
-  await list.getByRole("button", { name: /3 entries/ }).click();
+  await list.getByRole("button", { name: /3 frequencies/ }).click();
   await expect(list.locator("label.en", { hasText: "156.80" }).getByRole("checkbox")).toBeChecked();
   await expect(list.locator("label.en", { hasText: "159.25" }).getByRole("checkbox")).not.toBeChecked();
   const cyvr = airports.getByRole("checkbox", { name: "CYVR", exact: true });

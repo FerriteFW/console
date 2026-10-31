@@ -11,16 +11,18 @@ import { MODE_UNKNOWN, SiteData, decodeTile, gridSquare, sha256Hex, tileSites, t
 const FIX = new URL("../e2e/fixtures/sitedata/", import.meta.url);
 const BASE = "https://data.test";
 
-test("decode: running sums from 0; degrees, half kHz, modes, mobile", () => {
-  const t = decodeTile({ n: ["a", "b"], c: [1, 0, 0], a: [4919000, 500, 0], o: [-12320000, 2000, -10], f: [313600, 4910, -2], m: [0, 1, 2], s: [0, 1, 0] });
+test("decode: running sums from 0; degrees, half kHz, modes, mobile, categories", () => {
+  const t = decodeTile({ n: ["a", "b"], c: [1, 0, 0], a: [4919000, 500, 0], o: [-12320000, 2000, -10], f: [313600, 4910, -2], m: [0, 1, 2], s: [0, 1, 0], k: [0, 4, 1] });
   assert.deepEqual([...t.lat], [49.19, 49.195, 49.195]);
   assert.deepEqual([...t.lon], [-123.2, -123.18, -123.1801]);
   assert.deepEqual([...t.f], [313600, 318510, 318508]);
   const s = tileSites("tafl", t);
-  assert.deepEqual(s[1], { src: "tafl", name: "a", lat: 49.195, lon: -123.18, f: 318510, m: 1, mobile: true, type: "" });
+  assert.deepEqual(s[1], { src: "tafl", name: "a", lat: 49.195, lon: -123.18, f: 318510, m: 1, mobile: true, type: "", k: 4 });
   assert.equal(s[0].name, "b");
-  // `s` missing: every row 0.
+  // `s` and `k` missing: every row 0.
   assert.deepEqual([...decodeTile({ n: ["x"], c: [0], a: [1], o: [1], f: [1], m: [3] }).s], [0]);
+  assert.deepEqual([...decodeTile({ n: ["x"], c: [0], a: [1], o: [1], f: [1], m: [3] }).k], [0]);
+  assert.throws(() => decodeTile({ n: ["x"], c: [0], a: [1], o: [1], f: [1], k: [0, 1] }), /column k/);
   assert.throws(() => decodeTile({ n: [], c: [0, 0], a: [1], o: [1, 1], f: [1, 1], m: [0, 0] }), /column a/);
 });
 
@@ -115,7 +117,7 @@ test("client: tiles near Vancouver from both sources; kept in the cache; a newer
   const r = await d.near(["tafl", "fcc"], 49.1947, -123.1792, 50);
   assert.deepEqual(r.sources, ["tafl", "fcc"]);
   assert.deepEqual(r.failed, []);
-  assert.equal(r.sites.length, 8);
+  assert.equal(r.sites.length, 11);
   assert.ok(r.sites.some((s) => s.src === "fcc" && s.name === "point roberts" && s.f === 310320));
   assert.deepEqual(a.asked.filter((p) => !p.endsWith("index.json")).sort(), ["fcc/CN88.json", "tafl/CN89je.json", "tafl/CN89ke.json"]);
   assert.ok(store.map.has(`${BASE}/tafl/CN89je.json?build=2026-10-30`));
@@ -124,7 +126,7 @@ test("client: tiles near Vancouver from both sources; kept in the cache; a newer
   const b = fake({ build: "2026-11-30" });
   const d2 = new SiteData({ base: BASE, fetch: b.fetchFn, store });
   const r2 = await d2.near(["tafl", "fcc"], 49.1947, -123.1792, 50);
-  assert.equal(r2.sites.length, 8);
+  assert.equal(r2.sites.length, 11);
   assert.deepEqual(b.asked.sort(), ["fcc/index.json", "tafl/index.json"]);
   assert.equal(d2.newer.get("tafl"), "2026-11-30");
   assert.equal((await d2.index("tafl")).build_date, "2026-10-30");
@@ -140,7 +142,7 @@ test("client: tiles near Vancouver from both sources; kept in the cache; a newer
   const c = fake({ down: true });
   const d3 = new SiteData({ base: BASE, fetch: c.fetchFn, store });
   const r3 = await d3.near(["tafl", "fcc"], 49.1947, -123.1792, 50);
-  assert.equal(r3.sites.length, 8);
+  assert.equal(r3.sites.length, 11);
   const r4 = await d3.near(["tafl", "fcc"], 45.42, -75.7, 20);
   assert.equal(r4.failed.length, 1);
   assert.match(r4.failed[0].error, /Can't reach https:\/\/data\.test/);

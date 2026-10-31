@@ -10,7 +10,7 @@
 //! - an entry the table already holds (same RX, TX, mode and zone) is skipped.
 //!
 //! Also here: places as typed (`lat,lon`, a grid square, an NMEA GGA sentence or the terminal's answers),
-//! distances, airport channel names and the TAFL name groups.
+//! distances, airport channel names and licensees' organization names and groups.
 
 use crate::channels::{mhz_text, ChanView, ZoneView};
 use crate::plan::{check_channel, Set};
@@ -521,50 +521,99 @@ pub fn airport_name(icao: &str, type_name: &str, khz: u32, repeat: bool) -> Stri
     clean_name(&n)
 }
 
-// ---- TAFL ----
+// ---- Licensed sites ----
 
-/// TAFL's name groups (NeonPlug's `groupTaflEntriesByName`): entries whose first word is shared by `min` or more
-/// go under it (or under their first two words, when those also make groups); the rest stand alone. One group
-/// name per entry, in order.
-pub fn tafl_groups(names: &[String], min: usize) -> Vec<String> {
-    let words = |s: &str| -> Vec<String> {
-        let sep = if s.contains('_') { '_' } else { ' ' };
-        s.split(sep).filter(|w| !w.is_empty()).map(String::from).collect()
-    };
-    let first = |s: &str| words(s).first().cloned().unwrap_or_else(|| s.to_string());
-    let two = |s: &str| {
-        let w = words(s);
-        if w.len() >= 2 {
-            format!("{} {}", w[0], w[1])
-        } else {
-            first(s)
-        }
-    };
-    let mut by_first: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    for (i, n) in names.iter().enumerate() {
-        by_first.entry(first(n)).or_default().push(i);
+/// Legal and filler words an organization's name doesn't need.
+const ORG_DROP: &[&str] = &["inc", "ltd", "ltee", "ltée", "corp", "corporation", "co", "llc", "lp", "limited", "the", "of"];
+/// Words that name a government by the place after them: "City of Vancouver", "Township of Langley". "Vancouver,
+/// City of" (and the data's shortened "Van city FD") put the word first again.
+const ORG_FRONT: &[&str] = &["city", "town", "township", "twp", "village", "municipality", "district"];
+
+/// A licensee's name as an organization: punctuation and legal suffixes gone (Inc, Ltd, Ltée, Corp, LLC, LP,
+/// Limited, The), "Vancouver, City of" as "City of Vancouver". The words keep their case (for showing); compare
+/// them lower case ([`org_key`]).
+pub fn org_name(name: &str) -> String {
+    let mut w: Vec<String> = name
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty() && !ORG_DROP.contains(&w.to_lowercase().as_str()))
+        .map(String::from)
+        .collect();
+    let front = |w: &str| ORG_FRONT.contains(&w.to_lowercase().as_str());
+    if w.len() >= 2 && front(&w[1]) && !front(&w[0]) {
+        w.swap(0, 1);
     }
-    let mut out = vec![String::new(); names.len()];
-    for (w, idx) in by_first {
-        if idx.len() < min {
-            for i in idx {
-                out[i] = names[i].clone();
+    if w.len() >= 2 && front(&w[0]) {
+        w.insert(1, "of".into());
+    }
+    w.join(" ")
+}
+
+/// [`org_name`] for comparing: lower case.
+pub fn org_key(name: &str) -> String {
+    org_name(name).to_lowercase()
+}
+
+/// Organization groups for licensees' names (after NeonPlug's `groupTaflEntriesByName`), one group name per name, in
+/// order. Names are compared as organizations ([`org_name`]), each different one counted once: those that share a
+/// first word (two for "City of X") with `min` or more others go under the words they all share, or under their
+/// first two words when those split them into groups of `min` or more; the rest stand alone, as their org name.
+pub fn org_groups(names: &[String], min: usize) -> Vec<String> {
+    let orgs: Vec<String> = names.iter().map(|n| org_name(n)).collect();
+    let words = |s: &str| -> Vec<String> { s.split(' ').filter(|w| !w.is_empty()).map(String::from).collect() };
+    let head = |w: &[String]| -> String {
+        let n = if w.len() >= 3 && w[1] == "of" { 3 } else { 1 };
+        w.iter().take(n).map(|x| x.to_lowercase()).collect::<Vec<_>>().join(" ")
+    };
+    // The different names (lower case), by their first word(s); each keeps its words as first seen.
+    let mut seen: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut by_head: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for o in &orgs {
+        let k = o.to_lowercase();
+        if seen.contains_key(&k) {
+            continue;
+        }
+        let w = words(o);
+        by_head.entry(head(&w)).or_default().push(k.clone());
+        seen.insert(k, w);
+    }
+    let mut group: BTreeMap<String, String> = BTreeMap::new();
+    for (h, keys) in by_head {
+        if keys.len() < min {
+            for k in keys {
+                let g = seen[&k].join(" ");
+                group.insert(k, g);
             }
             continue;
         }
-        let mut by_two: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-        for &i in &idx {
-            by_two.entry(two(&names[i])).or_default().push(i);
+        let hn = h.split(' ').count();
+        let mut by_two: BTreeMap<String, Vec<&String>> = BTreeMap::new();
+        for k in &keys {
+            let w = &seen[k];
+            by_two.entry(w.iter().take(hn + 1).map(|x| x.to_lowercase()).collect::<Vec<_>>().join(" ")).or_default().push(k);
         }
-        // Two words when every two-word group is big enough on its own and there's more than one.
-        let use_two = by_two.len() > 1 && by_two.values().all(|v| v.len() >= min);
-        for (tw, v) in by_two {
-            for i in v {
-                out[i] = if use_two { tw.clone() } else { w.clone() };
+        // One more word when every such group is big enough on its own and there's more than one.
+        if by_two.len() > 1 && by_two.values().all(|v| v.len() >= min) {
+            for v in by_two.values() {
+                let g = seen[v[0]].iter().take(hn + 1).cloned().collect::<Vec<_>>().join(" ");
+                for k in v {
+                    group.insert((*k).clone(), g.clone());
+                }
             }
+            continue;
+        }
+        // The words they all share (at least the first).
+        let first = &seen[&keys[0]];
+        let mut n = first.len();
+        for k in &keys[1..] {
+            let w = &seen[k];
+            n = n.min(first.iter().zip(w).take_while(|(a, b)| a.eq_ignore_ascii_case(b)).count());
+        }
+        let g = first[..n.max(hn).min(first.len())].join(" ");
+        for k in keys {
+            group.insert(k, g.clone());
         }
     }
-    out
+    orgs.iter().map(|o| group[&o.to_lowercase()].clone()).collect()
 }
 
 #[cfg(test)]
@@ -815,13 +864,37 @@ mod tests {
     }
 
     #[test]
-    fn tafl_grouping() {
-        let names: Vec<String> =
-            ["bc ferries a", "bc ferries b", "bc hydro x", "bc hydro y", "lone site", "teck coal", "teck mine"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-        let g = tafl_groups(&names, 2);
-        assert_eq!(g, ["bc ferries", "bc ferries", "bc hydro", "bc hydro", "lone site", "teck", "teck"]);
+    fn org_names() {
+        assert_eq!(org_name("Vancouver, City of"), "City of Vancouver");
+        assert_eq!(org_key("Vancouver, City of"), org_key("CITY OF VANCOUVER"));
+        assert_eq!(org_name("Van city FD eng"), "city of Van FD eng");
+        assert_eq!(org_name("city Van  engine"), "city of Van engine");
+        assert_eq!(org_name("The Acme Towing Co., Ltd."), "Acme Towing");
+        assert_eq!(org_name("Hydro-Québec Ltée"), "Hydro Québec");
+        assert_eq!(org_name("Teck Coal Limited Partnership LP"), "Teck Coal Partnership");
+        assert_eq!(org_name("King County"), "King County");
+        assert_eq!(org_name("Township of Langley"), "Township of Langley");
+    }
+
+    #[test]
+    fn org_grouping() {
+        let names: Vec<String> = [
+            "bc ferries a", "bc ferries b", "bc hydro x", "bc hydro y", "lone site inc", "teck coal", "teck mine",
+            "city burnaby FD", "Burnaby, City of", "city burnaby eng", "city surrey", "fortisbc", "fortisbc", "Fortisbc Inc",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let g = org_groups(&names, 2);
+        assert_eq!(
+            g,
+            [
+                "bc ferries", "bc ferries", "bc hydro", "bc hydro", "lone site", "teck", "teck", "city of burnaby",
+                "city of burnaby", "city of burnaby", "city of surrey", "fortisbc", "fortisbc", "fortisbc"
+            ]
+        );
+        // Shared words beyond the first: one licensee's entries under its whole name.
+        let n: Vec<String> = ["bc hydro north", "bc hydro south"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(org_groups(&n, 2), ["bc hydro", "bc hydro"]);
     }
 }

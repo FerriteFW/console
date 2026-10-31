@@ -45,8 +45,9 @@ export type SourceIndex = {
   tiles: Record<string, number>;
   split: string[];
 };
-/** A tile as published (`columnar-1`). `m` missing: every row unknown (airports); `tn`/`t`: the uses (airports). */
-export type TileJson = { n: string[]; c: number[]; a: number[]; o: number[]; f: number[]; m?: number[]; s?: number[]; tn?: string[]; t?: number[] };
+/** A tile as published (`columnar-1`). `m` missing: every row unknown (airports); `tn`/`t`: the uses (airports); `k`
+ * missing: every row's category 0 (airports, tiles from before it). */
+export type TileJson = { n: string[]; c: number[]; a: number[]; o: number[]; f: number[]; m?: number[]; s?: number[]; tn?: string[]; t?: number[]; k?: number[] };
 /** A decoded tile: columns, one entry per row. `f` in half kHz; `t` indexes `types` (-1: none). */
 export type Tile = {
   names: string[];
@@ -58,21 +59,27 @@ export type Tile = {
   s: Uint8Array;
   types: string[];
   t: Int16Array;
+  k: Uint8Array;
 };
 
-/** Modes (`m`): 0 analog FM under 14 kHz, 1 analog FM 16-20 kHz, 2 digital or data only, 3 unknown. */
+/** Modes (`m`): 0 analog FM under 14 kHz, 1 analog FM 16-20 kHz, 2 digital or data only (no longer published), 3 unknown. */
 export const MODE_NFM = 0;
 export const MODE_FM = 1;
 export const MODE_DIGITAL = 2;
 export const MODE_UNKNOWN = 3;
 
-/** One site and frequency (a licensed site's, an airport's). `type`: the frequency's use (airports: "TWR"), or "". */
-export type Site = { src: string; name: string; lat: number; lon: number; f: number; m: number; mobile: boolean; type: string };
+/** Categories (`k`), by code: the licensee's kind. */
+export const CATEGORIES = ["Business", "Public safety", "Transit", "Utilities", "Marine", "Schools", "Government"] as const;
+export const CAT_PUBLIC_SAFETY = 1;
+
+/** One site and frequency (a licensed site's, an airport's). `type`: the frequency's use (airports: "TWR"), or "";
+ * `k`: the category (CATEGORIES). */
+export type Site = { src: string; name: string; lat: number; lon: number; f: number; m: number; mobile: boolean; type: string; k: number };
 
 /** A tile's columns into rows: running sums of `a`, `o` and `f` from 0. */
 export function decodeTile(t: TileJson): Tile {
   const n = t.c.length;
-  for (const k of ["a", "o", "f", "m", "s", "t"] as const) {
+  for (const k of ["a", "o", "f", "m", "s", "t", "k"] as const) {
     const col = t[k];
     if (col && col.length !== n) throw new Error(`Bad tile: column ${k} has ${col.length} rows, not ${n}`);
   }
@@ -86,6 +93,7 @@ export function decodeTile(t: TileJson): Tile {
     s: new Uint8Array(n),
     types: t.tn ?? [],
     t: new Int16Array(n),
+    k: new Uint8Array(n),
   };
   let a = 0;
   let o = 0;
@@ -101,6 +109,7 @@ export function decodeTile(t: TileJson): Tile {
     out.m[i] = t.m ? t.m[i] : MODE_UNKNOWN;
     out.s[i] = t.s ? t.s[i] : 0;
     out.t[i] = t.t ? t.t[i] : -1;
+    out.k[i] = t.k ? t.k[i] : 0;
   }
   return out;
 }
@@ -110,7 +119,7 @@ export function tileSites(src: string, t: Tile): Site[] {
   const out: Site[] = new Array(t.f.length);
   for (let i = 0; i < t.f.length; i++) {
     const ty = t.t[i];
-    out[i] = { src, name: t.names[t.name[i]] ?? "", lat: t.lat[i], lon: t.lon[i], f: t.f[i], m: t.m[i], mobile: t.s[i] === 1, type: ty >= 0 ? (t.types[ty] ?? "") : "" };
+    out[i] = { src, name: t.names[t.name[i]] ?? "", lat: t.lat[i], lon: t.lon[i], f: t.f[i], m: t.m[i], mobile: t.s[i] === 1, type: ty >= 0 ? (t.types[ty] ?? "") : "", k: t.k[i] };
   }
   return out;
 }

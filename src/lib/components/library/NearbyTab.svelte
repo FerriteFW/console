@@ -51,7 +51,7 @@
     return c;
   });
   const on = (src: string) => nearby.layers[src] !== false;
-  const each = $derived(nearby.show === "lic" ? "One zone per name group" : nearby.show === "air" ? "One zone per airport" : "One zone per group or airport");
+  const each = $derived(nearby.show === "lic" ? "One zone per organization" : nearby.show === "air" ? "One zone per airport" : "One zone per organization or airport");
   const siteHere = $derived(new Set(nearby.siteAll.map((e) => e.src)));
   const airHere = $derived(new Set(nearby.airports.length ? ["airports"] : []));
 </script>

@@ -23,10 +23,11 @@
 
   const on = (src: string) => nearby.layers[src] !== false;
 
-  /** The markers' sites: licensed entries by name and position, airports as they are; frequencies in order. */
+  /** The markers' sites: licensees by name and position (a box picks the organization's frequency, shared by its
+   * other sites), airports as they are; frequencies in order. */
   const mapSites = $derived.by((): Site[] => {
     const by = new Map<string, Site>();
-    for (const e of nearby.showLic ? nearby.siteAll : []) {
+    for (const e of nearby.showLic ? nearby.siteRows : []) {
       if (!on(e.src)) continue;
       const id = `s|${e.name}|${e.pos[0]}|${e.pos[1]}`;
       let s = by.get(id);
