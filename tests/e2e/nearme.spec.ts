@@ -49,16 +49,16 @@ async function openSite(p: Page, d: Locator, name: string) {
 test("map: the default, big; the sidebar's kinds; chips; picks shared with the lists; Add follows the switches", async ({ browser }, info) => {
   const { p, d, close } = await open(browser);
   await expect(d.getByRole("button", { name: "Map", exact: true })).toHaveAttribute("aria-pressed", "true");
-  // Licensed by default.
-  await expect(kind(d, "Licensed")).toHaveAttribute("aria-pressed", "true");
+  // Repeaters and Business & public by default (repeaters first in the sidebar).
+  await expect(kind(d, "Repeaters")).toHaveAttribute("aria-pressed", "true");
+  await expect(kind(d, "Business & public")).toHaveAttribute("aria-pressed", "true");
   await expect(kind(d, "Airports")).toHaveAttribute("aria-pressed", "false");
-  await expect(kind(d, "Repeaters")).toHaveAttribute("aria-pressed", "false");
   await expect(d.locator(".map[data-map=ready]")).toBeVisible();
   await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
   // Each kind's count near the place, shown or not (the fixtures: 2 airports and 7 repeater sites within 50 km).
   await expect(kind(d, "Airports")).toHaveText(/^Airports\s*2$/);
   await expect(kind(d, "Repeaters")).toHaveText(/^Repeaters\s*7$/);
-  await expect(kind(d, "Licensed")).toHaveText(/^Licensed\s*\d+$/);
+  await expect(kind(d, "Business & public")).toHaveText(/^Business & public\s*\d+$/);
   // The dialog nearly fills the window; Picked is a slim column on the map's right.
   const vw = p.viewportSize()!;
   const box = (await d.boundingBox())!;
@@ -72,6 +72,11 @@ test("map: the default, big; the sidebar's kinds; chips; picks shared with the l
   // Sub-filter chips for the sources with data here: Canada and the US (Point Roberts); no airport markers.
   const chip = (name: string) => d.getByRole("button", { name: new RegExp(`^${name} \\d+$`) });
   for (const c of ["Canada", "US"]) await expect(chip(c)).toHaveAttribute("aria-pressed", "true");
+  // Business is off to start (the map's noise): its sites (point roberts, richmond works) show once it's on.
+  const business = d.getByRole("group", { name: "Business and public categories" }).getByRole("button", { name: /^Business/ });
+  await expect(business).toHaveAttribute("aria-pressed", "false");
+  await expect(marker(d, "point roberts")).toHaveCount(0);
+  await business.click();
   await expect(marker(d, "point roberts").first()).toBeVisible({ timeout: 20_000 });
   await expect(marker(d, "richmond works").first()).toBeVisible();
   await expect(marker(d, "CYVR")).toHaveCount(0);
@@ -110,7 +115,7 @@ test("map: the default, big; the sidebar's kinds; chips; picks shared with the l
   await expect(marker(d, "CYVR")).toHaveCount(0);
   await expect(d.locator(".legend")).toContainText("Repeater");
   // All three.
-  await onlyKinds(d, "Licensed", "Airports", "Repeaters");
+  await onlyKinds(d, "Business & public", "Airports", "Repeaters");
   await expect(marker(d, "CYVR").first()).toBeVisible();
   await expect(marker(d, "richmond works").first()).toBeVisible();
   await expect(marker(d, "VE7RPT").first()).toBeVisible();
@@ -137,11 +142,11 @@ test("map: the default, big; the sidebar's kinds; chips; picks shared with the l
   await expect(picked.getByRole("button", { name: "Add 1 channel" })).toBeEnabled();
   await expect(picked).toContainText("2 more picked but hidden");
   await expect(picked).not.toContainText("bc ferries");
-  await onlyKinds(d, "Licensed");
+  await onlyKinds(d, "Business & public");
   await expect(picked.getByRole("button", { name: "Add 1 channel" })).toBeEnabled();
   await expect(picked).toContainText("bc ferries");
   await expect(picked).not.toContainText("CYVR");
-  await onlyKinds(d, "Licensed", "Airports");
+  await onlyKinds(d, "Business & public", "Airports");
   await expect(picked.getByRole("button", { name: "Add 2 channels" })).toBeEnabled();
 
   // The same picks in the list: the licensed groups, then the airports; BC Ferries' entry ticked, CYVR partly
@@ -166,7 +171,7 @@ test("map: the default, big; the sidebar's kinds; chips; picks shared with the l
   await expect(list).toHaveCount(0);
   await expect(airports).toBeVisible();
   await expect(d.getByRole("button", { name: "Add 1 channel" })).toBeEnabled();
-  await onlyKinds(d, "Licensed", "Airports", "Repeaters");
+  await onlyKinds(d, "Business & public", "Airports", "Repeaters");
   await expect(d.getByLabel("Repeaters near the place")).toBeVisible();
   await d.getByRole("button", { name: "Map", exact: true }).click();
 
@@ -193,7 +198,7 @@ test("map: the default, big; the sidebar's kinds; chips; picks shared with the l
   await closeWelcome(p);
   await p.getByRole("button", { name: "Add from library…" }).first().click();
   await d.getByRole("tab", { name: /^Near me/ }).click();
-  for (const k of ["Licensed", "Airports", "Repeaters"]) await expect(kind(d, k)).toHaveAttribute("aria-pressed", "true");
+  for (const k of ["Business & public", "Airports", "Repeaters"]) await expect(kind(d, k)).toHaveAttribute("aria-pressed", "true");
   await close();
 });
 
@@ -253,7 +258,7 @@ test("map: Add with Airports only adds the airport, the hidden licensed pick sta
   // Back to Licensed: BC Ferries is still picked.
   await p.getByRole("button", { name: "Add from library…" }).first().click();
   await d.getByRole("tab", { name: /^Near me/ }).click();
-  await onlyKinds(d, "Licensed");
+  await onlyKinds(d, "Business & public");
   await expect(picked).toContainText("bc ferries");
   await expect(picked.getByRole("button", { name: "Add 1 channel" })).toBeEnabled();
   await close();
@@ -289,7 +294,7 @@ test("map: the radius slider loads again; sites past it come in", async ({ brows
 
 test("map: Use my location: the browser's position, asked on the click", async ({ browser }, info) => {
   const { p, d, close } = await open(browser, { geolocation: { latitude: 45.32, longitude: -75.67 }, permissions: ["geolocation"] });
-  await onlyKinds(d, "Licensed", "Airports");
+  await onlyKinds(d, "Business & public", "Airports");
   await d.getByRole("button", { name: "Use my location" }).click();
   await expect(d.getByLabel("Place: latitude, longitude or grid square")).toHaveValue("45.3200, -75.6700");
   await expect(d).toContainText("From this computer's location");

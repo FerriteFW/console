@@ -27,7 +27,7 @@ async function readRadio() {
 async function openLibrary(tab: string) {
   await page.getByRole("button", { name: "Add from library…" }).click();
   await expect(lib()).toBeVisible();
-  const kind = tab === "Airports" ? "Airports" : tab === "Licensed sites" ? "Licensed" : "";
+  const kind = tab === "Airports" ? "Airports" : tab === "Licensed sites" ? "Business & public" : "";
   await lib().getByRole("tab", { name: new RegExp(`^${kind ? "Near me" : tab}`) }).click();
   if (kind) await nearMe(lib(), kind, true);
 }
@@ -198,8 +198,16 @@ test.describe.serial("near a place", () => {
     const filter = lib().getByLabel("Filter licensed sites");
     await expect(filter).toBeVisible({ timeout: 30_000 });
     // Near Vancouver: CN89 is split, so its subsquares come (je, ke), and the US square south of it (CN88).
-    expect(asked.filter((p) => /^(tafl|fcc)\//.test(p) && !p.endsWith("index.json")).sort()).toEqual(["fcc/CN88.json", "tafl/CN89je.json", "tafl/CN89ke.json"]);
+    await expect.poll(() => asked.filter((p) => /^(tafl|fcc)\//.test(p) && !p.endsWith("index.json")).sort()).toEqual(["fcc/CN88.json", "tafl/CN89je.json", "tafl/CN89ke.json"]);
     const list = lib().getByLabel("Licensed sites near the place");
+    // Categories as switches with counts under Business & public in the sidebar, public safety first; each a
+    // heading in the list. Business off to start (the long tail), one click brings it back.
+    const cats = lib().getByRole("group", { name: "Business and public categories" });
+    await expect(cats.getByRole("button")).toHaveText([/^Public safety\s*1$/, /^Transit\s*0$/, /^Utilities\s*0$/, /^Marine\s*3$/, /^Schools\s*0$/, /^Government\s*3$/, /^Business\s*2$/]);
+    await expect(cats.getByRole("button", { name: /^Business/ })).toHaveAttribute("aria-pressed", "false");
+    await expect(list.locator("h4")).toHaveText(["Public safety", "Marine", "Government"]);
+    await cats.getByRole("button", { name: /^Business/ }).click();
+    await expect(list.locator("h4")).toHaveText(["Public safety", "Marine", "Government", "Business"]);
     await expect(list).toContainText("point roberts"); // US
     await expect(list).toContainText("richmond works"); // Canada
     // Both sources' attribution lines.
@@ -209,10 +217,6 @@ test.describe.serial("near a place", () => {
     await expect(list).not.toContainText("ecomm");
     await expect(lib().getByRole("checkbox", { name: /digital/i })).toHaveCount(0);
 
-    // Categories as chips with counts, public safety first; each a heading in the list. All on to start.
-    const cats = lib().getByRole("group", { name: "Categories" });
-    await expect(cats.getByRole("button")).toHaveText(["Public safety 1", "Marine 3", "Government 3", "Business 2"]);
-    await expect(list.locator("h4")).toHaveText(["Public safety", "Marine", "Government", "Business"]);
     // Organizations: "city van works" and "van city" are one (City of Van), its two frequencies under one box.
     const van = list.getByRole("button", { name: /city of van\b.*2 frequencies/ });
     await expect(van).toBeVisible();
@@ -225,7 +229,7 @@ test.describe.serial("near a place", () => {
     await expect(list.locator("label.en", { hasText: "156.80" })).toHaveCount(1);
     await expect(list.locator("label.en", { hasText: "156.80" })).toContainText("2 sites · 0.1 km");
     await list.getByRole("button", { name: /bc ferries.*3 frequencies/ }).click();
-    // A chip off hides its category; the filter matches a category's name too.
+    // A category switched off hides it; the filter matches a category's name too.
     await cats.getByRole("button", { name: /^Marine/ }).click();
     await expect(cats.getByRole("button", { name: /^Marine/ })).toHaveAttribute("aria-pressed", "false");
     await expect(list).not.toContainText("bc ferries");
@@ -277,9 +281,9 @@ test.describe("licensed sites, no radio", () => {
     await p.getByRole("button", { name: "Add from library…" }).first().click();
     const d = p.getByRole("dialog", { name: "Add channels" });
     await d.getByRole("tab", { name: /^Near me/ }).click();
-    await nearMe(d, "Licensed");
+    await nearMe(d, "Business & public");
     await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
-    await expect(d.getByText("Licensed sites aren't available right now.")).toBeVisible();
+    await expect(d.getByText("Business and public sites aren't available right now.")).toBeVisible();
     await expect(d).toContainText("Can't reach https://data.ferritefw.dev");
     await shot(p, info, "39-library-sites-offline");
     await p.close();
@@ -292,7 +296,7 @@ test.describe("licensed sites, no radio", () => {
     await p.getByRole("button", { name: "Add from library…" }).first().click();
     const d = p.getByRole("dialog", { name: "Add channels" });
     await d.getByRole("tab", { name: /^Near me/ }).click();
-    await nearMe(d, "Licensed", true);
+    await nearMe(d, "Business & public", true);
     const save = d.getByRole("button", { name: /^Save Canada for offline \(\d+ KB\)$/ });
     await expect(save).toBeVisible();
     await save.click();

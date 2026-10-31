@@ -1,6 +1,6 @@
 <script lang="ts">
   // Licensed sites near a place, as a list: Canada (ISED's TAFL) and the US (the FCC's ULS), tiled from
-  // data.ferritefw.dev (sites.svelte.ts). By category (chips with counts switch each on or off; public safety first),
+  // data.ferritefw.dev (sites.svelte.ts). By category (switched on or off under "Business & public" in the dialog's sidebar; public safety first),
   // then by organization (the licensees' names grouped: nearest first), one entry per organization and frequency
   // (its nearest site; how many sites share it). A group's box takes the whole organization. RX only by default:
   // these are other people's licensed channels. Each row's mode comes from the data (NFM or FM; digital only never
@@ -9,16 +9,11 @@
   // leave the list too.
   import { library } from "../../library.svelte";
   import { sites, sourceName } from "../../sites.svelte";
-  import { CATEGORIES, CAT_BUSINESS, CAT_PUBLIC_SAFETY } from "../../sitedata";
-  import { MOBILE, mhz, modeLabel, nearby, type SiteEntry } from "../../nearby.svelte";
+  import { CATEGORIES } from "../../sitedata";
+  import { CAT_ORDER, MOBILE, mhz, modeLabel, nearby, type SiteEntry } from "../../nearby.svelte";
 
   const result = $derived(nearby.siteResult);
   let open = $state<Set<string>>(new Set());
-  /** Categories switched off (all on to start). */
-  let off = $state<Set<number>>(new Set());
-  /** Category codes in the order they show: public safety first, then the rest by code. */
-  /** Public safety first, Business (the long tail) last, the rest in code order. */
-  const ORDER = [CAT_PUBLIC_SAFETY, ...CATEGORIES.map((_, k) => k).filter((k) => k !== CAT_PUBLIC_SAFETY && k !== CAT_BUSINESS), CAT_BUSINESS];
 
   type Group = { id: string; name: string; km: number; es: SiteEntry[] };
   const entries = $derived(nearby.siteShown);
@@ -28,7 +23,7 @@
   const matching = $derived.by(() => {
     return nearby.query.trim() ? entries.filter(nearby.matchSite) : entries;
   });
-  /** Each category's count (for its chip), and its organizations' groups (nearest first, frequencies in order). */
+  /** Each category shown, and its organizations' groups (nearest first, frequencies in order). */
   const cats = $derived.by(() => {
     const by = new Map<number, Map<string, Group>>();
     for (const e of matching) {
@@ -39,13 +34,13 @@
       g.es.push(e);
       g.km = Math.min(g.km, e.km);
     }
-    return ORDER.filter((k) => by.has(k)).map((k) => {
+    return CAT_ORDER.filter((k) => by.has(k)).map((k) => {
       const groups = [...by.get(k)!.values()].sort((a, b) => a.km - b.km || a.name.localeCompare(b.name));
       for (const g of groups) g.es.sort((a, b) => a.f - b.f);
       return { k, name: CATEGORIES[k] ?? "Other", n: groups.reduce((n, g) => n + g.es.length, 0), groups };
     });
   });
-  const shown = $derived(cats.filter((c) => !off.has(c.k)));
+  const shown = $derived(cats);
   const nPicked = $derived(nearby.pickedSites.length);
 
   function flip(id: string) {
@@ -53,12 +48,6 @@
     if (n.has(id)) n.delete(id);
     else n.add(id);
     open = n;
-  }
-  function toggleCat(k: number) {
-    const n = new Set(off);
-    if (n.has(k)) n.delete(k);
-    else n.add(k);
-    off = n;
   }
   const km = (x: number) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
   const sitesNote = (e: SiteEntry) => (e.sites > 1 ? `${e.sites} sites · ` : "");
@@ -68,7 +57,7 @@
   const down = $derived(!!result && !result.sources.length && failed.length > 0 && failed.length >= sites.sources.length);
 </script>
 
-{#if nearby.multi}<h3 class="kind">Licensed sites</h3>{/if}
+{#if nearby.multi}<h3 class="kind">Business &amp; public</h3>{/if}
 {#if !library.place}
   <p class="sub">
     {#if sites.top}
@@ -81,7 +70,7 @@
   </p>
 {:else if down}
   <div class="msg" role="status">
-    <b>Licensed sites aren't available right now.</b>
+    <b>Business and public sites aren't available right now.</b>
     <span>{failed[0].error}. Places you looked at before, and sources saved for offline, still work.</span>
     <button class="btn quiet sm" onclick={() => sites.retry()}>Try again</button>
   </div>
@@ -95,13 +84,6 @@
     <button class="btn quiet sm" onclick={() => nearby.set(shown.flatMap((c) => c.groups.flatMap((g) => g.es.map((e) => e.key))), true)}>All shown</button>
     <button class="btn quiet sm" onclick={() => nearby.set(entries.map((e) => e.key), false)}>None</button>
   </div>
-  {#if cats.length}
-    <div class="cats" role="group" aria-label="Categories">
-      {#each cats as c (c.k)}
-        <button class="chip" aria-pressed={!off.has(c.k)} onclick={() => toggleCat(c.k)} title="Show or hide {c.name.toLowerCase()}">{c.name} <span class="n">{c.n}</span></button>
-      {/each}
-    </div>
-  {/if}
   {#if failed.length}
     <p class="warn">{failed.map((f) => `${sourceName(f.src, sites.source(f.src)?.title)}: ${f.error}`).join(" · ")}</p>
   {/if}
@@ -140,7 +122,7 @@
       {/each}
     {:else}
       <p class="sub pad">
-        Nothing within {library.radius} km{nearby.query.trim() || off.size ? " matches" : ""}.
+        Nothing within {library.radius} km{nearby.query.trim() || nearby.catsOff.size ? " matches" : ""}.
       </p>
     {/each}
   </div>
@@ -171,31 +153,6 @@
   }
   .find {
     width: 240px;
-  }
-  .cats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .chip {
-    font: inherit;
-    font-size: 12px;
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
-    background: var(--raised);
-    color: var(--text);
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    padding: 2px 9px;
-    cursor: pointer;
-  }
-  .chip[aria-pressed="false"] {
-    color: var(--sub);
-    background: none;
-  }
-  .chip .n {
-    color: var(--sub);
   }
   .cat {
     margin: 6px 6px 2px;

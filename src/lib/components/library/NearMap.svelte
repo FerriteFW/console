@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The "near me" map (Add channels › Near me, Map): the kinds shown (Licensed, Airports, Repeaters: the dialog's
+  // The "near me" map (Add channels › Near me, Map): the kinds shown (Repeaters, Business & public, Airports: the dialog's
   // sidebar; Canada and the US switched on: NearbyTab) near the place on one Leaflet map (bundled; OpenStreetMap tiles, attributed). It fills
   // the big dialog; Picked is a slim column on its right (below it on a narrow window). One marker per site (a name at a position) with its frequency count;
   // nearby markers cluster into a count until zoomed in (cluster.ts). A marker opens a small popup with a box per
@@ -29,7 +29,7 @@
   const mapSites = $derived.by((): Site[] => {
     const by = new Map<string, Site>();
     for (const e of nearby.showLic ? nearby.siteRows : []) {
-      if (!on(e.src) || !nearby.matchSite(e)) continue;
+      if (!on(e.src) || nearby.catsOff.has(e.k) || !nearby.matchSite(e)) continue;
       const id = `s|${e.name}|${e.pos[0]}|${e.pos[1]}`;
       let s = by.get(id);
       if (!s) by.set(id, (s = { id, kind: "lic", src: e.src, name: e.name, pos: e.pos, km: e.km, rows: [] }));
@@ -305,7 +305,7 @@
       {:else}
         {shownSites.length} {shownSites.length === 1 ? "site" : "sites"} on the map within {library.radius} km{nearby.query.trim() ? " matching the search" : ""}.{#if nearby.showLic && nearby.siteCapped}&nbsp;Only the nearest licensed sites show: make the circle smaller to see them all.{/if}
       {/if}
-      {#if sitesDown}<span class="bad"><b>Licensed sites aren't available right now.</b> {siteFailed[0].error}. <button class="link" onclick={() => sites.retry()}>Try again</button></span>{/if}
+      {#if sitesDown}<span class="bad"><b>Business and public sites aren't available right now.</b> {siteFailed[0].error}. <button class="link" onclick={() => sites.retry()}>Try again</button></span>{/if}
       {#if airDown}<span class="bad"><b>Airports aren't available right now.</b> {airFailed[0].error}. <button class="link" onclick={() => airportSites.retry()}>Try again</button></span>{/if}
       {#if rptDown}<span class="bad"><b>Repeaters aren't available right now.</b> {rptFailed[0].error}. <button class="link" onclick={() => repeaterSites.retry()}>Try again</button></span>{/if}
       {#if nearby.showLic && !sitesDown && siteFailed.length}<span class="bad">{siteFailed.map((f) => `${sourceName(f.src, sites.source(f.src)?.title)}: ${f.error}`).join(" · ")}</span>{/if}
@@ -315,7 +315,7 @@
       {#if mapError}<div class="over">{mapError}</div>{/if}
       <div class="legend" aria-hidden="true">
         <span><i class="dot you"></i>The place</span>
-        {#if nearby.showLic}<span><i class="dot lic"></i>Licensed</span>{/if}
+        {#if nearby.showLic}<span><i class="dot lic"></i>Business &amp; public</span>{/if}
         {#if nearby.showAir}<span><i class="dot air"></i>Airport</span>{/if}
         {#if nearby.showRpt}<span><i class="dot rpt"></i>Repeater</span>{/if}
         <span><i class="dot pick"></i>Picked</span>
@@ -329,7 +329,7 @@
               <header>
                 <b>{s.name}</b>
                 <span>
-                  {s.kind === "air" ? "Airport" : s.kind === "rpt" ? "Repeater" : `Licensed site · ${sourceName(s.src)}`} · {s.km < 10 ? s.km.toFixed(1) : Math.round(s.km)} km
+                  {s.kind === "air" ? "Airport" : s.kind === "rpt" ? "Repeater" : `Business & public · ${sourceName(s.src)}`} · {s.km < 10 ? s.km.toFixed(1) : Math.round(s.km)} km
                   {#if s.rows.length > 1}· <button class="link" onclick={() => nearby.set(s.rows.map((q) => q.key), !all)}>{all ? "None" : "All"}</button>{/if}
                 </span>
               </header>

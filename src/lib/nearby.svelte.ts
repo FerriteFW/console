@@ -13,7 +13,7 @@
 import { library, type FixedSet } from "./library.svelte";
 import { channels } from "./channels.svelte";
 import { airportSites, repeaterSites, sites, Sites, type Near } from "./sites.svelte";
-import { CATEGORIES, MODE_DIGITAL, MODE_FM, MODE_NFM } from "./sitedata";
+import { CATEGORIES, CAT_BUSINESS, CAT_PUBLIC_SAFETY, MODE_DIGITAL, MODE_FM, MODE_NFM } from "./sitedata";
 import { airportName, airportType, libraryFixedItems, near, orgGroups, type LibraryItem } from "./core";
 import { zoneName, type Target } from "./components/library/ZoneTarget.svelte";
 
@@ -63,12 +63,23 @@ function current(d: Sites): Near | null {
   return p && n && n.key === Sites.key(p.lat, p.lon, library.radius) ? n : null;
 }
 
-/** Near me's kinds: licensed sites, airports, repeaters. */
+/** Near me's kinds: repeaters, licensed sites ("Business & public"), airports; the sidebar's order. */
 export type Kind = "lic" | "air" | "rpt";
-export const KINDS: Kind[] = ["lic", "air", "rpt"];
-const KINDS_KEY = "ferrite.nearme.kinds";
-/** Before the sidebar's switches (Oct 31, 2026): one choice, Licensed | Airports | Both. */
-const OLD_SHOW_KEY = "ferrite.nearme.show";
+export const KINDS: Kind[] = ["rpt", "lic", "air"];
+/** v2 (Oct 31, 2026): repeaters joined the default, so the choices kept before start over once. */
+const KINDS_KEY = "ferrite.nearme.kinds.v2";
+/** Licensed sites' categories in the order they show: public safety first, Business (the long tail) last. */
+export const CAT_ORDER = [CAT_PUBLIC_SAFETY, ...CATEGORIES.map((_, k) => k).filter((k) => k !== CAT_PUBLIC_SAFETY && k !== CAT_BUSINESS), CAT_BUSINESS];
+const CATS_KEY = "ferrite.nearme.catsoff";
+function loadCatsOff(): Set<number> {
+  try {
+    const v = localStorage.getItem(CATS_KEY);
+    if (v) return new Set((JSON.parse(v) as unknown[]).filter((x): x is number => typeof x === "number"));
+  } catch {
+    /* no storage, or not JSON: the default */
+  }
+  return new Set([CAT_BUSINESS]);
+}
 function loadKinds(): Set<Kind> {
   try {
     const v = localStorage.getItem(KINDS_KEY);
@@ -76,13 +87,10 @@ function loadKinds(): Set<Kind> {
       const k = (JSON.parse(v) as unknown[]).filter((x): x is Kind => KINDS.includes(x as Kind));
       if (k.length) return new Set(k);
     }
-    const old = localStorage.getItem(OLD_SHOW_KEY);
-    if (old === "air") return new Set(["air"]);
-    if (old === "both") return new Set(["lic", "air"]);
   } catch {
     /* no storage, or not JSON: the default */
   }
-  return new Set(["lic"]);
+  return new Set(["rpt", "lic"]);
 }
 
 class Nearby {
@@ -106,6 +114,22 @@ class Nearby {
   }
   toggleKind(k: Kind) {
     this.setKind(k, !this.#kinds.has(k));
+  }
+  /** Licensed sites' categories switched off (Business to start: over half the rows, most of the map's noise). */
+  #catsOff = $state<Set<number>>(loadCatsOff());
+  get catsOff(): ReadonlySet<number> {
+    return this.#catsOff;
+  }
+  toggleCat(k: number) {
+    const n = new Set(this.#catsOff);
+    if (n.has(k)) n.delete(k);
+    else n.add(k);
+    this.#catsOff = n;
+    try {
+      localStorage.setItem(CATS_KEY, JSON.stringify([...n]));
+    } catch {
+      /* not kept: fine */
+    }
   }
   showLic = $derived(this.#kinds.has("lic"));
   showAir = $derived(this.#kinds.has("air"));
@@ -187,7 +211,13 @@ class Nearby {
   siteCapped = $derived(this.#sites.capped);
   siteRows = $derived(this.#sites.rows);
   /** The entries the list shows: a source switched off goes too. */
-  siteShown = $derived(this.siteAll.filter((e) => this.layers[e.src] !== false));
+  siteShown = $derived(this.siteAll.filter((e) => this.layers[e.src] !== false && !this.#catsOff.has(e.k)));
+  /** Each category's entries near the place (its sources switched on), shown or not: the sidebar's counts. */
+  catCounts = $derived.by(() => {
+    const n = new Map<number, number>();
+    for (const e of this.siteAll) if (this.layers[e.src] !== false) n.set(e.k, (n.get(e.k) ?? 0) + 1);
+    return n;
+  });
 
   /** Airports near the place (rows are one per frequency: here by name and position, frequencies in order). */
   airports = $derived.by((): Airport[] => {

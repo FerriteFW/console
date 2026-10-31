@@ -55,7 +55,7 @@ export const kind = (d: Locator, name: string) => d.getByRole("group", { name: "
 
 /** Exactly these kinds on (the wanted ones first: the last kind on can't go off). */
 export async function onlyKinds(d: Locator, ...names: string[]) {
-  const all = ["Licensed", "Airports", "Repeaters"];
+  const all = ["Business & public", "Airports", "Repeaters"];
   const on = async (n: string) => (await kind(d, n).getAttribute("aria-pressed")) === "true";
   for (const n of names) if (!(await on(n))) await kind(d, n).click();
   for (const n of all) if (!names.includes(n) && (await on(n))) await kind(d, n).click();

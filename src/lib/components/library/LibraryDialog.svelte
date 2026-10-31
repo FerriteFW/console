@@ -2,7 +2,8 @@
   // "Add channels": the channel library beside CHIRP import. Fixed sets; Near me: licensed sites, airports and
   // repeaters near a place (ported from NeonPlug), on the map or as a list (NearbyTab). Near me's kinds sit under it
   // in the sidebar, always in view: each a switch (any of them, at least one: nearby.svelte.ts), with how many are
-  // near the place; one clicked from another tab opens Near me with it on. The dialog is always nearly as big as the
+  // near the place; one clicked from another tab opens Near me with it on. Under Business & public (licensed sites),
+  // while it shows, its categories are switches too (Business off to start: the map's noise). The dialog is always nearly as big as the
   // window (a desktop app's feel: the map gets the room), so switching tabs never resizes it.
   // Added channels go into the table as new rows, checked by ferrite's own code; Write then shows them in the diff
   // as usual.
@@ -11,16 +12,17 @@
   import NearbyTab from "./NearbyTab.svelte";
   import { channels } from "../../channels.svelte";
   import { airportSites, repeaterSites, sites } from "../../sites.svelte";
-  import { nearby, type Kind } from "../../nearby.svelte";
+  import { CAT_ORDER, nearby, type Kind } from "../../nearby.svelte";
+  import { CATEGORIES } from "../../sitedata";
 
   const tabs = [
     { id: "fixed", label: "Fixed sets", sub: "FRS, GMRS, MURS, PMR446, marine, weather, airband, resource roads, calling" },
     { id: "near", label: "Near me", sub: "What's near a place, on a map" },
   ] as const;
   const KINDS: { id: Kind; label: string; what: [string, string] }[] = [
-    { id: "lic", label: "Licensed", what: ["licensed frequency", "licensed frequencies"] },
-    { id: "air", label: "Airports", what: ["airport", "airports"] },
     { id: "rpt", label: "Repeaters", what: ["repeater", "repeaters"] },
+    { id: "lic", label: "Business & public", what: ["licensed frequency", "licensed frequencies"] },
+    { id: "air", label: "Airports", what: ["airport", "airports"] },
   ];
 
   // Near me's data loads while the dialog is open and a place is given, so the sidebar can count it: airports and
@@ -82,6 +84,17 @@
               <button class="kind {k.id}" aria-pressed={nearby.kinds.has(k.id)} onclick={() => pickKind(k.id)} title={kindTitle(k, n)}>
                 <i class="box" aria-hidden="true"></i><span class="name">{k.label}</span>{#if n !== null && library.place}<span class="n">{n.toLocaleString()}</span>{/if}
               </button>
+              {#if k.id === "lic" && nearby.showLic}
+                <div class="cats" role="group" aria-label="Business and public categories">
+                  {#each CAT_ORDER as c (c)}
+                    {@const on = !nearby.catsOff.has(c)}
+                    {@const cn = nearby.siteResult ? (nearby.catCounts.get(c) ?? 0) : null}
+                    <button class="kind cat" aria-pressed={on} onclick={() => nearby.toggleCat(c)} title="{on ? 'Hide' : 'Show'} {CATEGORIES[c].toLowerCase()}">
+                      <i class="box" aria-hidden="true"></i><span class="name">{CATEGORIES[c]}</span>{#if cn !== null && library.place}<span class="n">{cn.toLocaleString()}</span>{/if}
+                    </button>
+                  {/each}
+                </div>
+              {/if}
             {/each}
           </div>
           <p class="note">Added channels land in the table as new rows (green). Nothing goes to the radio until Write, which backs up and shows the diff first.</p>
@@ -230,6 +243,29 @@
     border: solid #fff;
     border-width: 0 0 2px 2px;
     transform: rotate(-45deg);
+  }
+  .cats {
+    display: flex;
+    flex-direction: column;
+    margin: 0 0 4px 14px;
+    padding-left: 6px;
+    border-left: 1px solid var(--line);
+  }
+  .nav .kind.cat {
+    padding: 3px 8px;
+    gap: 7px;
+  }
+  .kind.cat .name,
+  .nav .kind.cat .n {
+    font-size: 12px;
+  }
+  .kind.cat .box {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+  .kind.cat {
+    --k: var(--map-lic);
   }
   .kind.lic {
     --k: var(--map-lic);
