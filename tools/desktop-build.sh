@@ -24,6 +24,7 @@ git -C "$here" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite-console"
 $ssh "$host" bash -s -- "$dir" "$what" <<'REMOTE'
 set -euo pipefail
 dir=$HOME/$1 what=$2
+cd "$dir"
 docker build -q -t ferrite-console-desktop "$dir/ferrite-console/tools/desktop" >/dev/null
 docker volume create ferrite-console-xwin >/dev/null
 run() {
