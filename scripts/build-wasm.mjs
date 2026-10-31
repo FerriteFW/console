@@ -3,6 +3,8 @@
 // wasm/Cargo.toml pins: `cargo install wasm-bindgen-cli --version 0.2.129 --locked`.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 
 const want = readFileSync("wasm/Cargo.toml", "utf8").match(/wasm-bindgen = "=([^"]+)"/)[1];
 let have = "";
@@ -18,6 +20,10 @@ if (have !== want) {
 }
 const run = (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" });
 // The `wasm` profile (Cargo.toml): release, cut for size.
+// Source paths the core keeps (panic locations) shown relative, not as this machine's folders: the checkouts'
+// parent becomes ".", the home folder (cargo's registry, rustup's sources) "~". The last matching prefix wins.
+const remap = [`--remap-path-prefix=${homedir()}=~`, `--remap-path-prefix=${resolve(process.cwd(), "..")}=.`];
+process.env.RUSTFLAGS = [process.env.RUSTFLAGS, ...remap].filter(Boolean).join(" ");
 run("cargo", ["build", "-p", "ferrite-console-wasm", "--target", "wasm32-unknown-unknown", "--profile", "wasm"]);
 run("wasm-bindgen", [
   "target/wasm32-unknown-unknown/wasm/ferrite_console_wasm.wasm",
