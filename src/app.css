@@ -48,6 +48,11 @@
   --amber: #f5c542;
   --red: #e5484d;
   --violet: #b59cff;
+  /* The "near me" map's markers: licensed sites, airports, digital only, picked. */
+  --map-lic: #22b8cf;
+  --map-air: #a78bfa;
+  --map-dig: #56606b;
+  --map-pick: #f97316;
   --focus: #0f1b2a;
   --toast: #1b2a3d;
   /* The drawn radio: body, bezel and keys (ferrite/sim/src/face.rs). */
@@ -74,6 +79,10 @@
   --amber: #9a6700;
   --red: #c21a1f;
   --violet: #6a3fd1;
+  --map-lic: #0e7490;
+  --map-air: #6d28d9;
+  --map-dig: #8a939d;
+  --map-pick: #c2410c;
   --focus: #e1ecfa;
   --toast: #dce7f5;
   --body: #2a2e35;

@@ -175,6 +175,7 @@ test.describe.serial("imports carry positions", () => {
     await page.getByRole("button", { name: "Add from library…" }).first().click();
     const lib = page.getByRole("dialog", { name: "Add channels" });
     await lib.getByRole("tab", { name: /^Airports/ }).click();
+    await lib.getByRole("button", { name: "List", exact: true }).click(); // the map is the default (nearme.spec.ts)
     await lib.getByLabel("Place: latitude, longitude or grid square").fill("49.1947, -123.1792");
     const cyvr = lib.getByRole("checkbox", { name: "CYVR", exact: true });
     await expect(cyvr).toBeVisible({ timeout: 20_000 });

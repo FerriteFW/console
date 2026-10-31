@@ -69,6 +69,7 @@ npm run e2e:run     # the same without the build
 - Add channels: fixed sets (FRS, GMRS, MURS, PMR446, marine, weather, airband, BC resource roads, calling).
 - Add channels: airports near a place (AM, RX only, worldwide from OurAirports via data.ferritefw.dev; can be saved for offline), place typed or from the radio's GPS or fixed position.
 - Add channels: licensed sites in Canada (TAFL) and the US (FCC) near a place, grouped by licensee, from data.ferritefw.dev; each source can be saved for offline.
+- Add channels: the "near me" map (the default view for airports and licensed sites): one marker per site, clustered when zoomed out, layers per source, a popup to tick frequencies, a Picked list with one Add; the radius as a circle to drag. The place from the radio, "Use my location" (browsers; not the macOS desktop app) or typed.
 - Radio Settings: every menu setting by its number and name; write with a backup and a diff first.
 - The model is the radio's own menu, found by running ferrite's App; a core test fails when the radio gains a setting Console doesn't show.
 - Settings no record carries (Watch, Battery Save, the message sound, MENU 0 5's symbol, comment, ambiguity, Mic-E, telemetry, TX delay and level): read with the radio's `dump`, written as its `set` lines.

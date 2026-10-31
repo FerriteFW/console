@@ -1,21 +1,17 @@
 <script lang="ts">
-  // The place and radius for Airports and licensed sites: typed (lat,lon or a grid square) or from the radio (its GPS fix,
-  // else its fixed position).
+  // The place and radius for Airports and licensed sites (list and map): typed (lat,lon or a grid square), from the
+  // radio (its GPS fix, else its fixed position), or this computer's location ("Use my location": asked only on that
+  // click, never on load). The desktop app on macOS has no location in its webview (wry doesn't pass WebKit's
+  // geolocation through yet), so the button isn't there.
   import { library } from "../../library.svelte";
   import { radio } from "../../radio.svelte";
+  import { isTauri } from "../../transport/native";
 
   const connected = $derived(radio.phase === "connected");
   const place = $derived(library.place);
-  let asking = $state(false);
-
-  async function fromRadio() {
-    asking = true;
-    try {
-      await library.placeFromRadio();
-    } finally {
-      asking = false;
-    }
-  }
+  const canLocate = typeof navigator !== "undefined" && !!navigator.geolocation && !(isTauri() && /Mac/.test(navigator.userAgent));
+  /** The radius choices, plus the map's own (dragged or slid) when it isn't one. */
+  const radii = $derived([...new Set([10, 25, 50, 100, 200, 400, library.radius])].sort((a, b) => a - b));
 </script>
 
 <div class="place">
@@ -29,18 +25,24 @@
       aria-label="Place: latitude, longitude or grid square"
     />
   </label>
-  <button class="btn" disabled={!connected || asking} onclick={fromRadio} title="The radio's GPS fix, else its fixed position (MENU 0 6 9)">
-    {asking ? "Asking…" : "From radio"}
+  <button class="btn" disabled={!connected || !!library.asking} onclick={() => library.placeFromRadio()} title="The radio's GPS fix, else its fixed position (MENU 0 6 9)">
+    {library.asking === "radio" ? "Asking…" : "From radio"}
   </button>
+  {#if canLocate}
+    <button class="btn" disabled={!!library.asking} onclick={() => library.placeFromBrowser()} title="This computer's location (the browser asks you first)">
+      {library.asking === "browser" ? "Locating…" : "Use my location"}
+    </button>
+  {/if}
   <label>
     <span class="label">Within</span>
     <select bind:value={library.radius} aria-label="Radius">
-      {#each [10, 25, 50, 100, 200, 400] as r (r)}<option value={r}>{r} km</option>{/each}
+      {#each radii as r (r)}<option value={r}>{r} km</option>{/each}
     </select>
   </label>
   <span class="sub">
     {#if place}{library.placeFrom || `${place.lat.toFixed(4)}, ${place.lon.toFixed(4)}`} · {place.grid}{:else if library.placeText.trim()}<span class="bad">Not a place: lat, lon or a grid square (CN89, CN89kg)</span>{:else}Latitude, longitude or a grid square{/if}
   </span>
+  {#if library.locNote}<span class="note" role="status">{library.locNote}</span>{/if}
 </div>
 
 <style>
@@ -73,5 +75,10 @@
   }
   .bad {
     color: var(--red);
+  }
+  .note {
+    flex-basis: 100%;
+    color: var(--sub);
+    font-size: 12px;
   }
 </style>

@@ -41,6 +41,12 @@ class Library {
   }
   /** Radius in km. */
   radius = $state(50);
+  /** Airports and Licensed sites: the map (the default) or the list. */
+  view = $state<"map" | "list">("map");
+  /** Asking the radio or the browser for the place. */
+  asking = $state<"" | "radio" | "browser">("");
+  /** Why the browser's location didn't come (refused, unavailable): said calmly beside the place. */
+  locNote = $state("");
 
   private pending = new Map<string, Promise<unknown>>();
 
@@ -73,30 +79,69 @@ class Library {
    * The radio's place: its GPS fix (the terminal's `gps`: the last GGA) if it has one, else its fixed position
    * (`get 0 6 9`). Fills the place box; says where it came from.
    */
-  async placeFromRadio() {
+  async placeFromRadio(auto = false) {
     const link = radio.connectedLink;
-    this.error = "";
+    if (!auto) this.error = "";
     if (!link) {
-      this.error = "Connect to a radio first, or type a place.";
+      if (!auto) this.error = "Connect to a radio first, or type a place.";
       return;
     }
-    for (const [cmd, what] of [
-      ["gps", "the radio's GPS"],
-      ["get 0 6 9", "the radio's fixed position"],
-    ] as const) {
-      try {
-        const text = await link.cmd(cmd);
-        const p = parsePlace(text);
-        if (p) {
-          this.placeText = `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
-          this.placeFrom = `From ${what}`;
-          return;
+    if (this.asking) return;
+    this.asking = "radio";
+    const was = this.placeText;
+    try {
+      for (const [cmd, what] of [
+        ["gps", "the radio's GPS"],
+        ["get 0 6 9", "the radio's fixed position"],
+      ] as const) {
+        try {
+          const text = await link.cmd(cmd);
+          const p = parsePlace(text);
+          if (p) {
+            // A place typed while the radio was asked wins.
+            if (this.placeText !== was) return;
+            this.placeText = `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
+            this.placeFrom = `From ${what}`;
+            this.locNote = "";
+            return;
+          }
+        } catch {
+          /* the next one */
         }
-      } catch {
-        /* the next one */
       }
+      if (!auto) this.error = "The radio has no GPS fix and no fixed position (MENU 0 6 9). Type a place or a grid square.";
+    } finally {
+      this.asking = "";
     }
-    this.error = "The radio has no GPS fix and no fixed position (MENU 0 6 9). Type a place or a grid square.";
+  }
+
+  /**
+   * This computer's location (the browser's), asked only when the person clicks "Use my location". Refused or
+   * unavailable: a calm note, the place left as it was.
+   */
+  async placeFromBrowser() {
+    this.locNote = "";
+    const geo = typeof navigator !== "undefined" ? navigator.geolocation : undefined;
+    if (!geo) {
+      this.locNote = "This browser can't tell its location. Type a place or a grid square.";
+      return;
+    }
+    this.asking = "browser";
+    const was = this.placeText;
+    try {
+      const p = await new Promise<GeolocationPosition>((ok, no) => geo.getCurrentPosition(ok, no, { timeout: 15_000, maximumAge: 600_000 }));
+      if (this.placeText !== was) return; // a place typed meanwhile wins
+      this.placeText = `${p.coords.latitude.toFixed(4)}, ${p.coords.longitude.toFixed(4)}`;
+      this.placeFrom = "From this computer's location";
+    } catch (e) {
+      const code = (e as GeolocationPositionError).code;
+      this.locNote =
+        code === 1
+          ? "Location is off for Console (the browser asked and it was refused). Allow it in the browser's site settings, or type a place."
+          : "Your location isn't available right now. Type a place or a grid square.";
+    } finally {
+      this.asking = "";
+    }
   }
 
   /** Entries into the table (through the core's checks). The table's new rows show green until written. */

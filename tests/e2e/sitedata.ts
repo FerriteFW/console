@@ -15,11 +15,15 @@ async function fixtureZip(src: string): Promise<Buffer> {
   return Buffer.from(await (await createZip(entries)).arrayBuffer());
 }
 
-/** data.ferritefw.dev from the fixtures; the top index carries the zips' real sizes and SHA-256. Returns the paths asked. */
+/** The map's OpenStreetMap tiles refused: the tests never use the internet (the map draws without them). */
+export const blockTiles = (p: Page) => p.route("https://tile.openstreetmap.org/**", (r) => r.abort());
+
+/** data.ferritefw.dev from the fixtures (and the map's tiles refused); the top index carries the zips' real sizes and SHA-256. Returns the paths asked. */
 export async function serveData(p: Page): Promise<string[]> {
   const zips = new Map<string, Buffer>();
   for (const src of ["tafl", "fcc", "airports"]) zips.set(`${src}.zip`, await fixtureZip(src));
   const asked: string[] = [];
+  await blockTiles(p);
   await p.route(`${DATA}/**`, async (route: Route) => {
     const path = new URL(route.request().url()).pathname.slice(1);
     asked.push(path);

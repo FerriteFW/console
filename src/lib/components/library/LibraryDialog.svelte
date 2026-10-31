@@ -1,11 +1,11 @@
 <script lang="ts">
   // "Add channels": the channel library beside CHIRP import. Fixed sets, airports and licensed sites near a
-  // place (ported from NeonPlug); repeaters not yet (see the tab). Added channels go into the table as new rows, checked
-  // by ferrite's own code; Write then shows them in the diff as usual.
+  // place (ported from NeonPlug), as a list or on the "near me" map (NearbyTab); repeaters not yet (see the tab).
+  // Added channels go into the table as new rows, checked by ferrite's own code; Write then shows them in the diff
+  // as usual.
   import { library } from "../../library.svelte";
   import FixedTab from "./FixedTab.svelte";
-  import AirportsTab from "./AirportsTab.svelte";
-  import SitesTab from "./SitesTab.svelte";
+  import NearbyTab from "./NearbyTab.svelte";
   import { channels } from "../../channels.svelte";
 
   const tabs = [
@@ -46,10 +46,8 @@
           {#if library.error}<div class="banner">{library.error}</div>{/if}
           {#if library.tab === "fixed"}
             <FixedTab onadded={close} />
-          {:else if library.tab === "airports"}
-            <AirportsTab onadded={close} />
-          {:else if library.tab === "sites"}
-            <SitesTab onadded={close} />
+          {:else if library.tab === "airports" || library.tab === "sites"}
+            <NearbyTab tab={library.tab} onadded={close} />
           {:else}
             <div class="stub">
               <h3>Repeaters: not yet</h3>

@@ -4,7 +4,7 @@
 // at your own risk). Airports and licensed sites never use the network: data.ferritefw.dev is served from
 // tests/e2e/fixtures/sitedata (a few tiny tiles) by ./sitedata.ts.
 import { type Page } from "@playwright/test";
-import { DATA, serveData } from "./sitedata";
+import { DATA, blockTiles, serveData } from "./sitedata";
 import { connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
 
 let page: Page;
@@ -27,7 +27,12 @@ async function openLibrary(tab: string) {
   await page.getByRole("button", { name: "Add from library…" }).click();
   await expect(lib()).toBeVisible();
   await lib().getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
+  // Airports and Licensed sites open on the map (nearme.spec.ts); these tests use the lists.
+  if (tab === "Airports" || tab === "Licensed sites") await lib().getByRole("button", { name: "List", exact: true }).click();
 }
+
+/** The list view (Airports and Licensed sites open on the map). */
+const listView = (d: ReturnType<Page["getByRole"]>) => d.getByRole("button", { name: "List", exact: true }).click();
 
 /** Each group its own page, connected and read (the groups can run on two workers, each with its own simulator). */
 function hooks() {
@@ -112,7 +117,7 @@ test.describe.serial("near a place", () => {
     const cyvr = lib().getByRole("checkbox", { name: "CYVR", exact: true });
     await expect(cyvr).toBeVisible({ timeout: 20_000 });
     // Level 2: 2-character fields only (Vancouver's is CN; the radio's place, asked first, may add its own).
-    const tiles = asked.filter((p) => !p.endsWith("index.json"));
+    const tiles = asked.filter((p) => p.startsWith("airports/") && !p.endsWith("index.json"));
     expect(tiles).toContain("airports/CN.json");
     for (const t of tiles) expect(t).toMatch(/^airports\/[A-R]{2}\.json$/);
     // Boundary Bay (18 km) is listed; Victoria (63 km) is not.
@@ -189,7 +194,7 @@ test.describe.serial("near a place", () => {
     const filter = lib().getByLabel("Filter licensed sites");
     await expect(filter).toBeVisible({ timeout: 30_000 });
     // Near Vancouver: CN89 is split, so its subsquares come (je, ke), and the US square south of it (CN88).
-    expect(asked.filter((p) => !p.endsWith("index.json")).sort()).toEqual(["fcc/CN88.json", "tafl/CN89je.json", "tafl/CN89ke.json"]);
+    expect(asked.filter((p) => /^(tafl|fcc)\//.test(p) && !p.endsWith("index.json")).sort()).toEqual(["fcc/CN88.json", "tafl/CN89je.json", "tafl/CN89ke.json"]);
     const list = lib().getByLabel("Licensed sites near the place");
     await expect(list).toContainText("point roberts"); // US
     await expect(list).toContainText("richmond works"); // Canada
@@ -213,9 +218,9 @@ test.describe.serial("near a place", () => {
     await shot(page, info, "36-library-sites");
     await filter.fill("fire");
     await lib().getByRole("button", { name: "All shown" }).click();
-    await expect(lib().getByRole("button", { name: "Add 4 entries" })).toBeEnabled();
+    await expect(lib().getByRole("button", { name: "Add 4 channels" })).toBeEnabled();
     const before = await state(page, (f) => f.channels.table.channels.length);
-    await lib().getByRole("button", { name: "Add 4 entries" }).click();
+    await lib().getByRole("button", { name: "Add 4 channels" }).click();
     await expect(lib()).toHaveCount(0);
     const added = await state(page, (f) => f.channels.table.channels.filter((c: any) => c.name === "bc ferries" || c.name === "vancouver fire"));
     expect(await state(page, (f) => f.channels.table.channels.length)).toBe(before + 4);
@@ -249,6 +254,7 @@ test.describe.serial("near a place", () => {
 test.describe("licensed sites, no radio", () => {
   test("data not reachable: says so, no crash", async ({ browser }, info) => {
     const p = await browser.newPage();
+    await blockTiles(p);
     await p.route(`${DATA}/**`, (r) => r.abort("internetdisconnected"));
     await openConsole(p, "channels");
     await p.getByRole("button", { name: "Add from library…" }).first().click();
@@ -268,6 +274,7 @@ test.describe("licensed sites, no radio", () => {
     await p.getByRole("button", { name: "Add from library…" }).first().click();
     const d = p.getByRole("dialog", { name: "Add channels" });
     await d.getByRole("tab", { name: /^Licensed sites/ }).click();
+    await listView(d);
     const save = d.getByRole("button", { name: /^Save Canada for offline \(\d+ KB\)$/ });
     await expect(save).toBeVisible();
     await save.click();
@@ -288,6 +295,7 @@ test.describe("licensed sites, no radio", () => {
     await p.getByRole("button", { name: "Add from library…" }).first().click();
     const d = p.getByRole("dialog", { name: "Add channels" });
     await d.getByRole("tab", { name: /^Airports/ }).click();
+    await listView(d);
     // Only the airports source in this tab's footer, not the licensed sites'.
     await expect(d.getByRole("button", { name: /^Save Canada for offline/ })).toHaveCount(0);
     const save = d.getByRole("button", { name: /^Save Airports for offline \(\d+ KB\)$/ });
@@ -306,6 +314,7 @@ test.describe("licensed sites, no radio", () => {
 
   test("airports: data not reachable: says so", async ({ browser }) => {
     const p = await browser.newPage();
+    await blockTiles(p);
     await p.route(`${DATA}/**`, (r) => r.abort("internetdisconnected"));
     await openConsole(p, "channels");
     await p.getByRole("button", { name: "Add from library…" }).first().click();

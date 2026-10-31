@@ -1,115 +1,41 @@
 <script lang="ts">
-  // Licensed sites near a place: Canada (ISED's TAFL) and the US (the FCC's ULS), tiled from data.ferritefw.dev
-  // (sites.svelte.ts). Licensee names grouped by their first words, one channel per name and frequency. RX only by
-  // default: these are other people's licensed channels. Each row's mode comes from the data (NFM or FM; digital
-  // only is hidden unless asked for; unknown takes the tab's mode). The footer has each source's attribution, its
-  // offline copy ("Save for offline") and the update the server offers.
+  // Licensed sites near a place, as a list: Canada (ISED's TAFL) and the US (the FCC's ULS), tiled from
+  // data.ferritefw.dev (sites.svelte.ts). Licensee names grouped by their first words, one entry per name and
+  // frequency. RX only by default: these are other people's licensed channels. Each row's mode comes from the data
+  // (NFM or FM; digital only is hidden unless asked for; unknown takes the "unknown mode" choice). The rows, the
+  // picks and Add are nearby.svelte.ts's, shared with the map and the Airports list. The footer has each source's
+  // attribution, its offline copy ("Save for offline") and the update the server offers.
   import { library } from "../../library.svelte";
-  import { channels } from "../../channels.svelte";
-  import { Sites, sites, sourceName } from "../../sites.svelte";
-  import { MODE_DIGITAL, MODE_FM, MODE_NFM } from "../../sitedata";
-  import { near, taflGroups, type LibraryItem } from "../../core";
-  import PlacePicker from "./PlacePicker.svelte";
+  import { sites, sourceName } from "../../sites.svelte";
+  import { MODE_DIGITAL } from "../../sitedata";
+  import { MOBILE, mhz, modeLabel, nearby, type SiteEntry } from "../../nearby.svelte";
   import DataFooter from "./DataFooter.svelte";
-  import ZoneTarget, { zoneName, type Target } from "./ZoneTarget.svelte";
+  import AddBar from "./AddBar.svelte";
 
   let { onadded }: { onadded: () => void } = $props();
 
-  /** The sites for this place and radius (not an earlier place's while the new one loads). */
-  const result = $derived.by(() => {
-    const p = library.place;
-    const d = sites.near;
-    return p && d && d.key === Sites.key(p.lat, p.lon, library.radius) ? d : null;
-  });
-
-  sites.start();
-  $effect(() => {
-    const p = library.place;
-    if (p) sites.look(p.lat, p.lon, library.radius);
-  });
-
+  const result = $derived(nearby.siteResult);
   let filter = $state("");
-  let picked = $state<Set<string>>(new Set());
   let open = $state<Set<string>>(new Set());
-  let rxOnly = $state(true);
-  let digital = $state(false);
-  let mode = $state<"NFM" | "FM">("NFM");
-  let target = $state<Target>({ kind: "each", name: "Licensed sites", existing: 0 });
 
-  type Entry = { key: string; src: string; name: string; f: number; m: number; mobile: boolean; km: number; group: string; pos: [number, number] };
-  /** Near entries, one per name and frequency (the nearest), grouped. */
-  const nearAll = $derived.by((): Entry[] => {
-    const d = result;
-    const p = library.place;
-    if (!d || !p) return [];
-    const seen = new Set<string>();
-    const out: Omit<Entry, "group">[] = [];
-    for (const { i, km } of near(p, library.radius, d.coords, 5000)) {
-      const r = d.sites[i];
-      const key = `${r.name}|${r.f}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ key, src: r.src, name: r.name, f: r.f, m: r.m, mobile: r.mobile, km, pos: [r.lat, r.lon] });
-    }
-    const groups = taflGroups(out.map((e) => e.name));
-    return out.map((e, k) => ({ ...e, group: groups[k] }));
-  });
-  const nDigital = $derived(nearAll.filter((e) => e.m === MODE_DIGITAL).length);
-  const entries = $derived(digital ? nearAll : nearAll.filter((e) => e.m !== MODE_DIGITAL));
+  const entries = $derived(nearby.siteEntries);
+  const nDigital = $derived(nearby.nDigital);
   /** The sources with rows here (a place near the border has both). */
   const here = $derived(new Set(entries.map((e) => e.src)));
   const shown = $derived.by(() => {
     const q = filter.trim().toLowerCase();
     const list = q ? entries.filter((e) => e.name.toLowerCase().includes(q) || mhz(e.f).startsWith(q)) : entries;
-    const g = new Map<string, Entry[]>();
+    const g = new Map<string, SiteEntry[]>();
     for (const e of list) g.set(e.group, [...(g.get(e.group) ?? []), e]);
     return [...g.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   });
+  const nPicked = $derived(nearby.pickedSites.length);
 
-  function set(keys: string[], on: boolean) {
-    const n = new Set(picked);
-    for (const k of keys) {
-      if (on) n.add(k);
-      else n.delete(k);
-    }
-    picked = n;
-  }
   function flip(g: string) {
     const n = new Set(open);
     if (n.has(g)) n.delete(g);
     else n.add(g);
     open = n;
-  }
-  /** Half kHz to MHz, 4 decimals (a trailing 0 dropped). */
-  const mhz = (f: number) => (f / 2000).toFixed(4).replace(/0$/, "");
-  const modeLabel = (m: number) => (m === MODE_NFM ? "NFM" : m === MODE_FM ? "FM" : m === MODE_DIGITAL ? "Digital" : "Mode ?");
-  const modeOf = (m: number): "NFM" | "FM" => (m === MODE_NFM ? "NFM" : m === MODE_FM ? "FM" : mode);
-  const MOBILE = "A mobile's frequency: often a repeater's input, or the centre of a mobile area";
-
-  function add() {
-    const zones = channels.table.zones;
-    const sel = entries.filter((e) => picked.has(e.key));
-    // One channel per zone and frequency: the licensees sharing it named on the first.
-    const byZf = new Map<string, { e: Entry; more: number; zone: string }>();
-    for (const e of sel) {
-      const zone = zoneName(target, e.group, zones);
-      const k = `${zone}|${e.f}`;
-      const was = byZf.get(k);
-      if (was) was.more++;
-      else byZf.set(k, { e, more: 0, zone });
-    }
-    const items: LibraryItem[] = [...byZf.values()].map(({ e, more, zone }) => ({
-      name: more ? `${e.name.slice(0, 12).trimEnd()} +${more}` : e.name,
-      rx: e.f / 2000,
-      mode: modeOf(e.m),
-      power: "Low",
-      rx_only: rxOnly,
-      zone,
-      pos: e.pos, // the site's licensed position (LINK-53: the channel's)
-    }));
-    library.add(items, `licensed sites (${sel.length} ${sel.length === 1 ? "licence" : "licences"})`);
-    picked = new Set();
-    onadded();
   }
 
   const failed = $derived(result?.failed ?? []);
@@ -117,7 +43,6 @@
   const down = $derived(!!result && !result.sources.length && failed.length > 0 && failed.length >= sites.sources.length);
 </script>
 
-<PlacePicker />
 {#if !library.place}
   <p class="sub">
     {#if sites.top}
@@ -139,24 +64,24 @@
 {:else}
   <div class="head">
     <input class="find" type="search" placeholder="Filter: name or MHz" bind:value={filter} aria-label="Filter licensed sites" />
-    <span>{entries.length} near · {picked.size} picked</span>
+    <span>{entries.length} near · {nPicked} picked</span>
     <label class="dig">
-      <input type="checkbox" bind:checked={digital} title="Sites licensed for digital or data only (no analog voice)" /> Show digital only ({nDigital})
+      <input type="checkbox" bind:checked={nearby.digital} title="Sites licensed for digital or data only (no analog voice)" /> Show digital only ({nDigital})
     </label>
     <span class="spacer"></span>
-    <button class="btn quiet sm" onclick={() => set(shown.flatMap(([, es]) => es.map((e) => e.key)), true)}>All shown</button>
-    <button class="btn quiet sm" onclick={() => (picked = new Set())}>None</button>
+    <button class="btn quiet sm" onclick={() => nearby.set(shown.flatMap(([, es]) => es.map((e) => e.key)), true)}>All shown</button>
+    <button class="btn quiet sm" onclick={() => nearby.set(entries.map((e) => e.key), false)}>None</button>
   </div>
   {#if failed.length}
     <p class="warn">{failed.map((f) => `${sourceName(f.src, sites.source(f.src)?.title)}: ${f.error}`).join(" · ")}</p>
   {/if}
   <div class="list" aria-label="Licensed sites near the place">
     {#each shown as [g, es] (g)}
-      {@const all = es.every((e) => picked.has(e.key))}
-      {@const some = es.some((e) => picked.has(e.key))}
+      {@const all = es.every((e) => nearby.has(e.key))}
+      {@const some = es.some((e) => nearby.has(e.key))}
       <div class="grp">
         <div class="gh">
-          <input type="checkbox" checked={all} indeterminate={some && !all} onchange={() => set(es.map((e) => e.key), !all)} aria-label={`Group ${g}`} />
+          <input type="checkbox" checked={all} indeterminate={some && !all} onchange={() => nearby.set(es.map((e) => e.key), !all)} aria-label={`Group ${g}`} />
           {#if es.length > 1}
             <button class="tw" onclick={() => flip(g)} aria-expanded={open.has(g)}>{open.has(g) ? "▾" : "▸"} <b>{g}</b> <span class="sub">{es.length} entries · {Math.round(es[0].km)} km</span></button>
           {:else}
@@ -172,7 +97,7 @@
         {#if es.length > 1 && open.has(g)}
           {#each es as e (e.key)}
             <label class="en">
-              <input type="checkbox" checked={picked.has(e.key)} onchange={() => set([e.key], !picked.has(e.key))} />
+              <input type="checkbox" checked={nearby.has(e.key)} onchange={() => nearby.toggle(e.key)} />
               <span>{e.name}</span><span class="mhz">{mhz(e.f)}</span>
               <span><span class="tag" class:dim={e.m === MODE_DIGITAL}>{modeLabel(e.m)}</span>{#if e.mobile}&nbsp;<span class="tag mob" title={MOBILE}>mobile</span>{/if}</span>
               <span class="sub">{here.size > 1 ? `${sourceName(e.src)} · ` : ""}{e.km.toFixed(1)} km</span>
@@ -182,20 +107,12 @@
       </div>
     {:else}
       <p class="sub pad">
-        Nothing within {library.radius} km{filter ? " matches" : ""}.{#if !digital && nDigital}&nbsp;{nDigital} digital-only {nDigital === 1 ? "site is" : "sites are"} hidden.{/if}
+        Nothing within {library.radius} km{filter ? " matches" : ""}.{#if !nearby.digital && nDigital}&nbsp;{nDigital} digital-only {nDigital === 1 ? "site is" : "sites are"} hidden.{/if}
       </p>
     {/each}
   </div>
 {/if}
-<div class="opts">
-  <label><input type="checkbox" bind:checked={rxOnly} /> RX only (listen; these are other licensees' channels)</label>
-  <label>Unknown mode as <select bind:value={mode} title="For sites whose mode the licence doesn't say; the others take theirs (NFM or FM)"><option>NFM</option><option>FM</option></select></label>
-</div>
-<div class="foot">
-  <ZoneTarget bind:value={target} each="One zone per name group" />
-  <span class="spacer"></span>
-  <button class="btn primary" disabled={!picked.size} onclick={add}>Add {picked.size} {picked.size === 1 ? "entry" : "entries"}</button>
-</div>
+<AddBar each="One zone per name group" licensed {onadded} />
 <DataFooter data={sites} {here} />
 
 <style>
@@ -206,8 +123,7 @@
     font-size: 12px;
     color: var(--sub);
   }
-  .find,
-  select {
+  .find {
     font: inherit;
     color: var(--text);
     background: var(--bg);
@@ -281,25 +197,6 @@
   }
   .tag.mob {
     border-style: dashed;
-  }
-  .opts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 18px;
-    font-size: 13px;
-  }
-  .opts label {
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-  }
-  .foot {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
-    border-top: 1px solid var(--line);
-    padding-top: 12px;
   }
   .msg {
     display: flex;
