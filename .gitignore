@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-single/
 target/
+target-linux/
 src/core-wasm/
 src/fonts/
 src-tauri/gen/schemas/

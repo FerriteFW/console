@@ -43,22 +43,25 @@ $ssh "$host" bash -s -- "$dir" "$what" <<'REMOTE'
 set -euo pipefail
 dir=$HOME/$1 what=$2
 cd "$dir"
-docker build -q -t ferrite-console-desktop "$dir/ferrite-console/tools/desktop" >/dev/null
+# Two build boxes: Linux on Ubuntu 22.04 (tools/desktop/linux: the oldest glibc to support), Windows on Debian 13
+# (tools/desktop: NSIS 3.11 for the installer). Each its own cargo target folder: build scripts compiled against one
+# glibc don't run on the other.
+[ "$what" = windows ] || docker build -q -t ferrite-console-desktop-linux "$dir/ferrite-console/tools/desktop/linux" >/dev/null
+[ "$what" = linux ] || docker build -q -t ferrite-console-desktop "$dir/ferrite-console/tools/desktop" >/dev/null
 docker volume create ferrite-console-xwin >/dev/null
-run() {
-  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e XWIN_CACHE_DIR=/xwin \
-    -v "$dir:/src" -v ferrite-console-xwin:/xwin -w /src/ferrite-console ferrite-console-desktop bash -c "$1"
+run() { # IMAGE TARGET-DIR COMMAND
+  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e XWIN_CACHE_DIR=/xwin -e CARGO_TARGET_DIR="/src/ferrite-console/$2" \
+    -v "$dir:/src" -v ferrite-console-xwin:/xwin -w /src/ferrite-console "$1" bash -c "npm ci --no-audit --no-fund --silent && $3"
 }
 docker run --rm -v ferrite-console-xwin:/xwin alpine chmod 777 /xwin
-run 'npm ci --no-audit --no-fund --silent'
 out=$dir/out; rm -rf "$out"; mkdir -p "$out"
 if [ "$what" != windows ]; then
-  run 'npx tauri build 2>&1 | tail -n 15'
-  cp ferrite-console/target/release/bundle/deb/*.deb ferrite-console/target/release/bundle/rpm/*.rpm \
-     ferrite-console/target/release/bundle/appimage/*.AppImage "$out/" 2>/dev/null || true
+  run ferrite-console-desktop-linux target-linux 'npx tauri build 2>&1 | tail -n 15'
+  cp ferrite-console/target-linux/release/bundle/deb/*.deb ferrite-console/target-linux/release/bundle/rpm/*.rpm \
+     ferrite-console/target-linux/release/bundle/appimage/*.AppImage "$out/" 2>/dev/null || true
 fi
 if [ "$what" != linux ]; then
-  run 'npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc 2>&1 | tail -n 15'
+  run ferrite-console-desktop target 'npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc 2>&1 | tail -n 15'
   cp ferrite-console/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe "$out/" 2>/dev/null || true
   # The bare app too: runs without installing (Windows 10 and 11 have the WebView2 runtime it needs).
   cp ferrite-console/target/x86_64-pc-windows-msvc/release/ferrite-console-app.exe "$out/Ferrite Console portable.exe" 2>/dev/null || true
