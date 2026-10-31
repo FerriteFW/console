@@ -132,6 +132,17 @@ pub fn waypoint_writes(old: &[Waypoint], new: &[Waypoint]) -> Records {
     out
 }
 
+/// LINK-58: a range preset's skip list record (its skipped frequencies, 10 Hz, u32 each); an empty list clears it.
+/// Write it after the presets: the list stays with the preset in its place.
+pub fn preset_skips_record(f: &[u32]) -> Vec<u8> {
+    f.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
+/// LINK-58: a `READ_MANY` record of `what` 11 as the skipped frequencies; None if its length isn't a multiple of 4.
+pub fn preset_skips_from_record(rec: &[u8]) -> Option<Vec<u32>> {
+    rec.len().is_multiple_of(4).then(|| rec.chunks(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+}
+
 /// A list `READ_MANY` answer's records: `(index, record)`, and the index to go on from (LINK-40).
 pub fn parse_many(rest: &[u8]) -> Option<(u16, Records)> {
     let mut r = Rd(rest);
@@ -187,6 +198,28 @@ mod tests {
         assert_eq!(s, 0);
         let h = crate::answers::Hello::parse(&a).unwrap();
         assert!(h.caps & caps::LISTS != 0, "caps {:#x}", h.caps);
+    }
+
+    /// LINK-58: a preset's skip list written and read back through ferrite's session; it stays with its preset when
+    /// the one before is deleted; one outside the range is refused with ferrite's reason; caps2 says so.
+    #[test]
+    fn preset_skips_through_ferrites_link() {
+        use ferrite_app::data::RangePreset;
+        let mut r = RadioSide::new();
+        let (_, a) = r.ask(msg::HELLO, &crate::answers::hello_payload("test"));
+        assert!(crate::answers::Hello::parse(&a).unwrap().caps2 & ferrite_core::link::caps2::PRESET_SKIPS != 0);
+        let pr = |n: &[u8], start: u32| RangePreset { name: ferrite_ui::text::Buf::from(n), start, end: start + 400_000, step: 10, mode: 0, narrow: true, skips: 0, resume: 0 };
+        r.seed_presets(&[pr(b"2 m", 14_400_000), pr(b"70 cm", 43_000_000)]);
+        assert!(all(&mut r, what::PRESET_SKIPS).is_empty());
+        let list: Vec<u32> = (1..=30).map(|j| 43_000_000 + 2_500 * j).collect();
+        assert_eq!(write_many(&mut r, what::PRESET_SKIPS, &[(1, preset_skips_record(&list))]).0, 0);
+        assert_eq!(preset_skips_from_record(&r.read_one(what::PRESET_SKIPS, 1).unwrap()), Some(list.clone()));
+        assert_eq!(r.ask(msg::DELETE, &[what::PRESET, 0, 0]).0, 0);
+        assert_eq!(preset_skips_from_record(&r.read_one(what::PRESET_SKIPS, 0).unwrap()), Some(list), "with its preset");
+        let (s, why) = write_many(&mut r, what::PRESET_SKIPS, &[(0, preset_skips_record(&[14_400_000]))]);
+        assert_eq!(s, Status::Invalid as u8);
+        assert!(String::from_utf8_lossy(&why).contains("range"));
+        assert_eq!(preset_skips_from_record(&[1, 2, 3]), None);
     }
 
     /// LINK-54: the nine quick messages read as the factory texts; one Console sets reads back as the owner's, the

@@ -112,7 +112,8 @@ pub fn protocol() -> String {
                  "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP,
                  "MSG_DELETE": msg::MSG_DELETE, "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION,
-                  "QUICK": what::QUICK, "WAYPOINT": what::WAYPOINT, "DTMF": what::DTMF },
+                  "QUICK": what::QUICK, "WAYPOINT": what::WAYPOINT, "DTMF": what::DTMF, "PRESET_SKIPS": what::PRESET_SKIPS },
+        "caps2": { "PRESET_SKIPS": ferrite_console_core::link::caps2::PRESET_SKIPS },
         "caps": { "POSITION": ferrite_console_core::link::caps::POSITION, "LISTS": ferrite_console_core::link::caps::LISTS },
         "waypointAdd": lists::WAYPOINT_ADD,
         "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "SUB_LOG": event::SUB_LOG, "LOG": event::LOG, "HEARD": event::HEARD,
@@ -329,6 +330,20 @@ pub fn dtmf_record(m: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn dtmf_from_record(rec: &[u8]) -> Option<String> {
     lists::dtmf_from_record(rec).map(|m| json(&m))
+}
+
+/// LINK-58: a `WRITE_MANY` record of `what` 11 for a range preset's skip list (JSON list of frequencies, 10 Hz;
+/// `[]` clears it). Write it after the presets: a list stays with the preset in its place.
+#[wasm_bindgen]
+pub fn preset_skips_record(f: &str) -> Result<Vec<u8>, JsError> {
+    let f: Vec<u32> = from_json(f, "skipped frequencies")?;
+    Ok(lists::preset_skips_record(&f))
+}
+
+/// LINK-58: a `READ_MANY` record of `what` 11 as a JSON list of frequencies (10 Hz), or undefined.
+#[wasm_bindgen]
+pub fn preset_skips_from_record(rec: &[u8]) -> Option<String> {
+    lists::preset_skips_from_record(rec).map(|f| json(&f))
 }
 
 #[wasm_bindgen]

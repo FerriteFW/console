@@ -36,6 +36,8 @@ pub struct MemStore {
     pub logged: Cell<u32>,
     /// Range presets (MENU 0 1 4), in order; up to 16.
     pub presets: RefCell<Vec<RangePreset>>,
+    /// Each preset's skipped frequencies (SCAN-10, LINK-58), beside it: they move with it.
+    pub preset_skips: RefCell<Vec<Vec<u32>>>,
     version: Cell<u32>,
 }
 
@@ -164,6 +166,10 @@ impl Data for MemStore {
     fn preset(&self, i: u8) -> Option<RangePreset> {
         self.presets.borrow().get(i as usize).copied()
     }
+    fn preset_skip(&self, i: u8, j: u8) -> Option<u32> {
+        let n = self.preset(i)?.skips;
+        self.preset_skips.borrow().get(i as usize)?.get(j as usize).copied().filter(|_| j < n)
+    }
     fn request(&self, op: Op) -> bool {
         let ok = match op {
             Op::DeleteChannel(n) => self.chans.borrow_mut().remove(&n).is_some(),
@@ -260,7 +266,10 @@ impl Data for MemStore {
                         true
                     }
                     core::cmp::Ordering::Equal if ps.len() < 16 && matches!(op, Op::PutPreset(..)) => {
-                        ps.push(p);
+                        ps.push(RangePreset { skips: 0, ..p });
+                        let mut sk = self.preset_skips.borrow_mut();
+                        sk.resize(ps.len(), Vec::new());
+                        sk[ps.len() - 1].clear();
                         true
                     }
                     _ => false,
@@ -268,7 +277,26 @@ impl Data for MemStore {
             }
             Op::DeletePreset(i) => {
                 let mut ps = self.presets.borrow_mut();
+                let mut sk = self.preset_skips.borrow_mut();
+                if (i as usize) < sk.len() {
+                    sk.remove(i as usize); // its list goes with it (LINK-58)
+                }
                 ((i as usize) < ps.len()).then(|| ps.remove(i as usize)).is_some()
+            }
+            Op::PresetSkips { preset, at, count, f } => {
+                let mut ps = self.presets.borrow_mut();
+                let Some(p) = ps.get_mut(preset as usize) else { return false };
+                p.skips = count;
+                let mut sk = self.preset_skips.borrow_mut();
+                if sk.len() <= preset as usize {
+                    sk.resize(preset as usize + 1, Vec::new());
+                }
+                let l = &mut sk[preset as usize];
+                l.resize(count as usize, 0);
+                for (j, v) in f.iter().enumerate().map(|(j, v)| (at as usize + j, *v)).filter(|(j, _)| *j < count as usize) {
+                    l[j] = v;
+                }
+                true
             }
             _ => false,
         };
@@ -416,6 +444,7 @@ impl RadioSide {
     /// Puts range presets straight into the store (a radio's starting state), bypassing the link's checks.
     pub fn seed_presets(&mut self, presets: &[RangePreset]) {
         *self.store.presets.borrow_mut() = presets.iter().take(16).copied().collect();
+        *self.store.preset_skips.borrow_mut() = vec![Vec::new(); presets.len().min(16)];
         self.store.bump();
     }
 

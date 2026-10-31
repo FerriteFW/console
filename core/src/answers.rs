@@ -93,6 +93,8 @@ pub struct Hello {
     pub build: Option<Build>,
     /// LINK-35.2: what the radio does beyond protocol 2 (1 `STREAM`, 2 two `WRITE_MANY` frames in flight); 0 before.
     pub caps: u8,
+    /// LINK-35.2: the second capability byte (1 range preset skip lists, LINK-58); 0 before decision 329.
+    pub caps2: u8,
 }
 
 impl Hello {
@@ -109,6 +111,7 @@ impl Hello {
             firmware,
             build: after.first().map(|&b| Build::of(b)),
             caps: after.get(1).copied().unwrap_or(0),
+            caps2: after.get(2).copied().unwrap_or(0),
         })
     }
 }
