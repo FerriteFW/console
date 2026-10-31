@@ -94,7 +94,7 @@
 {:else}
   <div class="head">
     <input class="find" type="search" placeholder="Filter: name, category or MHz" bind:value={filter} aria-label="Filter licensed sites" />
-    <span>{entries.length} near · {nPicked} picked</span>
+    <span>{entries.length} near{nearby.siteCapped ? " (the nearest only: make the radius smaller)" : ""} · {nPicked} picked</span>
     <span class="spacer"></span>
     <button class="btn quiet sm" onclick={() => nearby.set(shown.flatMap((c) => c.groups.flatMap((g) => g.es.map((e) => e.key))), true)}>All shown</button>
     <button class="btn quiet sm" onclick={() => nearby.set(entries.map((e) => e.key), false)}>None</button>

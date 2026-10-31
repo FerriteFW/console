@@ -24,6 +24,9 @@ export type Airport = { key: string; c: string; l: [number, number]; km: number;
 /** Half kHz to MHz, 4 decimals (a trailing 0 dropped). */
 export const mhz = (f: number) => (f / 2000).toFixed(4).replace(/0$/, "");
 export const modeLabel = (m: number) => (m === MODE_NFM ? "NFM" : m === MODE_FM ? "FM" : "Mode ?");
+/** The most rows a lookup keeps, nearest first (a big circle over a city has more): the lists and map say so when hit. */
+export const SITE_CAP = 50_000;
+export const AIRPORT_CAP = 2_000;
 export const MOBILE = "A mobile's frequency: often a repeater's input, or the centre of a mobile area";
 
 /** A data set's result for the library's place and radius (not an earlier place's while the new one loads). */
@@ -77,11 +80,12 @@ class Nearby {
 
   /** Licensed sites near the place, nearest first: the entries (one per organization and frequency) and the rows (one
    * per licensee and frequency). Digital only is left out: Ferrite has no digital modes (the data leaves it out too). */
-  #sites = $derived.by((): { entries: SiteEntry[]; rows: SiteRow[] } => {
+  #sites = $derived.by((): { entries: SiteEntry[]; rows: SiteRow[]; capped: boolean } => {
     const d = this.siteResult;
     const p = library.place;
-    if (!d || !p) return { entries: [], rows: [] };
-    const hits = near(p, library.radius, d.coords, 5000).filter(({ i }) => d.sites[i].m !== MODE_DIGITAL);
+    if (!d || !p) return { entries: [], rows: [], capped: false };
+    const all = near(p, library.radius, d.coords, SITE_CAP);
+    const hits = all.filter(({ i }) => d.sites[i].m !== MODE_DIGITAL);
     // Each category's licensees, grouped as organizations.
     const names = new Map<number, Set<string>>();
     for (const { i } of hits) {
@@ -107,9 +111,11 @@ class Nearby {
       const rk = `${r.name}|${r.f}`;
       if (!rows.has(rk)) rows.set(rk, { key, src: r.src, name: r.name, f: r.f, m: r.m, mobile: r.mobile, km, pos: [r.lat, r.lon] });
     }
-    return { entries: [...entries.values()], rows: [...rows.values()] };
+    return { entries: [...entries.values()], rows: [...rows.values()], capped: all.length >= SITE_CAP };
   });
   siteAll = $derived(this.#sites.entries);
+  /** The circle holds more licensed rows than a lookup keeps: only the nearest show. */
+  siteCapped = $derived(this.#sites.capped);
   siteRows = $derived(this.#sites.rows);
   /** The entries the list shows: a source switched off goes too. */
   siteShown = $derived(this.siteAll.filter((e) => this.layers[e.src] !== false));
@@ -134,7 +140,7 @@ class Nearby {
       coords[2 * i] = a.l[0];
       coords[2 * i + 1] = a.l[1];
     });
-    return near(p, library.radius, coords, 300).map(({ i, km }) => ({ ...list[i], km }));
+    return near(p, library.radius, coords, AIRPORT_CAP).map(({ i, km }) => ({ ...list[i], km }));
   });
 
   /** The fixed set of airband frequencies not tied to one airport. */

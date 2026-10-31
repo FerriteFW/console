@@ -278,7 +278,7 @@
       {:else if loading}
         Loading what's near the place…
       {:else}
-        {shownSites.length} {shownSites.length === 1 ? "site" : "sites"} on the map within {library.radius} km.
+        {shownSites.length} {shownSites.length === 1 ? "site" : "sites"} on the map within {library.radius} km.{#if nearby.showLic && nearby.siteCapped}&nbsp;Only the nearest licensed sites show: make the circle smaller to see them all.{/if}
       {/if}
       {#if sitesDown}<span class="bad"><b>Licensed sites aren't available right now.</b> {siteFailed[0].error}. <button class="link" onclick={() => sites.retry()}>Try again</button></span>{/if}
       {#if airDown}<span class="bad"><b>Airports aren't available right now.</b> {airFailed[0].error}. <button class="link" onclick={() => airportSites.retry()}>Try again</button></span>{/if}
