@@ -13,7 +13,6 @@
   import { MOBILE, mhz, modeLabel, nearby, type SiteEntry } from "../../nearby.svelte";
 
   const result = $derived(nearby.siteResult);
-  let filter = $state("");
   let open = $state<Set<string>>(new Set());
   /** Categories switched off (all on to start). */
   let off = $state<Set<number>>(new Set());
@@ -26,11 +25,7 @@
   const here = $derived(new Set(entries.map((e) => e.src)));
   /** The entries the filter keeps: organization, licensee or category name, or the start of the MHz. */
   const matching = $derived.by(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter(
-      (e) => e.group.toLowerCase().includes(q) || e.name.toLowerCase().includes(q) || CATEGORIES[e.k]?.toLowerCase().includes(q) || mhz(e.f).startsWith(q),
-    );
+    return nearby.query.trim() ? entries.filter(nearby.matchSite) : entries;
   });
   /** Each category's count (for its chip), and its organizations' groups (nearest first, frequencies in order). */
   const cats = $derived.by(() => {
@@ -93,7 +88,7 @@
   <p class="sub">Loading licensed sites near the place…</p>
 {:else}
   <div class="head">
-    <input class="find" type="search" placeholder="Filter: name, category or MHz" bind:value={filter} aria-label="Filter licensed sites" />
+    <input class="find" type="search" placeholder="Search: name, category or MHz" bind:value={nearby.query} aria-label="Filter licensed sites" />
     <span>{entries.length} near{nearby.siteCapped ? " (the nearest only: make the radius smaller)" : ""} · {nPicked} picked</span>
     <span class="spacer"></span>
     <button class="btn quiet sm" onclick={() => nearby.set(shown.flatMap((c) => c.groups.flatMap((g) => g.es.map((e) => e.key))), true)}>All shown</button>
@@ -144,7 +139,7 @@
       {/each}
     {:else}
       <p class="sub pad">
-        Nothing within {library.radius} km{filter || off.size ? " matches" : ""}.
+        Nothing within {library.radius} km{nearby.query.trim() || off.size ? " matches" : ""}.
       </p>
     {/each}
   </div>

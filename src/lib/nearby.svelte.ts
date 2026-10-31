@@ -10,14 +10,14 @@
 import { library, type FixedSet } from "./library.svelte";
 import { channels } from "./channels.svelte";
 import { airportSites, sites, Sites, type Near } from "./sites.svelte";
-import { MODE_DIGITAL, MODE_FM, MODE_NFM } from "./sitedata";
+import { CATEGORIES, MODE_DIGITAL, MODE_FM, MODE_NFM } from "./sitedata";
 import { airportName, airportType, libraryFixedItems, near, orgGroups, type LibraryItem } from "./core";
 import { zoneName, type Target } from "./components/library/ZoneTarget.svelte";
 
 /** A licensed entry: an organization's frequency, from its nearest site (`name`: that licensee); `sites`: how many share it. */
 export type SiteEntry = { key: string; src: string; name: string; f: number; m: number; mobile: boolean; km: number; group: string; k: number; sites: number; pos: [number, number] };
 /** A licensee's frequency at its nearest site (the map's markers), with the entry it picks (`key`). */
-export type SiteRow = { key: string; src: string; name: string; f: number; m: number; mobile: boolean; km: number; pos: [number, number] };
+export type SiteRow = { key: string; src: string; name: string; f: number; m: number; mobile: boolean; km: number; group: string; k: number; pos: [number, number] };
 export type AirportFreq = { key: string; khz: number; type: string };
 export type Airport = { key: string; c: string; l: [number, number]; km: number; freqs: AirportFreq[] };
 
@@ -65,6 +65,21 @@ class Nearby {
   showLic = $derived(this.#show !== "air");
   showAir = $derived(this.#show !== "lic");
 
+  /** The search, shared by the list and the map: an organization, licensee or category name, an airport or its
+   * frequency's use, or the start of the MHz. It narrows what shows; picks stay picked. */
+  query = $state("");
+  #q = $derived(this.query.trim().toLowerCase());
+  /** A licensed entry or row the search keeps. */
+  matchSite = (e: { group: string; name: string; k: number; f: number }) => {
+    const q = this.#q;
+    return !q || e.group.toLowerCase().includes(q) || e.name.toLowerCase().includes(q) || !!CATEGORIES[e.k]?.toLowerCase().includes(q) || mhz(e.f).startsWith(q);
+  };
+  /** An airport frequency the search keeps (its airport's code, its use, or the start of the MHz). */
+  matchAirport = (code: string, type: string, khz: number) => {
+    const q = this.#q;
+    return !q || code.toLowerCase().includes(q) || type.toLowerCase().includes(q) || (khz / 1000).toFixed(3).startsWith(q);
+  };
+
   picks = $state<Set<string>>(new Set());
   /** Licensed sites: RX only (other licensees' channels), the mode for an unknown one. */
   rxOnly = $state(true);
@@ -109,7 +124,7 @@ class Nearby {
       if (e) e.sites++;
       else entries.set(key, { key, src: r.src, name: r.name, f: r.f, m: r.m, mobile: r.mobile, km, group, k: r.k, sites: 1, pos: [r.lat, r.lon] });
       const rk = `${r.name}|${r.f}`;
-      if (!rows.has(rk)) rows.set(rk, { key, src: r.src, name: r.name, f: r.f, m: r.m, mobile: r.mobile, km, pos: [r.lat, r.lon] });
+      if (!rows.has(rk)) rows.set(rk, { key, src: r.src, name: r.name, f: r.f, m: r.m, mobile: r.mobile, km, group, k: r.k, pos: [r.lat, r.lon] });
     }
     return { entries: [...entries.values()], rows: [...rows.values()], capped: all.length >= SITE_CAP };
   });

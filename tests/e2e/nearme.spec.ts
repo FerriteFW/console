@@ -76,6 +76,14 @@ test("map: the default, big; Licensed | Airports | Both; chips; picks shared wit
   await chip("Canada").click();
   await expect(marker(d, "richmond works").first()).toBeVisible();
 
+  // The search narrows the map's markers (and the list's rows: the same search).
+  const search = d.getByLabel("Search sites near the place");
+  await search.fill("point roberts");
+  await expect(marker(d, "richmond works")).toHaveCount(0);
+  await expect(marker(d, "point roberts").first()).toBeVisible();
+  await search.fill("");
+  await expect(marker(d, "richmond works").first()).toBeVisible();
+
   // Airports only: airports' markers, no licensed ones, no Canada/US chips.
   await kind(d, "Airports").click();
   await expect(marker(d, "CYVR").first()).toBeVisible({ timeout: 20_000 });

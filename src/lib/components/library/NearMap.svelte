@@ -28,7 +28,7 @@
   const mapSites = $derived.by((): Site[] => {
     const by = new Map<string, Site>();
     for (const e of nearby.showLic ? nearby.siteRows : []) {
-      if (!on(e.src)) continue;
+      if (!on(e.src) || !nearby.matchSite(e)) continue;
       const id = `s|${e.name}|${e.pos[0]}|${e.pos[1]}`;
       let s = by.get(id);
       if (!s) by.set(id, (s = { id, kind: "lic", src: e.src, name: e.name, pos: e.pos, km: e.km, rows: [] }));
@@ -39,6 +39,8 @@
     for (const s of out) s.rows.sort((a, b) => Number(a.mhz) - Number(b.mhz));
     if (nearby.showAir) {
       for (const a of nearby.airports) {
+        const freqs = a.freqs.filter((q) => nearby.matchAirport(a.c, q.type, q.khz));
+        if (!freqs.length) continue;
         out.push({
           id: `a|${a.key}`,
           kind: "air",
@@ -46,7 +48,7 @@
           name: a.c,
           pos: a.l,
           km: a.km,
-          rows: a.freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false })),
+          rows: freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false })),
         });
       }
     }
@@ -273,12 +275,13 @@
         <input type="range" min="5" max="400" step="5" value={r} oninput={(e) => ((r = Number(e.currentTarget.value)), commit())} aria-label="Radius in km" />
         <span class="km">{r} km</span>
       </label>
+      <input class="find" type="search" placeholder="Search: name, category, airport or MHz" bind:value={nearby.query} aria-label="Search sites near the place" />
       {#if !library.place}
         Give a place above: type one, take the radio's, or use your location.
       {:else if loading}
         Loading what's near the place…
       {:else}
-        {shownSites.length} {shownSites.length === 1 ? "site" : "sites"} on the map within {library.radius} km.{#if nearby.showLic && nearby.siteCapped}&nbsp;Only the nearest licensed sites show: make the circle smaller to see them all.{/if}
+        {shownSites.length} {shownSites.length === 1 ? "site" : "sites"} on the map within {library.radius} km{nearby.query.trim() ? " matching the search" : ""}.{#if nearby.showLic && nearby.siteCapped}&nbsp;Only the nearest licensed sites show: make the circle smaller to see them all.{/if}
       {/if}
       {#if sitesDown}<span class="bad"><b>Licensed sites aren't available right now.</b> {siteFailed[0].error}. <button class="link" onclick={() => sites.retry()}>Try again</button></span>{/if}
       {#if airDown}<span class="bad"><b>Airports aren't available right now.</b> {airFailed[0].error}. <button class="link" onclick={() => airportSites.retry()}>Try again</button></span>{/if}
@@ -393,6 +396,17 @@
     min-width: 52px;
     color: var(--text);
     font-variant-numeric: tabular-nums;
+  }
+  .find {
+    width: 260px;
+    max-width: 100%;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 4px 8px;
   }
   .status {
     display: flex;
