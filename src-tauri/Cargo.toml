@@ -26,3 +26,7 @@ uuid = "1"
 # The Install page's native save dialog for the 4 MB backup (BACKUP-2).
 rfd = { version = "0.15", default-features = false, features = ["tokio"] }
 tokio = { version = "1", features = ["sync", "time", "rt"] }
+
+# rfd needs a backend on Linux: GTK 3, which the webview (WebKitGTK) already brings.
+[target.'cfg(target_os = "linux")'.dependencies]
+rfd = { version = "0.15", default-features = false, features = ["tokio", "gtk3"] }
