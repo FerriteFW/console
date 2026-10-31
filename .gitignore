@@ -3,6 +3,7 @@ dist/
 dist-single/
 target/
 src/core-wasm/
+src/fonts/
 src-tauri/gen/schemas/
 .DS_Store
 *.log

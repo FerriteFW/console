@@ -59,7 +59,7 @@
     [17, 700, "digits"], [26, 700, "digits"], [28, 700, "digits"], [46, 700, "digits"], [40, 600, "brand"],
   ];
   const family = (f: string) =>
-    f === "digits" ? '"Ferrite Mono Tight", "JetBrains Mono", monospace' : f === "brand" ? '"Barlow", sans-serif' : '"JetBrains Mono", monospace';
+    f === "digits" ? '"Ferrite Mono Tight", "JetBrains Mono", monospace' : f === "brand" ? '"Barlow Semi Condensed", sans-serif' : '"JetBrains Mono", monospace';
   const css565 = (c: number) => `rgb(${((c >> 11) & 31) * 255 / 31 | 0},${((c >> 5) & 63) * 255 / 63 | 0},${(c & 31) * 255 / 31 | 0})`;
   function itemStyle(it: ScreenItem): string {
     const box = `left:${it.x}px;top:${it.y - BAR}px;width:${it.w}px;height:${it.h}px;`;

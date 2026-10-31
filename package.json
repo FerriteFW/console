@@ -7,23 +7,25 @@
   "description": "Ferrite Console: live view, remote keys and (next) channel programming for Ferrite on the Radtel RT-950 Pro",
   "scripts": {
     "wasm": "node scripts/build-wasm.mjs",
-    "dev": "npm run wasm && vite",
-    "build": "npm run wasm && vite build",
+    "fonts": "node scripts/fonts.mjs",
+    "dev": "npm run wasm && npm run fonts && vite",
+    "build": "npm run wasm && npm run fonts && vite build",
     "preview": "vite preview",
     "test": "cargo test -p ferrite-console-core && node --test tests/unit/",
-    "e2e": "npm run wasm && VITE_DEV_TOOLS=1 vite build && playwright test",
+    "e2e": "npm run wasm && npm run fonts && VITE_DEV_TOOLS=1 vite build && playwright test",
     "e2e:run": "playwright test",
     "e2e:xeon": "tools/e2e-xeon.sh",
     "tauri": "tauri",
     "bundle-firmware": "node scripts/bundle-firmware.mjs",
-    "build:dev": "npm run wasm && VITE_DEV_TOOLS=1 vite build",
-    "build:single": "npm run wasm && vite build --mode single",
-    "build:app": "npm run wasm && vite build --mode app"
+    "build:dev": "npm run wasm && npm run fonts && VITE_DEV_TOOLS=1 vite build",
+    "build:single": "npm run wasm && npm run fonts && vite build --mode single",
+    "build:app": "npm run wasm && npm run fonts && vite build --mode app"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tauri-apps/cli": "^2.12.3",
+    "subset-font": "2.9.0",
     "svelte": "^5.57.2",
     "vite": "^8.3.4",
     "vite-plugin-singlefile": "2.3.3"

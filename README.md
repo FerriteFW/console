@@ -8,6 +8,7 @@ The companion app for Ferrite on the [Radtel RT-950 Pro](https://www.radtels.com
 - `core/`: the Rust core. Link sessions, answers, the UI readback, keys, channel records, the write plan, CHIRP CSV, the channel library. It reuses ferrite's own code by path (`../ferrite`).
 - `wasm/`: the core for the browser, built into `src/core-wasm/` by `npm run wasm`.
 - `src/`: the Svelte 5 UI (Vite).
+- `scripts/fonts.mjs`: the web fonts, ferrite's TTFs cut to the characters Console uses, as WOFF2 in `src/fonts/` (`npm run fonts`; every build runs it).
 - `public/data/`: the channel library's fixed sets. Airports and licensed sites come from https://data.ferritefw.dev (FerriteFW/data). See [tools/library/README.md](tools/library/README.md).
 - `tools/bridge.py`: the dev bridge. A local WebSocket to a serial port or the simulator (its cable or its Bluetooth side).
 - `tools/fakeboot.py`: a fake stock bootloader the bridge runs after REBOOT, for testing Firmware Update on the simulator.

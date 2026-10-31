@@ -1,34 +1,35 @@
 /* Ferrite's look: the radio's own colour tokens (ferrite/crates/ferrite-ui/src/gfx.rs for dark, theme.rs `day` for
    light, which is the radio's daylight theme), JetBrains Mono for text, Ferrite Mono Tight for frequency digits,
-   Barlow for the wordmark. The fonts are ferrite's own files (ferrite/fonts), bundled by Vite. */
+   Barlow for the wordmark. The fonts are ferrite's own files (ferrite/fonts), cut to the characters Console uses
+   as WOFF2 by scripts/fonts.mjs (into src/fonts/, not in git) and bundled by Vite. */
 
 @font-face {
   font-family: "JetBrains Mono";
-  src: url("@ferrite/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  src: url("./fonts/JetBrainsMono-Regular.woff2") format("woff2");
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
   font-family: "JetBrains Mono";
-  src: url("@ferrite/fonts/JetBrainsMono-Medium.ttf") format("truetype");
+  src: url("./fonts/JetBrainsMono-Medium.woff2") format("woff2");
   font-weight: 500;
   font-display: swap;
 }
 @font-face {
   font-family: "JetBrains Mono";
-  src: url("@ferrite/fonts/JetBrainsMono-Bold.ttf") format("truetype");
+  src: url("./fonts/JetBrainsMono-Bold.woff2") format("woff2");
   font-weight: 700;
   font-display: swap;
 }
 @font-face {
   font-family: "Ferrite Mono Tight";
-  src: url("@ferrite/fonts/FerriteMonoTight-Bold.ttf") format("truetype");
+  src: url("./fonts/FerriteMonoTight-Bold.woff2") format("woff2");
   font-weight: 700;
   font-display: swap;
 }
 @font-face {
   font-family: "Barlow Semi Condensed";
-  src: url("@ferrite/fonts/BarlowSemiCondensed-SemiBold.ttf") format("truetype");
+  src: url("./fonts/BarlowSemiCondensed-SemiBold.woff2") format("woff2");
   font-weight: 600;
   font-display: swap;
 }
