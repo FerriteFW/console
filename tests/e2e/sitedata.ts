@@ -61,3 +61,10 @@ export async function onlyKinds(d: Locator, ...names: string[]) {
   for (const n of all) if (!names.includes(n) && (await on(n))) await kind(d, n).click();
   for (const n of all) await expect(kind(d, n)).toHaveAttribute("aria-pressed", String(names.includes(n)));
 }
+
+/** Near me's Data popover open (each source's date, updates, Save for offline and full credits: DataCredits). */
+export async function openData(d: Locator) {
+  const b = d.getByRole("button", { name: /^Data/ });
+  if ((await b.getAttribute("aria-expanded")) !== "true") await b.click();
+  await expect(d.getByRole("dialog", { name: "Channel data sources" })).toBeVisible();
+}

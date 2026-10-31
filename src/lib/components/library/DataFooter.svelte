@@ -1,17 +1,16 @@
 <script lang="ts">
-  // The footer of a tab whose data comes from data.ferritefw.dev (Licensed sites, Airports): each source's date, the
+  // One data set's sources from data.ferritefw.dev, in Near me's Data popover (DataCredits): each source's date, the
   // update the server offers, its offline copy ("Save for offline") and its attribution line.
   import { library } from "../../library.svelte";
   import { sourceName, type Sites } from "../../sites.svelte";
 
   /** `here`: the sources with rows near the place (only theirs show attribution once a place is given). */
-  /** `inline`: each source's line and attribution run on as one paragraph (the map, short of height). */
-  let { data, here, inline = false }: { data: Sites; here: Set<string>; inline?: boolean } = $props();
+  let { data, here }: { data: Sites; here: Set<string> } = $props();
 
   const mb = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 </script>
 
-<footer class="data" class:inline aria-label="Channel data">
+<footer class="data" aria-label="Channel data">
   {#each data.listed as s (s.source)}
     {@const name = sourceName(s.source, s.title)}
     {@const saving = data.saving?.src === s.source ? data.saving : null}
@@ -52,16 +51,6 @@
     flex-wrap: wrap;
     gap: 4px 10px;
     align-items: center;
-  }
-  .inline .src,
-  .inline .attr {
-    display: inline;
-  }
-  .inline .src > * + * {
-    margin-left: 6px;
-  }
-  .inline .attr {
-    margin-left: 8px;
   }
   .sm {
     font-size: 11px;

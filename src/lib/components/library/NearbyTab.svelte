@@ -14,7 +14,7 @@
   import RepeatersTab from "./RepeatersTab.svelte";
   import NearMap from "./NearMap.svelte";
   import AddBar from "./AddBar.svelte";
-  import DataFooter from "./DataFooter.svelte";
+  import DataCredits from "./DataCredits.svelte";
 
   let { onadded }: { onadded: () => void } = $props();
 
@@ -78,9 +78,13 @@
     {#if nearby.showAir}<AirportsTab />{/if}
   </div>
   <AddBar {each} {onadded} />
-  {#if nearby.showLic}<DataFooter data={sites} here={siteHere} inline={nearby.multi} />{/if}
-  {#if nearby.showAir}<DataFooter data={airportSites} here={airHere} inline={nearby.multi} />{/if}
-  {#if nearby.showRpt}<DataFooter data={repeaterSites} here={rptHere} inline={nearby.multi} />{/if}
+  <DataCredits
+    shown={[
+      ...(nearby.showRpt ? [{ data: repeaterSites, here: rptHere }] : []),
+      ...(nearby.showLic ? [{ data: sites, here: siteHere }] : []),
+      ...(nearby.showAir ? [{ data: airportSites, here: airHere }] : []),
+    ]}
+  />
 {/if}
 
 <style>

@@ -13,7 +13,7 @@
   import { MOBILE, mhz, modeLabel, nearby, offsetLabel, toneLabel } from "../../nearby.svelte";
   import { gridCluster } from "../../cluster";
   import { ATTRIBUTION, loadLeaflet, TILES, type LatLng, type LCircle, type Leaflet, type LGroup, type LMap, type LMarker } from "../../leaflet";
-  import DataFooter from "./DataFooter.svelte";
+  import DataCredits from "./DataCredits.svelte";
   import AddBar from "./AddBar.svelte";
 
   let { each, onadded }: { each: string; onadded: () => void } = $props();
@@ -372,9 +372,13 @@
   </aside>
 </div>
 <div class="feet">
-  {#if nearby.showLic}<DataFooter data={sites} here={siteHere} inline />{/if}
-  {#if nearby.showAir}<DataFooter data={airportSites} here={airHere} inline />{/if}
-  {#if nearby.showRpt}<DataFooter data={repeaterSites} here={rptHere} inline />{/if}
+  <DataCredits
+    shown={[
+      ...(nearby.showRpt ? [{ data: repeaterSites, here: rptHere }] : []),
+      ...(nearby.showLic ? [{ data: sites, here: siteHere }] : []),
+      ...(nearby.showAir ? [{ data: airportSites, here: airHere }] : []),
+    ]}
+  />
 </div>
 
 <style>

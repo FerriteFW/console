@@ -6,7 +6,7 @@
 // my location" with the browser's position, and refused. The data comes from tests/e2e/fixtures/sitedata, the map's
 // tiles are refused (no internet).
 import { type Browser, type Locator, type Page } from "@playwright/test";
-import { kind, onlyKinds, serveData } from "./sitedata";
+import { kind, onlyKinds, openData, serveData } from "./sitedata";
 import { closeWelcome, expect, openConsole, shot, state, test } from "./helpers";
 
 /** Vancouver airport. */
@@ -224,6 +224,7 @@ test("sidebar: a kind clicked from another tab opens Near me; repeaters as a lis
   await list.getByRole("checkbox", { name: "XX7DCS", exact: true }).check();
   await list.getByRole("checkbox", { name: "VE7RPT", exact: true }).check();
   await expect(d).toContainText("2 repeater (shift and tones)");
+  await openData(d);
   await expect(d).toContainText("Repeater data from HearHam.com (user-contributed).");
   await shot(p, info, "45-nearme-repeaters-list");
   await d.getByRole("button", { name: "Add 2 channels" }).click();

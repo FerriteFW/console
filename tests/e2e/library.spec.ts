@@ -4,7 +4,7 @@
 // at your own risk). Airports and licensed sites never use the network: data.ferritefw.dev is served from
 // tests/e2e/fixtures/sitedata (a few tiny tiles) by ./sitedata.ts.
 import { type Page } from "@playwright/test";
-import { DATA, blockTiles, onlyKinds, serveData } from "./sitedata";
+import { DATA, blockTiles, onlyKinds, openData, serveData } from "./sitedata";
 import { connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
 
 let page: Page;
@@ -134,6 +134,7 @@ test.describe.serial("near a place", () => {
     await expect(row).toContainText("121.400 CLEARANCE");
     await expect(row).toContainText("121.700 GROUND");
     // The data's attribution.
+    await openData(lib());
     await expect(lib()).toContainText("Airport data from OurAirports");
     await cyvr.check();
     const add = lib().getByRole("button", { name: /^Add \d+ channels?$/ });
@@ -211,7 +212,8 @@ test.describe.serial("near a place", () => {
     await expect(list).toContainText("point roberts"); // US
     await expect(list).toContainText("richmond works"); // Canada
     // Both sources' attribution lines.
-    await expect(lib()).toContainText("Open Government Licence – Canada");
+    await expect(lib()).toContainText("Open Government Licence – Canada"); // the short credit line, always shown
+    await openData(lib());
     await expect(lib()).toContainText("Federal Communications Commission");
     // Digital only never shows (Ferrite has no digital modes): no row, no switch for it.
     await expect(list).not.toContainText("ecomm");
@@ -297,6 +299,7 @@ test.describe("licensed sites, no radio", () => {
     const d = p.getByRole("dialog", { name: "Add channels" });
     await d.getByRole("tab", { name: /^Near me/ }).click();
     await nearMe(d, "Business & public", true);
+    await openData(d);
     const save = d.getByRole("button", { name: /^Save Canada for offline \(\d+ KB\)$/ });
     await expect(save).toBeVisible();
     await save.click();
@@ -319,6 +322,7 @@ test.describe("licensed sites, no radio", () => {
     await d.getByRole("tab", { name: /^Near me/ }).click();
     await nearMe(d, "Airports", true);
     // Airports only: only the airports source in the footer, not the licensed sites'.
+    await openData(d);
     await expect(d.getByRole("button", { name: /^Save Canada for offline/ })).toHaveCount(0);
     const save = d.getByRole("button", { name: /^Save Airports for offline \(\d+ KB\)$/ });
     await expect(save).toBeVisible();
