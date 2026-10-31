@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { fileURLToPath } from "node:url";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
 // Ferrite's fonts and logo are used from the ferrite checkout next to this one (../ferrite), not copied.
@@ -32,12 +32,35 @@ function embedded(single) {
   };
 }
 
+// What each build carries of public/firmware (scripts/bundle-firmware.mjs: the Ferrite release and the reader).
+// The downloads (the desktop app: --mode app; the single file: --mode single) keep the release; the website build
+// (the default) drops it and keeps only the reader (the Install wizard's backup step), so the page offers a file to
+// pick until it fetches the GitHub release.
+function webFirmware(keep) {
+  return {
+    name: "ferrite-web-firmware",
+    apply: "build",
+    closeBundle() {
+      if (keep) return;
+      const dir = new URL("./dist/firmware/", import.meta.url);
+      const m = new URL("manifest.json", dir);
+      if (!existsSync(m)) return;
+      const manifest = JSON.parse(readFileSync(m, "utf8"));
+      if (manifest.ferrite) {
+        for (const f of [manifest.ferrite.file, `${manifest.ferrite.file}.minisig`]) rmSync(new URL(f, dir), { force: true });
+        delete manifest.ferrite;
+        writeFileSync(m, JSON.stringify(manifest, null, 1) + "\n");
+      }
+    },
+  };
+}
+
 // `vite build --mode single` (npm run build:single): Console as one HTML file that runs opened from disk, everything
 // inlined (scripts, styles, fonts, the wasm core, the firmware), in dist-single/.
 export default defineConfig(({ mode }) => ({
   // Relative asset paths in the single file, so BASE_URL ("./") also prefixes the embedded paths appfetch.ts strips.
   base: mode === "single" ? "./" : "/",
-  plugins: [svelte(), embedded(mode === "single"), ...(mode === "single" ? [viteSingleFile()] : [])],
+  plugins: [svelte(), embedded(mode === "single"), webFirmware(mode === "app" || mode === "single"), ...(mode === "single" ? [viteSingleFile()] : [])],
   define: { __CONSOLE_VERSION__: JSON.stringify(pkg.version) },
   resolve: { alias: { "@ferrite": ferrite } },
   clearScreen: false,

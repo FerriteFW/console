@@ -8,13 +8,15 @@
 // (tools/mkbtf.sh reader: Ferrite's read-only reader, ferrite decision 264). The old C reader still works:
 //   node scripts/bundle-firmware.mjs ../ferrite/target/ferrite-tx.btf ../fw/build/target/hwtest.btf
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const [ferrite = join(root, "../ferrite/target/ferrite-tx.btf"), reader = join(root, "../ferrite/target/ferrite-reader.btf")] = process.argv.slice(2);
 const out = join(root, "public/firmware");
+// Only what the manifest lists: older runs' leftovers (bench or test images) never ride along.
+rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
 function entry(path) {
