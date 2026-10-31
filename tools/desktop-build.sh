@@ -3,7 +3,8 @@
 # commit of this repo and of ../ferrite there (what's committed, not the working tree), builds, and brings the
 # bundles back to target/desktop/. Usage: tools/desktop-build.sh [linux|windows|all] [--host USER@HOST]
 # Windows: cargo-xwin downloads Microsoft's CRT and Windows SDK on its first run (kept in a cache volume there);
-# using them means accepting Microsoft's licence for them.
+# using them means accepting Microsoft's licence for them. Besides the NSIS setup.exe it brings back the bare app
+# ("Ferrite Console portable.exe"), which runs without installing.
 set -euo pipefail
 host=${FERRITE_XEON:-infamy@192.168.7.162}
 what=all
@@ -42,6 +43,8 @@ fi
 if [ "$what" != linux ]; then
   run 'npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc 2>&1 | tail -n 15'
   cp ferrite-console/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe "$out/" 2>/dev/null || true
+  # The bare app too: runs without installing (Windows 10 and 11 have the WebView2 runtime it needs).
+  cp ferrite-console/target/x86_64-pc-windows-msvc/release/ferrite-console-app.exe "$out/Ferrite Console portable.exe" 2>/dev/null || true
 fi
 ls -la "$out"
 REMOTE

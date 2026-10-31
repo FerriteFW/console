@@ -1,7 +1,8 @@
 # The desktop app's build box: the Linux bundles (.deb, .rpm, .AppImage) natively, and the Windows installer (NSIS
 # setup.exe) cross-compiled with cargo-xwin, as Tauri's "Windows installer on Linux" guide does it. Used by
 # tools/desktop-build.sh; nothing here is specific to one host.
-FROM node:24
+# Debian 13 (trixie): its NSIS (3.11) has the headers Tauri's installer script includes; 12's 3.08 doesn't.
+FROM node:24-trixie
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libwebkit2gtk-4.1-dev libudev-dev libdbus-1-dev librsvg2-dev libayatana-appindicator3-dev \
