@@ -1,12 +1,6 @@
-// Leaflet for the APRS map, loaded once from a pinned CDN version with its integrity hashes (not bundled: only the
-// map page needs it). Tiles are OpenStreetMap's standard ones, attributed on the map (a low-traffic use, within
-// their tile policy).
-const VERSION = "1.9.4";
-const JS = `https://unpkg.com/leaflet@${VERSION}/dist/leaflet.js`;
-const CSS = `https://unpkg.com/leaflet@${VERSION}/dist/leaflet.css`;
-const JS_SRI = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=";
-const CSS_SRI = "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=";
-
+// Leaflet for Console's maps, bundled (Alex, Oct 30, 2026: works offline and in the desktop app), in its own chunk
+// that loads the first time a map opens. Tiles are OpenStreetMap's standard ones, attributed on the map (a low-traffic
+// use, within their tile policy).
 export const TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 export const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
@@ -30,26 +24,12 @@ export type Leaflet = {
 let loading: Promise<Leaflet> | null = null;
 
 export function loadLeaflet(): Promise<Leaflet> {
-  const w = window as unknown as { L?: Leaflet };
-  if (w.L) return Promise.resolve(w.L);
-  loading ??= new Promise<Leaflet>((ok, fail) => {
-    const css = document.createElement("link");
-    css.rel = "stylesheet";
-    css.href = CSS;
-    css.integrity = CSS_SRI;
-    css.crossOrigin = "";
-    document.head.append(css);
-    const s = document.createElement("script");
-    s.src = JS;
-    s.integrity = JS_SRI;
-    s.crossOrigin = "";
-    s.onload = () => (w.L ? ok(w.L) : fail(new Error("Leaflet loaded without L")));
-    s.onerror = () => {
+  loading ??= Promise.all([import("leaflet"), import("leaflet/dist/leaflet.css")]).then(
+    ([m]) => ((m as { default?: unknown }).default ?? m) as unknown as Leaflet,
+    (e) => {
       loading = null;
-      s.remove();
-      fail(new Error(`The map library didn't load (${JS}): offline?`));
-    };
-    document.head.append(s);
-  });
+      throw new Error(`The map library didn't load: ${e instanceof Error ? e.message : e}`);
+    },
+  );
   return loading;
 }
