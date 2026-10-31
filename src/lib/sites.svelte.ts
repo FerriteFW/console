@@ -34,7 +34,8 @@ export class Sites {
   private started: Promise<void> | null = null;
 
   get sources(): string[] {
-    return this.top?.sources.map((s) => s.source) ?? KNOWN;
+    // The licensed sites only: the data repo also publishes other sources (airports) for other tabs.
+    return this.top?.sources.map((s) => s.source).filter((s) => KNOWN.includes(s)) ?? KNOWN;
   }
   source(src: string): TopSource | undefined {
     return this.top?.sources.find((s) => s.source === src);
