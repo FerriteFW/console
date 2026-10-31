@@ -68,7 +68,7 @@
   const down = $derived(!!result && !result.sources.length && failed.length > 0 && failed.length >= sites.sources.length);
 </script>
 
-{#if nearby.show === "both"}<h3 class="kind">Licensed sites</h3>{/if}
+{#if nearby.multi}<h3 class="kind">Licensed sites</h3>{/if}
 {#if !library.place}
   <p class="sub">
     {#if sites.top}

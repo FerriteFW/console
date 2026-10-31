@@ -1,6 +1,6 @@
 <script lang="ts">
-  // The "near me" map (Add channels › Near me, Map): the kinds shown (Licensed, Airports or Both; Canada and the US
-  // switched on: NearbyTab) near the place on one Leaflet map (bundled; OpenStreetMap tiles, attributed). It fills
+  // The "near me" map (Add channels › Near me, Map): the kinds shown (Licensed, Airports, Repeaters: the dialog's
+  // sidebar; Canada and the US switched on: NearbyTab) near the place on one Leaflet map (bundled; OpenStreetMap tiles, attributed). It fills
   // the big dialog; Picked is a slim column on its right (below it on a narrow window). One marker per site (a name at a position) with its frequency count;
   // nearby markers cluster into a count until zoomed in (cluster.ts). A marker opens a small popup with a box per
   // frequency. Your pin is
@@ -9,8 +9,8 @@
   // nearby.svelte.ts) with the zone target and Add.
   import { untrack } from "svelte";
   import { library } from "../../library.svelte";
-  import { airportSites, sites, sourceName } from "../../sites.svelte";
-  import { MOBILE, mhz, modeLabel, nearby } from "../../nearby.svelte";
+  import { airportSites, repeaterSites, sites, sourceName } from "../../sites.svelte";
+  import { MOBILE, mhz, modeLabel, nearby, offsetLabel, toneLabel } from "../../nearby.svelte";
   import { gridCluster } from "../../cluster";
   import { ATTRIBUTION, loadLeaflet, TILES, type LatLng, type LCircle, type Leaflet, type LGroup, type LMap, type LMarker } from "../../leaflet";
   import DataFooter from "./DataFooter.svelte";
@@ -18,8 +18,9 @@
 
   let { each, onadded }: { each: string; onadded: () => void } = $props();
 
-  type Row = { key: string; mhz: string; label: string; mobile: boolean };
-  type Site = { id: string; kind: "lic" | "air"; src: string; name: string; pos: LatLng; km: number; rows: Row[] };
+  /** `tone`: a repeater's tones (`label` is then its offset). */
+  type Row = { key: string; mhz: string; label: string; mobile: boolean; tone?: string };
+  type Site = { id: string; kind: "lic" | "air" | "rpt"; src: string; name: string; pos: LatLng; km: number; rows: Row[] };
 
   const on = (src: string) => nearby.layers[src] !== false;
 
@@ -49,6 +50,21 @@
           pos: a.l,
           km: a.km,
           rows: freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false })),
+        });
+      }
+    }
+    if (nearby.showRpt) {
+      for (const r of nearby.repeaters) {
+        const freqs = r.freqs.filter((q) => nearby.matchRepeater(r.c, q.f));
+        if (!freqs.length) continue;
+        out.push({
+          id: r.key,
+          kind: "rpt",
+          src: "repeaters",
+          name: r.c,
+          pos: r.l,
+          km: r.km,
+          rows: freqs.map((q) => ({ key: q.key, mhz: mhz(q.f), label: offsetLabel(q.d), mobile: false, tone: toneLabel(q.te, q.td) })),
         });
       }
     }
@@ -198,7 +214,7 @@
     for (const grp of groups) {
       if (grp.length === 1) {
         const s = grp[0];
-        const kind = picked(s) ? "pick" : s.kind === "air" ? "air" : "lic";
+        const kind = picked(s) ? "pick" : s.kind;
         const n = s.rows.length;
         const mk = l.marker(s.pos, {
           icon: l.divIcon({ className: "nm-icon", html: `<span class="nm-pin ${kind}${s.km > km ? " out" : ""}">${n > 1 ? n : ""}</span>`, iconSize: [24, 24], iconAnchor: [12, 12] }),
@@ -255,6 +271,7 @@
   const picks = $derived.by((): Pick[] => [
     ...nearby.pickedSites.map((e) => ({ key: e.key, name: e.name, mhz: mhz(e.f), tag: modeLabel(e.m) })),
     ...nearby.pickedAirports.flatMap(({ a, freqs }) => freqs.map((q) => ({ key: q.key, name: a.c, mhz: (q.khz / 1000).toFixed(3), tag: q.type }))),
+    ...nearby.pickedRepeaters.flatMap(({ r, freqs }) => freqs.map((q) => ({ key: q.key, name: r.c, mhz: mhz(q.f), tag: offsetLabel(q.d) }))),
   ]);
 
   // What the status line says.
@@ -262,9 +279,14 @@
   const airFailed = $derived(nearby.airportResult?.failed ?? []);
   const sitesDown = $derived(nearby.showLic && !!nearby.siteResult && !nearby.siteResult.sources.length && siteFailed.length > 0 && siteFailed.length >= sites.sources.length);
   const airDown = $derived(nearby.showAir && !!nearby.airportResult && !nearby.airportResult.sources.length && airFailed.length > 0);
-  const loading = $derived(!!library.place && ((nearby.showLic && !nearby.siteResult) || (nearby.showAir && !nearby.airportResult)));
+  const rptFailed = $derived(nearby.repeaterResult?.failed ?? []);
+  const rptDown = $derived(nearby.showRpt && !!nearby.repeaterResult && !nearby.repeaterResult.sources.length && rptFailed.length > 0);
+  const loading = $derived(
+    !!library.place && ((nearby.showLic && !nearby.siteResult) || (nearby.showAir && !nearby.airportResult) || (nearby.showRpt && !nearby.repeaterResult)),
+  );
   const siteHere = $derived(new Set(nearby.siteAll.map((e) => e.src)));
   const airHere = $derived(new Set(nearby.airports.length ? ["airports"] : []));
+  const rptHere = $derived(new Set(nearby.repeaters.length ? ["repeaters"] : []));
 </script>
 
 <div class="nm">
@@ -275,7 +297,7 @@
         <input type="range" min="5" max="400" step="5" value={r} oninput={(e) => ((r = Number(e.currentTarget.value)), commit())} aria-label="Radius in km" />
         <span class="km">{r} km</span>
       </label>
-      <input class="find" type="search" placeholder="Search: name, category, airport or MHz" bind:value={nearby.query} aria-label="Search sites near the place" />
+      <input class="find" type="search" placeholder="Search: name, category, airport, callsign or MHz" bind:value={nearby.query} aria-label="Search sites near the place" />
       {#if !library.place}
         Give a place above: type one, take the radio's, or use your location.
       {:else if loading}
@@ -285,6 +307,7 @@
       {/if}
       {#if sitesDown}<span class="bad"><b>Licensed sites aren't available right now.</b> {siteFailed[0].error}. <button class="link" onclick={() => sites.retry()}>Try again</button></span>{/if}
       {#if airDown}<span class="bad"><b>Airports aren't available right now.</b> {airFailed[0].error}. <button class="link" onclick={() => airportSites.retry()}>Try again</button></span>{/if}
+      {#if rptDown}<span class="bad"><b>Repeaters aren't available right now.</b> {rptFailed[0].error}. <button class="link" onclick={() => repeaterSites.retry()}>Try again</button></span>{/if}
       {#if nearby.showLic && !sitesDown && siteFailed.length}<span class="bad">{siteFailed.map((f) => `${sourceName(f.src, sites.source(f.src)?.title)}: ${f.error}`).join(" · ")}</span>{/if}
     </div>
     <div class="wrap" bind:this={wrap}>
@@ -294,6 +317,7 @@
         <span><i class="dot you"></i>The place</span>
         {#if nearby.showLic}<span><i class="dot lic"></i>Licensed</span>{/if}
         {#if nearby.showAir}<span><i class="dot air"></i>Airport</span>{/if}
+        {#if nearby.showRpt}<span><i class="dot rpt"></i>Repeater</span>{/if}
         <span><i class="dot pick"></i>Picked</span>
       </div>
       {#if popSites.length && popAt}
@@ -305,7 +329,7 @@
               <header>
                 <b>{s.name}</b>
                 <span>
-                  {s.kind === "air" ? "Airport" : `Licensed site · ${sourceName(s.src)}`} · {s.km < 10 ? s.km.toFixed(1) : Math.round(s.km)} km
+                  {s.kind === "air" ? "Airport" : s.kind === "rpt" ? "Repeater" : `Licensed site · ${sourceName(s.src)}`} · {s.km < 10 ? s.km.toFixed(1) : Math.round(s.km)} km
                   {#if s.rows.length > 1}· <button class="link" onclick={() => nearby.set(s.rows.map((q) => q.key), !all)}>{all ? "None" : "All"}</button>{/if}
                 </span>
               </header>
@@ -316,6 +340,7 @@
                       <input type="checkbox" checked={nearby.has(q.key)} onchange={() => nearby.toggle(q.key)} aria-label="{s.name} {q.mhz} {q.label}" />
                       <span class="mono">{q.mhz}</span>
                       <span class="tag">{q.label}</span>
+                      {#if q.tone}<span class="tag">{q.tone}</span>{/if}
                       {#if q.mobile}<span class="tag mob" title={MOBILE}>mobile</span>{/if}
                     </label>
                   </li>
@@ -349,6 +374,7 @@
 <div class="feet">
   {#if nearby.showLic}<DataFooter data={sites} here={siteHere} inline />{/if}
   {#if nearby.showAir}<DataFooter data={airportSites} here={airHere} inline />{/if}
+  {#if nearby.showRpt}<DataFooter data={repeaterSites} here={rptHere} inline />{/if}
 </div>
 
 <style>
@@ -375,6 +401,9 @@
   }
   .dot.air {
     background: var(--map-air);
+  }
+  .dot.rpt {
+    background: var(--map-rpt);
   }
   .dot.pick {
     background: var(--map-pick);
@@ -637,6 +666,9 @@
   }
   .map :global(.nm-pin.air) {
     background: var(--map-air);
+  }
+  .map :global(.nm-pin.rpt) {
+    background: var(--map-rpt);
   }
   .map :global(.nm-pin.pick) {
     background: var(--map-pick);

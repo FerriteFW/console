@@ -1,6 +1,6 @@
-// The channel library ("Add channels"), ported from NeonPlug: fixed sets, airports near a place, and licensed sites
-// (Canada and the US) near a place. Fixed sets are in public/data/ (tools/library/README.md says where they come
-// from). Airports and licensed sites come tiled from data.ferritefw.dev (sites.svelte.ts, sitedata.ts). Turning entries into channels (numbers, zones, names,
+// The channel library ("Add channels"), ported from NeonPlug: fixed sets, and airports, licensed sites (Canada and
+// the US) and amateur repeaters near a place. Fixed sets are in public/data/ (tools/library/README.md says where they come
+// from). Airports, licensed sites and repeaters come tiled from data.ferritefw.dev (sites.svelte.ts, sitedata.ts). Turning entries into channels (numbers, zones, names,
 // ferrite's own checks) is the core's (core/src/library.rs).
 import { libraryAdd, parsePlace, type LibraryAdded, type LibraryItem, type Place } from "./core";
 import { channels } from "./channels.svelte";
@@ -30,7 +30,7 @@ async function fetchJson<T>(name: string): Promise<T> {
 
 class Library {
   open = $state(false);
-  tab = $state<"fixed" | "near" | "repeaters">("fixed");
+  tab = $state<"fixed" | "near">("fixed");
   fixed = $state<FixedSet[] | null>(null);
   error = $state("");
   /** The place for Near me (airports and licensed sites), as typed, and what it parses to. */

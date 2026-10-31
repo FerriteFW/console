@@ -1,6 +1,6 @@
 // data.ferritefw.dev for the e2e tests, from tests/e2e/fixtures/sitedata (a few tiny tiles): no network. The zips
 // are made from the fixtures here; the top index gets their real sizes and SHA-256.
-import { type Page, type Route } from "@playwright/test";
+import { expect, type Locator, type Page, type Route } from "@playwright/test";
 import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createZip } from "../../src/lib/zip.ts";
@@ -21,7 +21,7 @@ export const blockTiles = (p: Page) => p.route("https://tile.openstreetmap.org/*
 /** data.ferritefw.dev from the fixtures (and the map's tiles refused); the top index carries the zips' real sizes and SHA-256. Returns the paths asked. */
 export async function serveData(p: Page): Promise<string[]> {
   const zips = new Map<string, Buffer>();
-  for (const src of ["tafl", "fcc", "airports"]) zips.set(`${src}.zip`, await fixtureZip(src));
+  for (const src of ["tafl", "fcc", "airports", "repeaters"]) zips.set(`${src}.zip`, await fixtureZip(src));
   const asked: string[] = [];
   await blockTiles(p);
   await p.route(`${DATA}/**`, async (route: Route) => {
@@ -49,3 +49,15 @@ export async function serveData(p: Page): Promise<string[]> {
   return asked;
 }
 
+
+/** Near me's kinds in the Add channels dialog's sidebar: switches, each with its count near the place. */
+export const kind = (d: Locator, name: string) => d.getByRole("group", { name: "Near me shows" }).getByRole("button", { name: new RegExp(`^${name}`) });
+
+/** Exactly these kinds on (the wanted ones first: the last kind on can't go off). */
+export async function onlyKinds(d: Locator, ...names: string[]) {
+  const all = ["Licensed", "Airports", "Repeaters"];
+  const on = async (n: string) => (await kind(d, n).getAttribute("aria-pressed")) === "true";
+  for (const n of names) if (!(await on(n))) await kind(d, n).click();
+  for (const n of all) if (!names.includes(n) && (await on(n))) await kind(d, n).click();
+  for (const n of all) await expect(kind(d, n)).toHaveAttribute("aria-pressed", String(names.includes(n)));
+}

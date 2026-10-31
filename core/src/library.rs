@@ -1,6 +1,6 @@
 //! The channel library ("Add channels"): fixed sets (FRS, GMRS, MURS, PMR446, marine, weather, resource roads,
 //! calling frequencies), airports near a place, and Canadian licensed sites (TAFL) near a place, as ported from
-//! NeonPlug. The UI picks the entries; this module turns them into the table's channels and zones:
+//! NeonPlug, and amateur repeaters near a place (HearHam: a shift, an access tone and a receive tone each). The UI picks the entries; this module turns them into the table's channels and zones:
 //!
 //! - frequencies to the radio's 10 Hz, TX as simplex, a +/- shift (up to 10 MHz) or split;
 //! - names to 16 printable ASCII characters; the step the largest of the radio's that fits the frequency;
@@ -43,6 +43,9 @@ pub struct Item {
     /// A CTCSS or DCS word for both directions (TERM-35.2's form), if the set has one.
     #[serde(default)]
     pub tone: Option<String>,
+    /// The receive tone when it differs from `tone` ("off" for none): a repeater's that sends no tone, or another.
+    #[serde(default)]
+    pub rx_tone: Option<String>,
     /// Where it is, `[lat, lon]` in degrees (airports, TAFL sites): the channel's position (CHAN-2, LINK-53).
     #[serde(default)]
     pub pos: Option<crate::channels::Position>,
@@ -141,6 +144,9 @@ pub fn add(items: &[Item], table: &Set) -> Added {
         v.pos = it.pos;
         if let Some(t) = &it.tone {
             v.tx_tone = t.clone();
+            v.rx_tone = t.clone();
+        }
+        if let Some(t) = &it.rx_tone {
             v.rx_tone = t.clone();
         }
         let tx = it.tx.map(ten_hz).unwrap_or(rx);
@@ -267,6 +273,7 @@ pub fn fixed_items(set: &FixedSet, picks: &[usize], zone: &str) -> Vec<Item> {
             rx_only: set.rx_only || f.rx_only,
             zone: zone.into(),
             tone: f.ctcss.map(|t| format!("{t:.1}")).or_else(|| f.dcs.map(|d| format!("D{d:03}N"))),
+            rx_tone: None,
             pos: None,
         })
         .collect()
@@ -662,6 +669,24 @@ mod tests {
         let s = |i: usize| (a.channels[i].duplex.as_str(), a.channels[i].offset.as_str());
         assert_eq!(s(0), ("+", "5.00000"), "{:?}", a.notes);
         assert_eq!(s(1), ("split", "437.80000"));
+    }
+
+    /// A repeater: TX as its shift, the access tone sent, the receive tone apart (none, or another).
+    #[test]
+    fn repeater_tones() {
+        let mut a = item("VE7RHS", 145.27, Some(144.67), "FM", "Repeaters");
+        a.tone = Some("100.0".into());
+        a.rx_tone = Some("off".into());
+        let mut b = item("VE7DCS", 443.2, Some(448.2), "FM", "Repeaters");
+        b.tone = Some("D023N".into());
+        let got = add(&[a, b], &Set::default());
+        assert!(got.notes.is_empty(), "{:?}", got.notes);
+        let c = |i: usize| {
+            let v = &got.channels[i];
+            (v.duplex.as_str(), v.offset.as_str(), v.tx_tone.as_str(), v.rx_tone.as_str(), v.rx_only)
+        };
+        assert_eq!(c(0), ("-", "0.60000", "100.0", "off", false));
+        assert_eq!(c(1), ("+", "5.00000", "D023N", "D023N", false));
     }
 
     /// Airband: AM, RX only, ferrite takes it; 8.33 kHz channels get the 8.33 step.

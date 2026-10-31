@@ -48,9 +48,10 @@
   --amber: #f5c542;
   --red: #e5484d;
   --violet: #b59cff;
-  /* The "near me" map's markers: licensed sites, airports, picked. */
+  /* The "near me" map's markers: licensed sites, airports, repeaters, picked. */
   --map-lic: #22b8cf;
   --map-air: #a78bfa;
+  --map-rpt: #65a30d;
   --map-pick: #f97316;
   --focus: #0f1b2a;
   --toast: #1b2a3d;
@@ -80,6 +81,7 @@
   --violet: #6a3fd1;
   --map-lic: #0e7490;
   --map-air: #6d28d9;
+  --map-rpt: #3f6212;
   --map-pick: #c2410c;
   --focus: #e1ecfa;
   --toast: #dce7f5;

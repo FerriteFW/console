@@ -1,12 +1,12 @@
 // Data from data.ferritefw.dev (through sitedata.ts) for the channel library's tabs: licensed sites (Canada's TAFL and
-// the US FCC's ULS) and airports (OurAirports). Per tab: the rows near the library's place, the sources' attribution
-// and dates, updates the server offers, and each source's offline copy ("Save for offline"). One client for both,
+// the US FCC's ULS), airports (OurAirports) and repeaters (HearHam). Per kind: the rows near the library's place, the sources' attribution
+// and dates, updates the server offers, and each source's offline copy ("Save for offline"). One client for all,
 // so the indexes and tiles are fetched and kept once.
 import { untrack } from "svelte";
 import { SiteData, type NearResult, type Site, type TopIndex, type TopSource } from "./sitedata.ts";
 
 /** Short names for the sources the data repo publishes; another source shows its title. */
-const NAMES: Record<string, string> = { tafl: "Canada", fcc: "US", airports: "Airports" };
+const NAMES: Record<string, string> = { tafl: "Canada", fcc: "US", airports: "Airports", repeaters: "Repeaters" };
 const client = new SiteData();
 
 export const sourceName = (src: string, title = src) => NAMES[src] ?? title;
@@ -148,3 +148,5 @@ export class Sites {
 export const sites = new Sites(["tafl", "fcc"]);
 /** Airports (the Airports tab). */
 export const airportSites = new Sites(["airports"]);
+/** Amateur repeaters (Near me's Repeaters). */
+export const repeaterSites = new Sites(["repeaters"]);

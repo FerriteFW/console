@@ -1,10 +1,12 @@
-// Add channels › Near me (no radio): one tab, the map by default; Licensed | Airports | Both decides what the map, the
-// list and Add show (remembered); Canada and the US as sub-filter chips; a popup's box adds to Picked and shows ticked
-// in the lists; Add's count follows the switch; one Add makes an airport's AM channel and a licensed NFM one, with
-// positions; the radius slider loads again; "Use my location" with the browser's position, and refused. The data
-// comes from tests/e2e/fixtures/sitedata, the map's tiles are refused (no internet).
+// Add channels › Near me (no radio): one tab, the map by default; the sidebar's kinds (Licensed, Airports, Repeaters:
+// switches, any of them, at least one, with counts) decide what the map, the list and Add show (remembered); one
+// clicked from another tab opens Near me; Canada and the US as sub-filter chips; a popup's box adds to Picked and shows
+// ticked in the lists; Add's count follows the switches; one Add makes an airport's AM channel, a licensed NFM one and
+// a repeater's (shift and tones), with positions; repeaters as a list, searched; the radius slider loads again; "Use
+// my location" with the browser's position, and refused. The data comes from tests/e2e/fixtures/sitedata, the map's
+// tiles are refused (no internet).
 import { type Browser, type Locator, type Page } from "@playwright/test";
-import { serveData } from "./sitedata";
+import { kind, onlyKinds, serveData } from "./sitedata";
 import { closeWelcome, expect, openConsole, shot, state, test } from "./helpers";
 
 /** Vancouver airport. */
@@ -21,32 +23,42 @@ async function open(browser: Browser, ctx: Parameters<Browser["newContext"]>[0] 
   return { p, d, close: () => c.close() };
 }
 
-/** Near me's Licensed | Airports | Both switch. */
-const kind = (d: Locator, name: string) => d.getByRole("group", { name: "Show" }).getByRole("button", { name, exact: true });
-
 /** A site's marker on the map, or the cluster holding it (labelled with its sites' names). */
 const marker = (d: Locator, name: string) => d.getByRole("button", { name: new RegExp(`^(${name}: \\d+ frequenc|\\d+ sites: (.*, )?${name}(,|$))`) });
 
 /** Opens a site's popup: its marker, or its cluster (zooming in, or listing sites too close to split). */
 async function openSite(p: Page, d: Locator, name: string) {
   const pop = d.getByRole("dialog", { name: /^Frequencies at / });
+  // Another site's popup closed first: it can sit over this one's marker.
+  if ((await pop.count()) && !(await pop.locator("header b", { hasText: new RegExp(`^${name}$`) }).count())) await pop.getByRole("button", { name: "Close" }).click({ timeout: 2000 });
   for (let i = 0; i < 8; i++) {
     if (await pop.locator("header b", { hasText: new RegExp(`^${name}$`) }).count()) return pop;
     const m = marker(d, name).first();
-    if (await m.count()) await m.click().catch(() => {});
+    // Off the map's view (zoomed in on another site): zoom out a step first.
+    const at = (await m.count()) ? await m.boundingBox() : null;
+    const view = (await d.locator(".wrap").boundingBox())!;
+    const inView = at && at.x >= view.x && at.y >= view.y && at.x + at.width <= view.x + view.width && at.y + at.height <= view.y + view.height;
+    if (at && !inView) await d.getByRole("button", { name: "Zoom out" }).click({ timeout: 2000 }).catch(() => {});
+    else if (at) await m.click({ timeout: 2000 }).catch(() => {});
     await p.waitForTimeout(400);
   }
   await expect(pop.locator("header b", { hasText: new RegExp(`^${name}$`) })).toBeVisible();
   return pop;
 }
 
-test("map: the default, big; Licensed | Airports | Both; chips; picks shared with the lists; Add follows the switch", async ({ browser }, info) => {
+test("map: the default, big; the sidebar's kinds; chips; picks shared with the lists; Add follows the switches", async ({ browser }, info) => {
   const { p, d, close } = await open(browser);
   await expect(d.getByRole("button", { name: "Map", exact: true })).toHaveAttribute("aria-pressed", "true");
   // Licensed by default.
   await expect(kind(d, "Licensed")).toHaveAttribute("aria-pressed", "true");
-  await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
+  await expect(kind(d, "Airports")).toHaveAttribute("aria-pressed", "false");
+  await expect(kind(d, "Repeaters")).toHaveAttribute("aria-pressed", "false");
   await expect(d.locator(".map[data-map=ready]")).toBeVisible();
+  await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
+  // Each kind's count near the place, shown or not (the fixtures: 2 airports and 7 repeater sites within 50 km).
+  await expect(kind(d, "Airports")).toHaveText(/^Airports\s*2$/);
+  await expect(kind(d, "Repeaters")).toHaveText(/^Repeaters\s*7$/);
+  await expect(kind(d, "Licensed")).toHaveText(/^Licensed\s*\d+$/);
   // The dialog nearly fills the window; Picked is a slim column on the map's right.
   const vw = p.viewportSize()!;
   const box = (await d.boundingBox())!;
@@ -60,7 +72,6 @@ test("map: the default, big; Licensed | Airports | Both; chips; picks shared wit
   // Sub-filter chips for the sources with data here: Canada and the US (Point Roberts); no airport markers.
   const chip = (name: string) => d.getByRole("button", { name: new RegExp(`^${name} \\d+$`) });
   for (const c of ["Canada", "US"]) await expect(chip(c)).toHaveAttribute("aria-pressed", "true");
-  await expect(chip("Airports")).toHaveCount(0);
   await expect(marker(d, "point roberts").first()).toBeVisible({ timeout: 20_000 });
   await expect(marker(d, "richmond works").first()).toBeVisible();
   await expect(marker(d, "CYVR")).toHaveCount(0);
@@ -85,42 +96,56 @@ test("map: the default, big; Licensed | Airports | Both; chips; picks shared wit
   await expect(marker(d, "richmond works").first()).toBeVisible();
 
   // Airports only: airports' markers, no licensed ones, no Canada/US chips.
-  await kind(d, "Airports").click();
+  await onlyKinds(d, "Airports");
   await expect(marker(d, "CYVR").first()).toBeVisible({ timeout: 20_000 });
   await expect(marker(d, "richmond works")).toHaveCount(0);
   await expect(marker(d, "point roberts")).toHaveCount(0);
   await expect(chip("Canada")).toHaveCount(0);
-  // Both: both.
-  await kind(d, "Both").click();
+  // The last kind on stays on.
+  await kind(d, "Airports").click();
+  await expect(kind(d, "Airports")).toHaveAttribute("aria-pressed", "true");
+  // Repeaters only: their markers, in the legend.
+  await onlyKinds(d, "Repeaters");
+  await expect(marker(d, "VE7RPT").first()).toBeVisible({ timeout: 20_000 });
+  await expect(marker(d, "CYVR")).toHaveCount(0);
+  await expect(d.locator(".legend")).toContainText("Repeater");
+  // All three.
+  await onlyKinds(d, "Licensed", "Airports", "Repeaters");
   await expect(marker(d, "CYVR").first()).toBeVisible();
   await expect(marker(d, "richmond works").first()).toBeVisible();
+  await expect(marker(d, "VE7RPT").first()).toBeVisible();
 
-  // CYVR's tower and BC Ferries' 156.800 (NFM) from their popups.
+  // CYVR's tower, BC Ferries' 156.800 (NFM) and VE7RHS's 2 m machine (its shift and tone shown) from their popups.
   let pop = await openSite(p, d, "CYVR");
   await pop.getByRole("checkbox", { name: "CYVR 118.700 TOWER" }).check();
   pop = await openSite(p, d, "bc ferries");
   await pop.getByRole("checkbox", { name: "bc ferries 156.800 NFM" }).check();
-  await expect(picked.locator("h3 .count")).toHaveText("2");
+  pop = await openSite(p, d, "VE7RHS");
+  await expect(pop).toContainText("Repeater");
+  await expect(pop).toContainText("TSQL 100.0");
+  await pop.getByRole("checkbox", { name: "VE7RHS 145.270 −600 kHz" }).check();
+  await expect(picked.locator("h3 .count")).toHaveText("3");
   await expect(picked).toContainText("CYVR");
   await expect(picked).toContainText("118.700");
   await expect(picked).toContainText("bc ferries");
+  await expect(picked).toContainText("VE7RHS");
   await shot(p, info, "43-nearme-popup");
 
-  // Add takes only what shows: one kind hidden, its pick stays picked but isn't counted.
-  await kind(d, "Airports").click();
+  // Add takes only what shows: kinds hidden, their picks stay picked but aren't counted.
+  await onlyKinds(d, "Airports");
   await expect(picked.locator("h3 .count")).toHaveText("1");
   await expect(picked.getByRole("button", { name: "Add 1 channel" })).toBeEnabled();
-  await expect(picked).toContainText("1 more picked but hidden");
+  await expect(picked).toContainText("2 more picked but hidden");
   await expect(picked).not.toContainText("bc ferries");
-  await kind(d, "Licensed").click();
+  await onlyKinds(d, "Licensed");
   await expect(picked.getByRole("button", { name: "Add 1 channel" })).toBeEnabled();
   await expect(picked).toContainText("bc ferries");
   await expect(picked).not.toContainText("CYVR");
-  await kind(d, "Both").click();
+  await onlyKinds(d, "Licensed", "Airports");
   await expect(picked.getByRole("button", { name: "Add 2 channels" })).toBeEnabled();
 
-  // The same picks in the list: Both is the licensed groups, then the airports; BC Ferries' entry ticked, CYVR
-  // partly picked.
+  // The same picks in the list: the licensed groups, then the airports; BC Ferries' entry ticked, CYVR partly
+  // picked.
   await d.getByRole("button", { name: "List", exact: true }).click();
   const list = d.getByLabel("Licensed sites near the place");
   const airports = d.getByLabel("Airports", { exact: true });
@@ -137,41 +162,86 @@ test("map: the default, big; Licensed | Airports | Both; chips; picks shared wit
   await expect(d.getByRole("button", { name: "Add 2 channels" })).toBeEnabled();
   await shot(p, info, "43a-nearme-list-both");
   // Airports only, as a list: no licensed rows, Add 1.
-  await kind(d, "Airports").click();
+  await onlyKinds(d, "Airports");
   await expect(list).toHaveCount(0);
   await expect(airports).toBeVisible();
   await expect(d.getByRole("button", { name: "Add 1 channel" })).toBeEnabled();
-  await kind(d, "Both").click();
+  await onlyKinds(d, "Licensed", "Airports", "Repeaters");
+  await expect(d.getByLabel("Repeaters near the place")).toBeVisible();
   await d.getByRole("button", { name: "Map", exact: true }).click();
 
-  // One Add: the airport's AM, RX-only channel named by its use, and the licensed NFM one, both with positions.
-  await picked.getByRole("button", { name: "Add 2 channels" }).click();
+  // One Add: the airport's AM, RX-only channel named by its use, the licensed NFM one and the repeater's (its input
+  // as TX, its tone both ways), all with positions.
+  await picked.getByRole("button", { name: "Add 3 channels" }).click();
   await expect(d).toHaveCount(0);
-  const added = await state(p, (f) => f.channels.table.channels.filter((c: any) => c.name === "CYVR TWR" || c.name === "bc ferries"));
+  const added = await state(p, (f) => f.channels.table.channels.filter((c: any) => ["CYVR TWR", "bc ferries", "VE7RHS"].includes(c.name)));
   const by = (n: string) => added.find((c: any) => c.name === n);
   expect([by("CYVR TWR").rx, by("CYVR TWR").mode, by("CYVR TWR").rx_only]).toEqual(["118.70000", "AM", true]);
   expect([by("bc ferries").rx, by("bc ferries").mode, by("bc ferries").rx_only]).toEqual(["156.80000", "NFM", true]);
   expect(by("bc ferries").pos).toEqual([49.195, -123.18]);
   expect(by("CYVR TWR").pos).toHaveLength(2);
-  // One zone per group or airport (the default target).
+  const rhs = by("VE7RHS");
+  expect([rhs.rx, rhs.duplex, rhs.offset, rhs.tx_tone, rhs.rx_tone, rhs.mode, rhs.rx_only]).toEqual(["145.27000", "-", "0.60000", "100.0", "100.0", "FM", false]);
+  expect(rhs.pos).toEqual([49.26973, -123.24992]);
+  // One zone per group or airport (the default target), repeaters in one.
   const zones = await state(p, (f) => f.channels.table.zones.map((z: any) => z.name));
   expect(zones).toContain("CYVR");
+  expect(zones).toContain("Repeaters");
 
-  // The choice is remembered (this browser).
+  // The kinds are remembered (this browser).
   await p.reload();
   await closeWelcome(p);
   await p.getByRole("button", { name: "Add from library…" }).first().click();
   await d.getByRole("tab", { name: /^Near me/ }).click();
-  await expect(kind(d, "Both")).toHaveAttribute("aria-pressed", "true");
+  for (const k of ["Licensed", "Airports", "Repeaters"]) await expect(kind(d, k)).toHaveAttribute("aria-pressed", "true");
+  await close();
+});
+
+test("sidebar: a kind clicked from another tab opens Near me; repeaters as a list, searched, added with shift and tones", async ({ browser }, info) => {
+  const { p, d, close } = await open(browser);
+  await d.getByRole("tab", { name: /^Fixed sets/ }).click();
+  await kind(d, "Repeaters").click();
+  await expect(d.getByRole("tab", { name: /^Near me/ })).toHaveAttribute("aria-selected", "true");
+  await expect(kind(d, "Repeaters")).toHaveAttribute("aria-pressed", "true");
+  await onlyKinds(d, "Repeaters");
+  await d.getByRole("button", { name: "List", exact: true }).click();
+  await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
+  const list = d.getByLabel("Repeaters near the place");
+  await expect(list).toContainText("VE7RHS");
+  await expect(list).toContainText("XX7DCS");
+  await expect(list).toContainText("TSQL D023");
+  // The search keeps a callsign or the start of the MHz.
+  await d.getByLabel("Filter repeaters").fill("443");
+  await expect(list).toContainText("XX7DCS");
+  await expect(list).toContainText("VE7RSC");
+  await expect(list).not.toContainText("VE7RHS");
+  await d.getByLabel("Filter repeaters").fill("");
+  await list.getByRole("checkbox", { name: "XX7DCS", exact: true }).check();
+  await list.getByRole("checkbox", { name: "VE7RPT", exact: true }).check();
+  await expect(d).toContainText("2 repeater (shift and tones)");
+  await expect(d).toContainText("Repeater data from HearHam.com (user-contributed).");
+  await shot(p, info, "45-nearme-repeaters-list");
+  await d.getByRole("button", { name: "Add 2 channels" }).click();
+  await expect(d).toHaveCount(0);
+  const added = await state(p, (f) => f.channels.table.channels.filter((c: any) => ["XX7DCS", "VE7RPT"].includes(c.name)));
+  const by = (n: string) => added.find((c: any) => c.name === n);
+  const row = (c: any) => [c.rx, c.duplex, c.offset, c.tx_tone, c.rx_tone, c.rx_only];
+  expect(row(by("XX7DCS"))).toEqual(["443.00000", "+", "5.00000", "D023N", "D023N", false]);
+  expect(row(by("VE7RPT"))).toEqual(["146.94000", "-", "0.60000", "off", "off", false]);
+  expect(by("XX7DCS").pos).toEqual([49.25, -123.1]);
+  const zones = await state(p, (f) => f.channels.table.zones.map((z: any) => z.name));
+  expect(zones).toContain("Repeaters");
   await close();
 });
 
 test("map: Add with Airports only adds the airport, the hidden licensed pick stays", async ({ browser }) => {
   const { p, d, close } = await open(browser);
+  // The map first: a place given before it's ready can be fitted before its size settles.
+  await expect(d.locator(".map[data-map=ready]")).toBeVisible();
   await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
   let pop = await openSite(p, d, "bc ferries");
   await pop.getByRole("checkbox", { name: "bc ferries 156.800 NFM" }).check();
-  await kind(d, "Airports").click();
+  await onlyKinds(d, "Airports");
   pop = await openSite(p, d, "CYVR");
   await pop.getByRole("checkbox", { name: "CYVR 118.700 TOWER" }).check();
   const picked = d.getByRole("complementary", { name: "Picked" });
@@ -183,7 +253,7 @@ test("map: Add with Airports only adds the airport, the hidden licensed pick sta
   // Back to Licensed: BC Ferries is still picked.
   await p.getByRole("button", { name: "Add from library…" }).first().click();
   await d.getByRole("tab", { name: /^Near me/ }).click();
-  await kind(d, "Licensed").click();
+  await onlyKinds(d, "Licensed");
   await expect(picked).toContainText("bc ferries");
   await expect(picked.getByRole("button", { name: "Add 1 channel" })).toBeEnabled();
   await close();
@@ -191,7 +261,7 @@ test("map: Add with Airports only adds the airport, the hidden licensed pick sta
 
 test("map: the radius slider loads again; sites past it come in", async ({ browser }) => {
   const { d, close } = await open(browser);
-  await kind(d, "Airports").click();
+  await onlyKinds(d, "Airports");
   await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
   await expect(marker(d, "CYVR").first()).toBeVisible({ timeout: 20_000 });
   // Victoria (63 km) is outside 50 km.
@@ -219,7 +289,7 @@ test("map: the radius slider loads again; sites past it come in", async ({ brows
 
 test("map: Use my location: the browser's position, asked on the click", async ({ browser }, info) => {
   const { p, d, close } = await open(browser, { geolocation: { latitude: 45.32, longitude: -75.67 }, permissions: ["geolocation"] });
-  await kind(d, "Both").click();
+  await onlyKinds(d, "Licensed", "Airports");
   await d.getByRole("button", { name: "Use my location" }).click();
   await expect(d.getByLabel("Place: latitude, longitude or grid square")).toHaveValue("45.3200, -75.6700");
   await expect(d).toContainText("From this computer's location");

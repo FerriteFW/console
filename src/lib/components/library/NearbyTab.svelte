@@ -1,15 +1,17 @@
 <script lang="ts">
-  // Near me: the place (PlacePicker), what to show (Licensed, Airports or Both; Canada and the US as sub-filters of
-  // Licensed), then the map (the default) or the list. Only the kinds shown load, show and go in Add (nearby.svelte.ts).
-  // The list for Both is the licensed groups, then the airports. When no place is given yet and a radio is
-  // connected, its GPS fix (else its fixed position) is asked for once.
+  // Near me: the place (PlacePicker), Canada and the US as sub-filters of Licensed, then the map (the default) or the
+  // list. The kinds shown (Licensed, Airports, Repeaters) are switched in the dialog's sidebar (LibraryDialog, which
+  // also loads them); only those show and go in Add (nearby.svelte.ts). The list with several kinds is the licensed
+  // groups, then the airports, then the repeaters. When no place is given yet and a radio is connected, its GPS fix
+  // (else its fixed position) is asked for once.
   import { library } from "../../library.svelte";
   import { radio } from "../../radio.svelte";
-  import { airportSites, sites } from "../../sites.svelte";
-  import { nearby, type Show } from "../../nearby.svelte";
+  import { airportSites, repeaterSites, sites } from "../../sites.svelte";
+  import { nearby } from "../../nearby.svelte";
   import PlacePicker from "./PlacePicker.svelte";
   import SitesTab from "./SitesTab.svelte";
   import AirportsTab from "./AirportsTab.svelte";
+  import RepeatersTab from "./RepeatersTab.svelte";
   import NearMap from "./NearMap.svelte";
   import AddBar from "./AddBar.svelte";
   import DataFooter from "./DataFooter.svelte";
@@ -18,22 +20,9 @@
 
   sites.start();
   airportSites.start();
+  repeaterSites.start();
   library.loadFixed();
   if (!library.placeText.trim() && radio.phase === "connected") library.placeFromRadio(true);
-
-  $effect(() => {
-    const p = library.place;
-    const r = library.radius;
-    if (!p) return;
-    if (nearby.showLic) sites.look(p.lat, p.lon, r);
-    if (nearby.showAir) airportSites.look(p.lat, p.lon, r);
-  });
-
-  const SHOW: { id: Show; label: string; title: string }[] = [
-    { id: "lic", label: "Licensed", title: "Licensed VHF and UHF sites: Canada and the US" },
-    { id: "air", label: "Airports", title: "Airports' airband frequencies: AM, RX only" },
-    { id: "both", label: "Both", title: "Licensed sites and airports together" },
-  ];
   const SOURCES = [
     { src: "tafl", label: "Canada" },
     { src: "fcc", label: "US" },
@@ -51,9 +40,17 @@
     return c;
   });
   const on = (src: string) => nearby.layers[src] !== false;
-  const each = $derived(nearby.show === "lic" ? "One zone per organization" : nearby.show === "air" ? "One zone per airport" : "One zone per organization or airport");
+  /** The zone target's "each" choice for the kinds shown: repeaters all go in one "Repeaters" zone. */
+  const each = $derived.by(() => {
+    const per = [nearby.showLic ? "organization" : "", nearby.showAir ? "airport" : ""].filter(Boolean);
+    const one = per.length ? `One zone per ${per.join(" or ")}` : "";
+    if (!nearby.showRpt) return one;
+    return one ? `${one}, one for repeaters` : `One zone: "Repeaters"`;
+  });
   const siteHere = $derived(new Set(nearby.siteAll.map((e) => e.src)));
   const airHere = $derived(new Set(nearby.airports.length ? ["airports"] : []));
+  const rptHere = $derived(new Set(nearby.repeaters.length ? ["repeaters"] : []));
+  const chips = $derived(nearby.showLic ? SOURCES.filter((x) => counts[x.src]) : []);
 </script>
 
 <div class="top">
@@ -63,30 +60,27 @@
     <button aria-pressed={library.view === "list"} class:on={library.view === "list"} onclick={() => (library.view = "list")}>List</button>
   </div>
 </div>
-<div class="kinds">
-  <div class="seg" role="group" aria-label="Show">
-    {#each SHOW as k (k.id)}
-      <button aria-pressed={nearby.show === k.id} class:on={nearby.show === k.id} onclick={() => (nearby.show = k.id)} title={k.title}>{k.label}</button>
-    {/each}
-  </div>
-  {#if nearby.showLic}
-    {#each SOURCES.filter((x) => counts[x.src]) as x (x.src)}
+{#if chips.length}
+  <div class="kinds" role="group" aria-label="Licensed sources">
+    {#each chips as x (x.src)}
       <button class="chip" aria-pressed={on(x.src)} onclick={() => (nearby.layers = { ...nearby.layers, [x.src]: !on(x.src) })} title="Show or hide {x.label}'s licensed sites">
         <i class="dot"></i>{x.label} <span class="n">{counts[x.src]}</span>
       </button>
     {/each}
-  {/if}
-</div>
+  </div>
+{/if}
 {#if library.view === "map"}
   <NearMap {each} {onadded} />
 {:else}
-  <div class="lists" class:both={nearby.show === "both"}>
+  <div class="lists" class:both={nearby.multi}>
     {#if nearby.showLic}<SitesTab />{/if}
     {#if nearby.showAir}<AirportsTab />{/if}
+    {#if nearby.showRpt}<RepeatersTab />{/if}
   </div>
   <AddBar {each} {onadded} />
-  {#if nearby.showLic}<DataFooter data={sites} here={siteHere} inline={nearby.show === "both"} />{/if}
-  {#if nearby.showAir}<DataFooter data={airportSites} here={airHere} inline={nearby.show === "both"} />{/if}
+  {#if nearby.showLic}<DataFooter data={sites} here={siteHere} inline={nearby.multi} />{/if}
+  {#if nearby.showAir}<DataFooter data={airportSites} here={airHere} inline={nearby.multi} />{/if}
+  {#if nearby.showRpt}<DataFooter data={repeaterSites} here={rptHere} inline={nearby.multi} />{/if}
 {/if}
 
 <style>
@@ -128,9 +122,6 @@
   .seg button.on {
     background: var(--blue);
     color: var(--blue-fg);
-  }
-  .kinds .seg {
-    margin-right: 6px;
   }
   .chip {
     font: inherit;

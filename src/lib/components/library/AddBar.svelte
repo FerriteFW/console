@@ -10,8 +10,11 @@
   const n = $derived(nearby.items.length);
   const nSites = $derived(nearby.pickedSites.length);
   const nAir = $derived(nearby.pickedAirports.reduce((k, x) => k + x.freqs.length, 0) + nearby.nCommon);
+  const nRpt = $derived(nearby.pickedRepeaters.reduce((k, x) => k + x.freqs.length, 0));
   const summary = $derived(
-    [nSites ? `${nSites} licensed` : "", nAir ? `${nAir} airport (AM, RX only)` : ""].filter(Boolean).join(" · "),
+    [nSites ? `${nSites} licensed` : "", nAir ? `${nAir} airport (AM, RX only)` : "", nRpt ? `${nRpt} repeater (shift and tones)` : ""]
+      .filter(Boolean)
+      .join(" · "),
   );
 
   function add() {

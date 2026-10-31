@@ -21,7 +21,7 @@
   const keys = (a: (typeof found)[number]) => a.freqs.map((q) => q.key);
 </script>
 
-{#if nearby.show === "both"}<h3 class="kind">Airports</h3>{/if}
+{#if nearby.multi}<h3 class="kind">Airports</h3>{/if}
 {#if !library.place}
   <p class="sub">
     {#if total}

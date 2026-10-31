@@ -4,7 +4,7 @@
 // at your own risk). Airports and licensed sites never use the network: data.ferritefw.dev is served from
 // tests/e2e/fixtures/sitedata (a few tiny tiles) by ./sitedata.ts.
 import { type Page } from "@playwright/test";
-import { DATA, blockTiles, serveData } from "./sitedata";
+import { DATA, blockTiles, onlyKinds, serveData } from "./sitedata";
 import { connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
 
 let page: Page;
@@ -32,9 +32,9 @@ async function openLibrary(tab: string) {
   if (kind) await nearMe(lib(), kind, true);
 }
 
-/** Near me: what to show (Licensed, Airports or Both), and the list view if asked. */
+/** Near me: that kind alone shown (the sidebar's switches), and the list view if asked. */
 async function nearMe(d: ReturnType<Page["getByRole"]>, kind: string, list = false) {
-  await d.getByRole("group", { name: "Show" }).getByRole("button", { name: kind, exact: true }).click();
+  await onlyKinds(d, kind);
   if (list) await d.getByRole("button", { name: "List", exact: true }).click();
 }
 
@@ -263,13 +263,6 @@ test.describe.serial("near a place", () => {
     await toolbar().getByRole("button", { name: /^File/ }).click();
     await page.getByRole("menuitem", { name: /^Discard unwritten changes/ }).click();
     expect(await state(page, (f) => f.channels.pending)).toBe(0);
-  });
-
-  test("repeaters: says why not yet", async ({}, info) => {
-    await openLibrary("Repeaters");
-    await expect(lib()).toContainText("Repeaters: not yet");
-    await shot(page, info, "38-library-repeaters");
-    await lib().getByRole("button", { name: "Close" }).click();
   });
 });
 

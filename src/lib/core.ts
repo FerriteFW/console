@@ -294,6 +294,8 @@ export type LibraryItem = {
   rx_only?: boolean;
   zone: string;
   tone?: string | null;
+  /** The receive tone when it differs from `tone` ("off": none). */
+  rx_tone?: string | null;
   /** [lat, lon] in degrees: the channel's position (airports, TAFL sites). */
   pos?: [number, number] | null;
 };

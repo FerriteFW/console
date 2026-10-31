@@ -333,7 +333,7 @@
     <div class="grp adds">
       {#if tab === "channels"}
         <button class="btn" disabled={busy || t.channels.length >= 1000} onclick={addChannel}>+ Add channel</button>
-        <button class="btn" disabled={busy || t.channels.length >= 1000} onclick={() => library.show()} title="Fixed sets, airports and licensed sites (Canada, US) near a place">
+        <button class="btn" disabled={busy || t.channels.length >= 1000} onclick={() => library.show()} title="Fixed sets, and licensed sites (Canada, US), airports and repeaters near a place">
           Add from library…
         </button>
       {/if}

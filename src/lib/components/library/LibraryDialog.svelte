@@ -1,20 +1,55 @@
 <script lang="ts">
-  // "Add channels": the channel library beside CHIRP import. Fixed sets; Near me: licensed sites and airports near a
-  // place (ported from NeonPlug), on the map or as a list (NearbyTab); repeaters not yet (see the tab). The dialog
-  // is always nearly as big as the window (a desktop app's feel: the map gets the room), so switching tabs never
-  // resizes it.
+  // "Add channels": the channel library beside CHIRP import. Fixed sets; Near me: licensed sites, airports and
+  // repeaters near a place (ported from NeonPlug), on the map or as a list (NearbyTab). Near me's kinds sit under it
+  // in the sidebar, always in view: each a switch (any of them, at least one: nearby.svelte.ts), with how many are
+  // near the place; one clicked from another tab opens Near me with it on. The dialog is always nearly as big as the
+  // window (a desktop app's feel: the map gets the room), so switching tabs never resizes it.
   // Added channels go into the table as new rows, checked by ferrite's own code; Write then shows them in the diff
   // as usual.
   import { library } from "../../library.svelte";
   import FixedTab from "./FixedTab.svelte";
   import NearbyTab from "./NearbyTab.svelte";
   import { channels } from "../../channels.svelte";
+  import { airportSites, repeaterSites, sites } from "../../sites.svelte";
+  import { nearby, type Kind } from "../../nearby.svelte";
 
   const tabs = [
     { id: "fixed", label: "Fixed sets", sub: "FRS, GMRS, MURS, PMR446, marine, weather, airband, resource roads, calling" },
-    { id: "near", label: "Near me", sub: "Licensed sites (Canada, the US) and airports near a place, on a map" },
-    { id: "repeaters", label: "Repeaters", sub: "Not yet" },
+    { id: "near", label: "Near me", sub: "What's near a place, on a map" },
   ] as const;
+  const KINDS: { id: Kind; label: string; what: [string, string] }[] = [
+    { id: "lic", label: "Licensed", what: ["licensed frequency", "licensed frequencies"] },
+    { id: "air", label: "Airports", what: ["airport", "airports"] },
+    { id: "rpt", label: "Repeaters", what: ["repeater", "repeaters"] },
+  ];
+
+  // Near me's data loads while the dialog is open and a place is given, so the sidebar can count it: airports and
+  // repeaters (small) always, licensed sites when shown (their tiles are big).
+  $effect(() => {
+    const p = library.place;
+    const r = library.radius;
+    if (!library.open || !p) return;
+    if (nearby.showLic) sites.look(p.lat, p.lon, r);
+    airportSites.look(p.lat, p.lon, r);
+    repeaterSites.look(p.lat, p.lon, r);
+  });
+  /** How many of a kind are near the place, once loaded. */
+  function count(k: Kind): number | null {
+    if (k === "lic") return nearby.siteResult ? nearby.siteShown.length : null;
+    if (k === "air") return nearby.airportResult ? nearby.airports.length : null;
+    return nearby.repeaterResult ? nearby.repeaters.length : null;
+  }
+  function kindTitle(k: (typeof KINDS)[number], n: number | null) {
+    const on = nearby.kinds.has(k.id);
+    const what = n === null ? "" : `${n} ${k.what[n === 1 ? 0 : 1]} within ${library.radius} km. `;
+    return what + (on && nearby.kinds.size === 1 ? "At least one kind shows" : on ? `Click to hide ${k.label.toLowerCase()}` : `Click to show ${k.label.toLowerCase()}`);
+  }
+  function pickKind(k: Kind) {
+    if (library.tab !== "near") {
+      library.tab = "near";
+      nearby.setKind(k, true);
+    } else nearby.toggleKind(k);
+  }
 
   const room = $derived(1000 - channels.table.channels.length);
   const close = () => (library.open = false);
@@ -41,27 +76,22 @@
               <b>{t.label}</b><span>{t.sub}</span>
             </button>
           {/each}
+          <div class="kinds" role="group" aria-label="Near me shows">
+            {#each KINDS as k (k.id)}
+              {@const n = count(k.id)}
+              <button class="kind {k.id}" aria-pressed={nearby.kinds.has(k.id)} onclick={() => pickKind(k.id)} title={kindTitle(k, n)}>
+                <i class="box" aria-hidden="true"></i><span class="name">{k.label}</span>{#if n !== null && library.place}<span class="n">{n.toLocaleString()}</span>{/if}
+              </button>
+            {/each}
+          </div>
           <p class="note">Added channels land in the table as new rows (green). Nothing goes to the radio until Write, which backs up and shows the diff first.</p>
         </div>
         <div class="panel" role="tabpanel" aria-label={tabs.find((t) => t.id === library.tab)?.label}>
           {#if library.error}<div class="banner">{library.error}</div>{/if}
           {#if library.tab === "fixed"}
             <FixedTab onadded={close} />
-          {:else if library.tab === "near"}
-            <NearbyTab onadded={close} />
           {:else}
-            <div class="stub">
-              <h3>Repeaters: not yet</h3>
-              <p>NeonPlug's repeater source is RadioID's DMR list (<code>rptrs.json</code>). It doesn't fit Ferrite:</p>
-              <ul>
-                <li>Ferrite is analog. DMR repeaters are useless to it.</li>
-                <li>Only about 1,100 of its 11,500 entries are mixed mode (analog too).</li>
-                <li>The list has no access tones. Most analog repeaters need one.</li>
-                <li>The list has no coordinates, so "near a place" can't work.</li>
-              </ul>
-              <p>RepeaterBook has the right data, but its API needs a key and its terms limit reuse.</p>
-              <p>For now: export from RepeaterBook or CHIRP as CHIRP CSV, then <b>CHIRP CSV › Import</b>.</p>
-            </div>
+            <NearbyTab onadded={close} />
           {/if}
         </div>
       </div>
@@ -148,6 +178,68 @@
     background: var(--focus);
     border-left-color: var(--blue);
   }
+  /* Near me's kinds: indented under it, each a switch with its count. */
+  .kinds {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: -2px 0 4px 14px;
+    padding-left: 8px;
+    border-left: 1px solid var(--line);
+  }
+  .nav .kind {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border: none;
+    font: inherit;
+    font-size: 13px;
+    color: var(--sub);
+  }
+  .nav .kind[aria-pressed="true"] {
+    color: var(--text);
+  }
+  .kind .name {
+    flex: 1;
+    color: inherit;
+    font-size: 13px;
+  }
+  .nav .kind .n {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .box {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    border: 1.5px solid var(--sub);
+    display: grid;
+    place-items: center;
+  }
+  .kind[aria-pressed="true"] .box {
+    border-color: transparent;
+    background: var(--k);
+  }
+  .kind[aria-pressed="true"] .box::after {
+    content: "";
+    width: 7px;
+    height: 4px;
+    margin-top: -2px;
+    border: solid #fff;
+    border-width: 0 0 2px 2px;
+    transform: rotate(-45deg);
+  }
+  .kind.lic {
+    --k: var(--map-lic);
+  }
+  .kind.air {
+    --k: var(--map-air);
+  }
+  .kind.rpt {
+    --k: var(--map-rpt);
+  }
   .note {
     margin-top: auto;
     color: var(--sub);
@@ -168,18 +260,6 @@
     color: var(--red);
     font-size: 13px;
   }
-  .stub {
-    max-width: 640px;
-    font-size: 13px;
-  }
-  .stub h3 {
-    margin: 4px 0 10px;
-    font-size: 15px;
-  }
-  .stub ul {
-    padding-left: 20px;
-    color: var(--sub);
-  }
   .sub {
     color: var(--sub);
     font-size: 12px;
@@ -192,9 +272,14 @@
       grid-template-columns: 1fr;
       grid-template-rows: auto 1fr;
     }
-    .nav {
+    .nav,
+    .kinds {
       flex-direction: row;
       overflow-x: auto;
+    }
+    .kinds {
+      margin: 0;
+      border-left: none;
     }
     .nav button span,
     .note {

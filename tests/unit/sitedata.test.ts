@@ -17,7 +17,7 @@ test("decode: running sums from 0; degrees, half kHz, modes, mobile, categories"
   assert.deepEqual([...t.lon], [-123.2, -123.18, -123.1801]);
   assert.deepEqual([...t.f], [313600, 318510, 318508]);
   const s = tileSites("tafl", t);
-  assert.deepEqual(s[1], { src: "tafl", name: "a", lat: 49.195, lon: -123.18, f: 318510, m: 1, mobile: true, type: "", k: 4 });
+  assert.deepEqual(s[1], { src: "tafl", name: "a", lat: 49.195, lon: -123.18, f: 318510, m: 1, mobile: true, type: "", k: 4, d: 0, te: "", td: "" });
   assert.equal(s[0].name, "b");
   // `s` and `k` missing: every row 0.
   assert.deepEqual([...decodeTile({ n: ["x"], c: [0], a: [1], o: [1], f: [1], m: [3] }).s], [0]);
@@ -35,6 +35,17 @@ test("decode: airports: no modes (unknown), uses from tn/t, -1 none", () => {
     [120.0005, "", MODE_UNKNOWN],
   ]);
   assert.throws(() => decodeTile({ n: ["x"], c: [0], a: [1], o: [1], f: [1], tn: ["TWR"], t: [0, 0] }), /column t/);
+});
+
+test("decode: repeaters: offsets (each row's own, not summed) and tones from pn/pe/pd, -1 none", () => {
+  const t = decodeTile({ n: ["VE7RHS", "VE7RPT"], c: [0, 1, 1], a: [4926973, 0, 0], o: [-12324992, 0, 0], f: [290540, 595460, 4000], d: [-1200, 10000, 0], pn: ["100.0", "D023"], pe: [0, 1, -1], pd: [-1, 1, -1] });
+  const s = tileSites("repeaters", t);
+  assert.deepEqual(s.map((x) => [x.name, x.f / 2000, x.d / 2000, x.te, x.td]), [
+    ["VE7RHS", 145.27, -0.6, "100.0", ""],
+    ["VE7RPT", 443, 5, "D023", "D023"],
+    ["VE7RPT", 445, 0, "", ""],
+  ]);
+  assert.throws(() => decodeTile({ n: ["x"], c: [0], a: [1], o: [1], f: [1], d: [0, 0] }), /column d/);
 });
 
 test("grid squares, 2, 4 and 6 characters", () => {

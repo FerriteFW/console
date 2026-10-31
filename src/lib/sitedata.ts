@@ -1,7 +1,7 @@
 /**
- * Licensed sites (Canada's TAFL, the US FCC's ULS) and airports (OurAirports) from the FerriteFW/data repo, published
+ * Licensed sites (Canada's TAFL, the US FCC's ULS), airports (OurAirports) and repeaters (HearHam) from the FerriteFW/data repo, published
  * at https://data.ferritefw.dev (its README's "Output" is the format). Each source is tiled by grid square (airports
- * by 2-character field: its index's `level`): a place and radius fetch only the tiles the circle's box touches. Tiles are decoded once and kept in memory, and kept in Cache
+ * and repeaters by 2-character field: its index's `level`): a place and radius fetch only the tiles the circle's box touches. Tiles are decoded once and kept in memory, and kept in Cache
  * Storage (the browser's and the Tauri webview's) under their URL plus the source's build date, so the next visit
  * and offline use read them from there. A newer build date is offered as an update, never fetched by itself.
  * "Save for offline" fetches a source's whole zip, checks its SHA-256 and stores every tile.
@@ -46,8 +46,24 @@ export type SourceIndex = {
   split: string[];
 };
 /** A tile as published (`columnar-1`). `m` missing: every row unknown (airports); `tn`/`t`: the uses (airports); `k`
- * missing: every row's category 0 (airports, tiles from before it). */
-export type TileJson = { n: string[]; c: number[]; a: number[]; o: number[]; f: number[]; m?: number[]; s?: number[]; tn?: string[]; t?: number[]; k?: number[] };
+ * missing: every row's category 0 (airports, tiles from before it); `d`, `pn`/`pe`/`pd`: repeaters' offsets (half kHz,
+ * each row's own) and tones (encode and decode, indexes into `pn`, -1 none). */
+export type TileJson = {
+  n: string[];
+  c: number[];
+  a: number[];
+  o: number[];
+  f: number[];
+  m?: number[];
+  s?: number[];
+  tn?: string[];
+  t?: number[];
+  k?: number[];
+  d?: number[];
+  pn?: string[];
+  pe?: number[];
+  pd?: number[];
+};
 /** A decoded tile: columns, one entry per row. `f` in half kHz; `t` indexes `types` (-1: none). */
 export type Tile = {
   names: string[];
@@ -60,6 +76,12 @@ export type Tile = {
   types: string[];
   t: Int16Array;
   k: Uint8Array;
+  /** Repeaters: the offset in half kHz (TX = f + d); 0 elsewhere. */
+  d: Int32Array;
+  /** Repeaters: the tile's tones ("100.0", "D023", "D023I"); `pe` (sent) and `pd` (received) index them, -1 none. */
+  tones: string[];
+  pe: Int16Array;
+  pd: Int16Array;
 };
 
 /** Modes (`m`): 0 analog FM under 14 kHz, 1 analog FM 16-20 kHz, 2 digital or data only (no longer published), 3 unknown. */
@@ -73,14 +95,15 @@ export const CATEGORIES = ["Business", "Public safety", "Transit", "Utilities", 
 export const CAT_BUSINESS = 0;
 export const CAT_PUBLIC_SAFETY = 1;
 
-/** One site and frequency (a licensed site's, an airport's). `type`: the frequency's use (airports: "TWR"), or "";
- * `k`: the category (CATEGORIES). */
-export type Site = { src: string; name: string; lat: number; lon: number; f: number; m: number; mobile: boolean; type: string; k: number };
+/** One site and frequency (a licensed site's, an airport's, a repeater's). `type`: the frequency's use (airports:
+ * "TWR"), or ""; `k`: the category (CATEGORIES); `d`: a repeater's offset in half kHz (0 elsewhere); `te`, `td`: its
+ * tones to send and that it sends ("100.0", "D023", "D023I"; "" none). */
+export type Site = { src: string; name: string; lat: number; lon: number; f: number; m: number; mobile: boolean; type: string; k: number; d: number; te: string; td: string };
 
 /** A tile's columns into rows: running sums of `a`, `o` and `f` from 0. */
 export function decodeTile(t: TileJson): Tile {
   const n = t.c.length;
-  for (const k of ["a", "o", "f", "m", "s", "t", "k"] as const) {
+  for (const k of ["a", "o", "f", "m", "s", "t", "k", "d", "pe", "pd"] as const) {
     const col = t[k];
     if (col && col.length !== n) throw new Error(`Bad tile: column ${k} has ${col.length} rows, not ${n}`);
   }
@@ -95,6 +118,10 @@ export function decodeTile(t: TileJson): Tile {
     types: t.tn ?? [],
     t: new Int16Array(n),
     k: new Uint8Array(n),
+    d: new Int32Array(n),
+    tones: t.pn ?? [],
+    pe: new Int16Array(n),
+    pd: new Int16Array(n),
   };
   let a = 0;
   let o = 0;
@@ -111,6 +138,9 @@ export function decodeTile(t: TileJson): Tile {
     out.s[i] = t.s ? t.s[i] : 0;
     out.t[i] = t.t ? t.t[i] : -1;
     out.k[i] = t.k ? t.k[i] : 0;
+    out.d[i] = t.d ? t.d[i] : 0;
+    out.pe[i] = t.pe ? t.pe[i] : -1;
+    out.pd[i] = t.pd ? t.pd[i] : -1;
   }
   return out;
 }
@@ -120,7 +150,21 @@ export function tileSites(src: string, t: Tile): Site[] {
   const out: Site[] = new Array(t.f.length);
   for (let i = 0; i < t.f.length; i++) {
     const ty = t.t[i];
-    out[i] = { src, name: t.names[t.name[i]] ?? "", lat: t.lat[i], lon: t.lon[i], f: t.f[i], m: t.m[i], mobile: t.s[i] === 1, type: ty >= 0 ? (t.types[ty] ?? "") : "", k: t.k[i] };
+    const tone = (j: number) => (j >= 0 ? (t.tones[j] ?? "") : "");
+    out[i] = {
+      src,
+      name: t.names[t.name[i]] ?? "",
+      lat: t.lat[i],
+      lon: t.lon[i],
+      f: t.f[i],
+      m: t.m[i],
+      mobile: t.s[i] === 1,
+      type: ty >= 0 ? (t.types[ty] ?? "") : "",
+      k: t.k[i],
+      d: t.d[i],
+      te: tone(t.pe[i]),
+      td: tone(t.pd[i]),
+    };
   }
   return out;
 }
