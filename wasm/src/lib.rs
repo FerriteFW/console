@@ -332,6 +332,33 @@ pub fn dtmf_from_record(rec: &[u8]) -> Option<String> {
     lists::dtmf_from_record(rec).map(|m| json(&m))
 }
 
+/// TEXT-7: the factory quick messages (JSON list).
+#[wasm_bindgen]
+pub fn quick_factory() -> String {
+    json(&lists::quick_factory())
+}
+
+/// LINK-54: why the radio would refuse a quick message (`{own, text}`, JSON), or undefined.
+#[wasm_bindgen]
+pub fn quick_check(q: &str) -> Result<Option<String>, JsError> {
+    let q: lists::QuickMessage = from_json(q, "quick message")?;
+    Ok(lists::check_quick(&q))
+}
+
+/// LINK-55: why the radio would refuse a waypoint (`{name, lat, lon, source}`, JSON), or undefined.
+#[wasm_bindgen]
+pub fn waypoint_check(w: &str) -> Result<Option<String>, JsError> {
+    let w: lists::Waypoint = from_json(w, "waypoint")?;
+    Ok(lists::check_waypoint(&w))
+}
+
+/// LINK-56: why the radio would refuse a DTMF memory (`{symbols, name}`, JSON), or undefined.
+#[wasm_bindgen]
+pub fn dtmf_check(m: &str) -> Result<Option<String>, JsError> {
+    let m: lists::DtmfMemory = from_json(m, "DTMF memory")?;
+    Ok(lists::check_dtmf(&m))
+}
+
 /// LINK-58: a `WRITE_MANY` record of `what` 11 for a range preset's skip list (JSON list of frequencies, 10 Hz;
 /// `[]` clears it). Write it after the presets: a list stays with the preset in its place.
 #[wasm_bindgen]
@@ -1028,10 +1055,16 @@ pub fn new_preset(number: u8, name: &str) -> String {
 
 /// The presets write plan from the radio's to the table's (JSON lists of presets).
 #[wasm_bindgen]
-pub fn presets_plan(base: &str, want: &str) -> Result<String, JsError> {
+pub fn presets_plan(base: &str, want: &str, skips: bool) -> Result<String, JsError> {
     let b: Vec<ferrite_console_core::presets::PresetView> = from_json(base, "base")?;
     let w: Vec<ferrite_console_core::presets::PresetView> = from_json(want, "table")?;
-    Ok(json(&ferrite_console_core::presets::plan(&b, &w)))
+    Ok(json(&ferrite_console_core::presets::plan(&b, &w, skips)))
+}
+
+/// SCAN-10: a skipped frequency typed in MHz, as 10 Hz, or undefined.
+#[wasm_bindgen]
+pub fn preset_skip_parse(text: &str) -> Option<u32> {
+    ferrite_console_core::presets::parse_skip(text)
 }
 
 /// The presets as `.ferrite`'s presets.json. `radio` is JSON `{firmware, callsign, ...}`.

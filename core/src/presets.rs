@@ -2,10 +2,12 @@
 //! the field order of ferrite's `link.rs` (`preset_save`, and `apply`'s reader), the presets as the editor shows
 //! them, and the write plan, checked first through ferrite's own link session ([`RadioSide`]).
 //!
-//! A preset's skipped frequencies (SCAN-10, up to 48) aren't in the link's record: the radio keeps them with the
-//! preset it already holds at that index (`p.skips = old.skips`). So the plan never shifts a kept preset to another
+//! A preset's skipped frequencies (SCAN-10, up to 48) aren't in the preset's own record: the radio keeps them with the
+//! preset it already holds at that index (`p.skips = old.skips`), and reads and writes them as a list of their own
+//! (LINK-58, `what` 11, from radios whose second caps byte says so). So the plan never shifts a kept preset to another
 //! index: deletions go first (highest index first), then each kept preset is rewritten where it now is, then the new
-//! ones are added after them. `origin` (the number it was read as) is how the table says which preset is which.
+//! ones are added after them; then the skip lists that differ from what the radio then holds. `origin` (the number it
+//! was read as) is how the table says which preset is which.
 
 use crate::answers::status_text;
 use crate::channels::{mhz_text, parse_mhz, RESUMES};
@@ -16,7 +18,7 @@ use ferrite_app::data::RangePreset;
 use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::slot::{MODES, SLOT_MODES, STEPS, STEP_12K5};
 use ferrite_core::freq::mhz;
-use ferrite_core::link::{msg, what};
+use ferrite_core::link::{msg, what, PRESET_SKIPS_MAX};
 use ferrite_ui::text::Buf;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -133,6 +135,9 @@ pub struct PresetView {
     /// The number it was read as (its skipped frequencies stay with it), None for one added here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<u8>,
+    /// Its skipped frequencies (SCAN-10, LINK-58), 10 Hz, in the radio's order; empty for none (or not read).
+    #[serde(default)]
+    pub skips: Vec<u32>,
 }
 
 fn pick(list: &[String], v: &str, what: &str) -> Result<usize, String> {
@@ -162,6 +167,7 @@ impl PresetView {
             mode: MODES.get(p.mode as usize).unwrap_or(&"FM").to_string(),
             resume: resume_word(p.resume.min(12)),
             origin: Some(index + 1),
+            skips: Vec::new(),
         }
     }
 
@@ -219,7 +225,12 @@ impl PresetView {
     /// As the radio would hold it (MHz to five decimals, words as the radio spells them), keeping number and origin.
     pub fn normal(&self) -> Result<PresetView, String> {
         let p = self.preset()?;
-        Ok(PresetView { number: self.number, origin: self.origin, ..PresetView::of(self.number.saturating_sub(1), &p) })
+        Ok(PresetView {
+            number: self.number,
+            origin: self.origin,
+            skips: self.skips.clone(),
+            ..PresetView::of(self.number.saturating_sub(1), &p)
+        })
     }
 }
 
@@ -231,6 +242,7 @@ pub fn choices() -> serde_json::Value {
         "resumes": resume_words(),
         "max": MAX_PRESETS,
         "nameLen": NAME_LEN,
+        "skipsMax": PRESET_SKIPS_MAX,
     })
 }
 
@@ -259,7 +271,34 @@ pub fn check(v: &PresetView) -> Option<String> {
     };
     let mut r = RadioSide::new();
     let (s, rest) = r.write_one(what::PRESET, 0, &preset_record(&p));
-    (s != 0).then(|| reason(s, &rest))
+    if s != 0 {
+        return Some(reason(s, &rest));
+    }
+    if v.skips.is_empty() {
+        return None;
+    }
+    if v.skips.len() > PRESET_SKIPS_MAX {
+        return Some(format!("skipped frequencies: {PRESET_SKIPS_MAX} at most"));
+    }
+    let (s, rest) = r.write_one(what::PRESET_SKIPS, 0, &crate::lists::preset_skips_record(&v.skips));
+    (s != 0).then(|| format!("skipped frequencies: {}", reason(s, &rest)))
+}
+
+/// A skipped frequency typed in MHz ("146.52"), as 10 Hz; None if it isn't one.
+pub fn parse_skip(text: &str) -> Option<u32> {
+    parse_mhz(text)
+}
+
+/// A skip list as the diff shows it: the frequencies in MHz, the first few.
+fn skips_text(f: &[u32]) -> String {
+    if f.is_empty() {
+        return "none".into();
+    }
+    let mut t: Vec<String> = f.iter().take(4).map(|&x| mhz_text(x)).collect();
+    if f.len() > 4 {
+        t.push(format!("… ({} in all)", f.len()));
+    }
+    t.join(", ")
 }
 
 /// The views as the diff compares them (the number and origin aside).
@@ -290,6 +329,9 @@ pub struct Plan {
     pub begin: Vec<u8>,
     pub ops: Vec<Op>,
     pub problems: Vec<Problem>,
+    /// LINK-58: the skip lists to write after the ops, `(index, record)` for `WRITE_MANY` of `what` 11 (an empty
+    /// record clears one): each preset whose list differs from what the radio holds with it then.
+    pub skips: Vec<(u16, Vec<u8>)>,
 }
 
 fn problem(n: u8, e: String) -> Problem {
@@ -298,8 +340,10 @@ fn problem(n: u8, e: String) -> Problem {
 
 /// The plan from `base` (the radio's presets, read just now) to `want` (the table): presets gone deleted, highest
 /// index first; then each kept one written where it now is when it changed (or moved down); then the new ones
-/// added in order. Run through ferrite's link session seeded with `base` first: its refusals are problems.
-pub fn plan(base: &[PresetView], want: &[PresetView]) -> Plan {
+/// added in order; then, with `skips` (a radio that takes them: LINK-58), each skip list that differs from the one
+/// the radio holds with that preset (a kept one's as read, a new one's none). Run through ferrite's link session
+/// seeded with `base` first: its refusals are problems.
+pub fn plan(base: &[PresetView], want: &[PresetView], skips: bool) -> Plan {
     let mut problems = Vec::new();
     let mut changes = Vec::new();
     let mut ops = Vec::new();
@@ -313,8 +357,13 @@ pub fn plan(base: &[PresetView], want: &[PresetView]) -> Plan {
     if want.len() > MAX_PRESETS {
         problems.push(problem(0, format!("at most {MAX_PRESETS} range presets")));
     }
-    let empty =
-        |problems: Vec<Problem>| Plan { changes: Vec::new(), begin: begin_payload(0), ops: Vec::new(), problems };
+    let empty = |problems: Vec<Problem>| Plan {
+        changes: Vec::new(),
+        begin: begin_payload(0),
+        ops: Vec::new(),
+        problems,
+        skips: Vec::new(),
+    };
     if !problems.is_empty() {
         return empty(problems);
     }
@@ -357,13 +406,21 @@ pub fn plan(base: &[PresetView], want: &[PresetView]) -> Plan {
             payloads: vec![delete_payload(what::PRESET, i as u16)],
         });
     }
+    let mut skip_writes = Vec::new();
     for (i, (v, p)) in want.iter().zip(&wp).enumerate() {
         let old = v.origin.map(|o| (o, &bp[o as usize - 1], &base[o as usize - 1]));
+        // The list the radio holds with this preset once the records are written: a kept one's, a new one's none.
+        let held: &[u32] = old.map_or(&[], |(_, _, ov)| &ov.skips);
+        let skip_field = (skips && v.skips != held).then(|| {
+            skip_writes.push((i as u16, crate::lists::preset_skips_record(&v.skips)));
+            Field { field: "skipped".into(), from: skips_text(held), to: skips_text(&v.skips) }
+        });
         if let Some((o, op, ov)) = old {
-            if op == p && o as usize == i + 1 {
+            if op == p && o as usize == i + 1 && skip_field.is_none() {
                 continue;
             }
-            let fs = fields(&shown(&PresetView::of(0, op)), &shown(&PresetView::of(0, p)));
+            let mut fs = fields(&shown(&PresetView::of(0, op)), &shown(&PresetView::of(0, p)));
+            fs.extend(skip_field);
             if !fs.is_empty() {
                 changes.push(Change {
                     what: "preset",
@@ -390,7 +447,7 @@ pub fn plan(base: &[PresetView], want: &[PresetView]) -> Plan {
                 number: v.number as u16,
                 kind: "added",
                 name: v.name.clone(),
-                fields: Vec::new(),
+                fields: skip_field.into_iter().collect(),
             });
         }
         ops.push(Op {
@@ -401,16 +458,26 @@ pub fn plan(base: &[PresetView], want: &[PresetView]) -> Plan {
             payloads: write_payloads(what::PRESET, i as u16, &preset_record(p)),
         });
     }
-    problems.extend(dry_run(&bp, &ops, &wp));
-    Plan { changes, begin: begin_payload(ops.len() as u16), ops, problems }
+    let held: Vec<Vec<u32>> = base.iter().map(|v| v.skips.clone()).collect();
+    problems.extend(dry_run(&bp, &held, &ops, &wp, &skip_writes));
+    Plan { changes, begin: begin_payload(ops.len() as u16), ops, problems, skips: skip_writes }
 }
 
-/// The ops through ferrite's own radio side seeded with the radio's presets: every refusal in ferrite's words, then
-/// whether it ends up holding what the table wants. A preset `WRITE` goes as a one-record `WRITE_MANY`, as Console
-/// sends them.
-fn dry_run(base: &[RangePreset], ops: &[Op], want: &[RangePreset]) -> Vec<Problem> {
+/// The ops through ferrite's own radio side seeded with the radio's presets (and their skip lists, `held`): every
+/// refusal in ferrite's words, then whether it ends up holding what the table wants. A preset `WRITE` goes as a
+/// one-record `WRITE_MANY`, as Console sends them; the skip lists after the session.
+fn dry_run(
+    base: &[RangePreset],
+    held: &[Vec<u32>],
+    ops: &[Op],
+    want: &[RangePreset],
+    skips: &[(u16, Vec<u8>)],
+) -> Vec<Problem> {
     let mut r = RadioSide::new();
     r.seed_presets(base);
+    for (i, l) in held.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
+        r.write_one(what::PRESET_SKIPS, i as u16, &crate::lists::preset_skips_record(l));
+    }
     let mut out = Vec::new();
     let (s, rest) = r.ask(msg::BEGIN, &begin_payload(ops.len() as u16));
     if s != 0 {
@@ -429,6 +496,15 @@ fn dry_run(base: &[RangePreset], ops: &[Op], want: &[RangePreset]) -> Vec<Proble
         }
     }
     r.ask(msg::END, &[]);
+    for (i, rec) in skips {
+        if !out.is_empty() {
+            break;
+        }
+        let (s, rest) = r.write_one(what::PRESET_SKIPS, *i, rec);
+        if s != 0 {
+            out.push(problem(*i as u8 + 1, format!("skipped frequencies: {}", reason(s, &rest))));
+        }
+    }
     if out.is_empty() {
         let got: Vec<RangePreset> = r.store.presets.borrow().iter().map(|p| RangePreset { skips: 0, ..*p }).collect();
         let want: Vec<RangePreset> = want.iter().map(|p| RangePreset { skips: 0, ..*p }).collect();
@@ -462,6 +538,9 @@ pub struct BackupPreset {
     pub resume: String,
     /// The record as the link carries it, hex.
     pub record: String,
+    /// Its skipped frequencies (SCAN-10, LINK-58), MHz; left out when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skips: Vec<String>,
 }
 
 /// The presets as presets.json's text, or the first one that doesn't parse.
@@ -479,6 +558,7 @@ pub fn backup(list: &[PresetView], saved: &str, radio: BTreeMap<String, String>)
             mode: n.mode,
             resume: n.resume,
             record: hex(&preset_record(&p)),
+            skips: v.skips.iter().map(|&f| mhz_text(f)).collect(),
         });
     }
     let b = Backup { format: BACKUP_FORMAT.into(), version: 1, saved: saved.into(), radio, presets };
@@ -504,6 +584,11 @@ pub fn restore(text: &str) -> Result<(Vec<PresetView>, Backup), String> {
         let p = preset_from_record(&rec).ok_or_else(|| format!("preset {}: its record didn't parse", i + 1))?;
         let mut v = PresetView::of(i as u8, &p);
         v.origin = None;
+        v.skips = x
+            .skips
+            .iter()
+            .map(|t| parse_mhz(t).ok_or_else(|| format!("preset {}: skipped frequency {t:?} isn't MHz", i + 1)))
+            .collect::<Result<_, _>>()?;
         out.push(v);
     }
     Ok((out, b))
@@ -560,7 +645,7 @@ mod tests {
         let mut want = vec![base[0].clone(), PresetView { number: 2, ..base[2].clone() }, PresetView::new(3, "Marine")];
         want[2].low = "156".into();
         want[2].high = "162.025".into();
-        let p = plan(&base, &want);
+        let p = plan(&base, &want, true);
         assert!(p.problems.is_empty(), "{:?}", p.problems);
         let kinds: Vec<_> = p.ops.iter().map(|o| (o.kind, o.number)).collect();
         assert_eq!(kinds, [("delete", 2), ("write", 3)], "Air only moved down: not rewritten");
@@ -568,7 +653,7 @@ mod tests {
         // An edit to a kept one: written at its index, the diff naming the field.
         let mut want = base.clone();
         want[1].high = "440".into();
-        let p = plan(&base, &want);
+        let p = plan(&base, &want, true);
         assert_eq!(p.ops.len(), 1);
         assert_eq!(
             p.changes[0].fields,
@@ -578,8 +663,59 @@ mod tests {
         let mut bad = base.clone();
         bad[0].low = "50".into();
         bad[0].high = "70".into();
-        assert!(plan(&base, &bad).problems[0].error.contains("64 MHz"));
-        assert!(plan(&base, &base).ops.is_empty());
+        assert!(plan(&base, &bad, true).problems[0].error.contains("64 MHz"));
+        assert!(plan(&base, &base, true).ops.is_empty());
+    }
+
+    /// LINK-58: a kept preset's changed skip list is written after the records at its new index, the diff naming
+    /// it; a new preset's list goes too; a moved-down preset with its list as held writes nothing; a frequency
+    /// outside the range is refused as the radio refuses it; without `skips` (an older radio) none are written.
+    #[test]
+    fn plan_writes_skip_lists_after_the_presets() {
+        let mut base = vec![v(1, "2 m", "144", "148"), v(2, "70 cm", "430", "450"), v(3, "Air", "118", "137")];
+        base[1].skips = vec![43_200_000, 44_600_000];
+        base[2].skips = vec![12_150_000];
+        // 2 m deleted: 70 cm (now 1) gets one more skip, Air (now 2) keeps its list; a new one with a skip.
+        let mut want = vec![
+            PresetView { number: 1, ..base[1].clone() },
+            PresetView { number: 2, ..base[2].clone() },
+            PresetView::new(3, "Marine"),
+        ];
+        want[0].skips.push(44_000_000);
+        (want[2].low, want[2].high) = ("156".into(), "162.025".into());
+        want[2].skips = vec![15_680_000];
+        let p = plan(&base, &want, true);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(p.skips.iter().map(|s| s.0).collect::<Vec<_>>(), [0, 2]);
+        assert_eq!(
+            crate::lists::preset_skips_from_record(&p.skips[0].1),
+            Some(vec![43_200_000, 44_600_000, 44_000_000])
+        );
+        let ch = p.changes.iter().find(|c| c.number == 1 && c.kind == "changed").unwrap();
+        assert_eq!(
+            ch.fields,
+            [Field {
+                field: "skipped".into(),
+                from: "432.00000, 446.00000".into(),
+                to: "432.00000, 446.00000, 440.00000".into()
+            }]
+        );
+        assert_eq!(p.changes.iter().find(|c| c.kind == "added").unwrap().fields[0].to, "156.80000");
+        assert!(plan(&base, &want, false).skips.is_empty(), "an older radio: none");
+        // Outside its range: the radio's reason.
+        let mut bad = base.clone();
+        bad[0].skips = vec![14_000_000];
+        assert!(plan(&base, &bad, true).problems[0].error.contains("skipped frequencies"));
+        assert!(check(&bad[0]).unwrap().starts_with("skipped frequencies"));
+        assert_eq!(check(&base[1]), None);
+        assert!(plan(&base, &base, true).skips.is_empty() && plan(&base, &base, true).changes.is_empty());
+        // In the backup, as MHz.
+        let text = backup(&want, "2026-10-30T00:00:00Z", BTreeMap::new()).unwrap();
+        assert!(text.contains("\"440.00000\""), "{text}");
+        assert_eq!(
+            restore(&text).unwrap().0.iter().map(|p| p.skips.clone()).collect::<Vec<_>>(),
+            want.iter().map(|p| p.skips.clone()).collect::<Vec<_>>()
+        );
     }
 
     #[test]

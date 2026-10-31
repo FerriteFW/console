@@ -143,6 +143,38 @@ pub fn preset_skips_from_record(rec: &[u8]) -> Option<Vec<u32>> {
     rec.len().is_multiple_of(4).then(|| rec.chunks(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
 }
 
+/// TEXT-7: the factory quick messages, in order (what "Back to the factory text" puts back).
+pub fn quick_factory() -> Vec<String> {
+    (0..QUICK_COUNT as usize).map(|i| String::from_utf8_lossy(ferrite_app::words::quick(i)).into_owned()).collect()
+}
+
+/// A refusal's reason as the editors show it ("invalid: " taken off), or None for `ok`.
+fn reason(s: u8, rest: &[u8]) -> Option<String> {
+    (s != 0).then(|| crate::answers::status_text(s, rest).trim_start_matches("invalid: ").to_string())
+}
+
+/// LINK-54: why the radio would refuse this quick message (compose's rules: TEXT-7), or None. The factory text
+/// (`own` false) is always taken. Ferrite's own link session decides.
+pub fn check_quick(q: &QuickMessage) -> Option<String> {
+    if !q.own {
+        return None;
+    }
+    let (s, rest) = crate::radioside::RadioSide::new().write_one(ferrite_core::link::what::QUICK, 0, &quick_record(q));
+    reason(s, &rest)
+}
+
+/// LINK-55: why the radio would refuse this waypoint (its name and position, GPS-10), or None.
+pub fn check_waypoint(w: &Waypoint) -> Option<String> {
+    let (s, rest) = crate::radioside::RadioSide::new().write_one(ferrite_core::link::what::WAYPOINT, WAYPOINT_ADD, &waypoint_record(Some(w)));
+    reason(s, &rest)
+}
+
+/// LINK-56: why the radio would refuse this DTMF memory (its symbols and name, DTMF-12), or None.
+pub fn check_dtmf(m: &DtmfMemory) -> Option<String> {
+    let (s, rest) = crate::radioside::RadioSide::new().write_one(ferrite_core::link::what::DTMF, 0, &dtmf_record(Some(m)));
+    reason(s, &rest)
+}
+
 /// A list `READ_MANY` answer's records: `(index, record)`, and the index to go on from (LINK-40).
 pub fn parse_many(rest: &[u8]) -> Option<(u16, Records)> {
     let mut r = Rd(rest);
@@ -292,6 +324,24 @@ mod tests {
         assert!(String::from_utf8_lossy(&why).contains("symbols"));
         assert_eq!(write_many(&mut r, what::DTMF, &[(4, dtmf_record(None))]).0, 0);
         assert!(all(&mut r, what::DTMF).is_empty());
+    }
+
+    /// The editors' checks are ferrite's: a quick message APRS can't carry, a waypoint without a name or off the
+    /// globe, DTMF symbols the dialer can't send; the factory texts are the radio's.
+    #[test]
+    fn checks_are_ferrites() {
+        assert_eq!(quick_factory().len(), QUICK_COUNT as usize);
+        assert!(quick_factory().iter().all(|t| !t.is_empty()));
+        assert_eq!(check_quick(&QuickMessage { own: true, text: "QRV on 146.52".into() }), None);
+        assert!(check_quick(&QuickMessage { own: true, text: "a~b".into() }).unwrap().contains("no | ~ {"));
+        assert!(check_quick(&QuickMessage { own: true, text: "x".repeat(68) }).is_some());
+        assert_eq!(check_quick(&QuickMessage { own: false, text: "a~b".into() }), None, "the factory text");
+        assert_eq!(check_waypoint(&wp(1)), None);
+        assert!(check_waypoint(&Waypoint { name: String::new(), ..wp(1) }).unwrap().contains("name"));
+        assert!(check_waypoint(&Waypoint { lat: 910_000_000, ..wp(1) }).is_some());
+        assert_eq!(check_dtmf(&DtmfMemory { symbols: "*79#".into(), name: "Link on".into() }), None);
+        assert!(check_dtmf(&DtmfMemory { symbols: "12E".into(), name: String::new() }).unwrap().contains("symbols"));
+        assert!(check_dtmf(&DtmfMemory { symbols: "1".repeat(17), name: String::new() }).is_some());
     }
 
     /// LINK-57: subscribed to the event log, an event logged on the radio side comes as kind 5 and reads as the

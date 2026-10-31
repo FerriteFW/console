@@ -2,6 +2,8 @@
 //! Radio side of the codec is ferrite's own (`link::parse`, `link::build`). It knows `HELLO`, `INFO`, `UI` (with
 //! `MORE` pages), `KEY` (keypad, knob; remote PTT is refused), `CMD` (a line of text) and `BAUD`; the rest answers
 //! `unknown type`. Its screens are a home with three cards and a small quick menu: a look-alike, not the firmware.
+//! Its `HELLO` says the capabilities its records have ([`DEMO_CAPS`], [`DEMO_CAPS2`]), so Console's editors for them
+//! show against it.
 //!
 //! Records are the firmware's own: `READ`, `WRITE`, `DELETE`, `BEGIN` and `END` go to ferrite's link session
 //! over an in-memory store ([`crate::radioside`]), seeded with [`demo_set`], so channel programming against the demo
@@ -15,6 +17,13 @@ use ferrite_core::link::{self, key, msg, Status, ANSWER, MAX_PAYLOAD, MAX_WIRE};
 
 /// The UI text a `UI` answer carries at most (as the radio's pages: under the 240-byte payload).
 const PAGE: usize = 200;
+
+/// LINK-35.2: what the demo's records do (ferrite's own session over its store): channel deletes in `WRITE_MANY`,
+/// channel positions, the quick messages, waypoints, DTMF memories and the event log. Not `STREAM`, compression,
+/// audio or the drawn screen: the demo's own answers don't have them.
+pub const DEMO_CAPS: u8 = link::caps::LISTS | link::caps::POSITION | 8;
+/// The second capability byte: range preset skip lists (LINK-58).
+pub const DEMO_CAPS2: u8 = link::caps2::PRESET_SKIPS;
 
 pub struct DemoRadio {
     /// Ferrite's radio side, for the records.
@@ -40,6 +49,7 @@ impl Default for DemoRadio {
         let (zones, chans) = demo_set().parts().unwrap_or_default();
         side.seed(&zones, &chans);
         side.seed_presets(&demo_presets());
+        demo_lists(&mut side);
         DemoRadio {
             side,
             rx: Vec::new(),
@@ -81,7 +91,16 @@ impl DemoRadio {
                 Ok(f) => {
                     let (ty, seq, p) = (f.ty, f.seq, f.payload.to_vec());
                     let (status, rest) = match ty {
-                        msg::READ | msg::WRITE | msg::READ_MANY | msg::WRITE_MANY | msg::USED | msg::DELETE | msg::BEGIN | msg::END => {
+                        msg::READ
+                        | msg::WRITE
+                        | msg::READ_MANY
+                        | msg::WRITE_MANY
+                        | msg::USED
+                        | msg::DELETE
+                        | msg::BEGIN
+                        | msg::END
+                        | msg::LOG_READ
+                        | msg::SUBSCRIBE => {
                             self.side.ask(ty, &p)
                         }
                         _ => {
@@ -114,6 +133,7 @@ impl DemoRadio {
                 let mut r = vec![link::PROTOCOL, MAX_PAYLOAD as u8, 1];
                 push_text(&mut r, "demo");
                 r.push(link::build::of(true, true, false));
+                r.extend([DEMO_CAPS, DEMO_CAPS2]);
                 (Status::Ok, r)
             }
             msg::INFO => {
@@ -274,6 +294,21 @@ pub fn demo_presets() -> Vec<ferrite_app::data::RangePreset> {
         .collect()
 }
 
+/// The demo's lists, written through ferrite's own link session as Console would: a quick message of the owner's,
+/// three waypoints around Ottawa, two DTMF memories, a skip list on the 2 m range, and one event logged.
+fn demo_lists(side: &mut RadioSide) {
+    use crate::lists::{dtmf_record, preset_skips_record, quick_record, waypoint_record, DtmfMemory, QuickMessage, Waypoint, WAYPOINT_ADD};
+    use link::what;
+    side.write_one(what::QUICK, 8, &quick_record(&QuickMessage { own: true, text: "At the club tonight, 146.94".into() }));
+    for (name, lat, lon, source) in [("Camp Fortune", 455_090_000, -758_590_000, "marked"), ("Club shack", 453_960_000, -757_160_000, "link"), ("VE3RSB-1", 454_240_000, -756_950_000, "aprs")] {
+        side.write_one(what::WAYPOINT, WAYPOINT_ADD, &waypoint_record(Some(&Waypoint { name: name.into(), lat, lon, source: source.into() })));
+    }
+    side.write_one(what::DTMF, 0, &dtmf_record(Some(&DtmfMemory { symbols: "*79#".into(), name: "Link on".into() })));
+    side.write_one(what::DTMF, 1, &dtmf_record(Some(&DtmfMemory { symbols: "#79#".into(), name: "Link off".into() })));
+    side.write_one(what::PRESET_SKIPS, 0, &preset_skips_record(&[14_439_000, 14_580_000]));
+    side.store.log("*79#");
+}
+
 pub fn demo_set() -> Set {
     let zone = |n: u8, name: &str, scan: bool| ZoneView { scan_all: scan, ..ZoneView::new(n, name) };
     #[allow(clippy::type_complexity)]
@@ -359,6 +394,7 @@ mod tests {
         assert_eq!(st, 0);
         let h = Hello::parse(&h).unwrap();
         assert!(h.may_go_on && h.build.unwrap().dry);
+        assert_eq!((h.caps, h.caps2), (DEMO_CAPS, DEMO_CAPS2), "the demo says what its records do");
         let (_, i) = ask(&mut r, &mut s, msg::INFO, &[]);
         assert_eq!(Info::parse(&i).unwrap().uid_text.unwrap().len(), 23);
         let ui_text = |r: &mut DemoRadio, s: &mut Session| {
@@ -384,6 +420,35 @@ mod tests {
         let (st, _) = ask(&mut r, &mut s, msg::KEY, &[key::PTT, key::ON, key::ACTIVE]);
         assert_eq!(st, Status::Invalid as u8, "the demo never transmits");
         assert_eq!(ask(&mut r, &mut s, 0x55, &[]).0, Status::UnknownType as u8);
+    }
+
+    /// The capabilities the demo's HELLO says are there: its lists read back as seeded, a skip list with its preset,
+    /// the event log by `LOG_READ`, and `SUBSCRIBE` with the event log's mask taken.
+    #[test]
+    fn demo_lists_through_the_link() {
+        let (mut r, mut s) = (DemoRadio::new(), Session::new());
+        r.feed(&s.take_cable(0.0));
+        let many = |r: &mut DemoRadio, s: &mut Session, w: u8| {
+            let mut p = vec![w];
+            p.extend(0u16.to_le_bytes());
+            p.extend(300u16.to_le_bytes());
+            let (st, rest) = ask(r, s, msg::READ_MANY, &p);
+            assert_eq!(st, 0);
+            crate::lists::parse_many(&rest).unwrap().1
+        };
+        let wps = many(&mut r, &mut s, link::what::WAYPOINT);
+        assert_eq!(wps.len(), 3);
+        assert_eq!(crate::lists::waypoint_from_record(&wps[0].1).unwrap().name, "VE3RSB-1", "newest first");
+        assert_eq!(many(&mut r, &mut s, link::what::DTMF).len(), 2);
+        let q = many(&mut r, &mut s, link::what::QUICK);
+        assert!(crate::lists::quick_from_record(&q[8].1).unwrap().own);
+        let sk = many(&mut r, &mut s, link::what::PRESET_SKIPS);
+        assert_eq!((sk.len(), sk[0].0), (1, 0));
+        let (st, rest) = ask(&mut r, &mut s, msg::LOG_READ, &crate::log::read_payload(u32::MAX, 0));
+        assert_eq!(st, 0);
+        assert_eq!(crate::log::parse_page(&rest).unwrap().records.len(), 1);
+        let (st, _) = ask(&mut r, &mut s, msg::SUBSCRIBE, &crate::aprs::subscribe_payload(link::event::SUB_LOG, 0, false, false));
+        assert_eq!(st, 0);
     }
 
     /// The demo's records are ferrite's: its set reads back through the link as built, and INFO counts it.
