@@ -39,6 +39,7 @@ impl Default for DemoRadio {
         let mut side = RadioSide::new();
         let (zones, chans) = demo_set().parts().unwrap_or_default();
         side.seed(&zones, &chans);
+        side.seed_presets(&demo_presets());
         DemoRadio {
             side,
             rx: Vec::new(),
@@ -119,7 +120,7 @@ impl DemoRadio {
                 let mut r = Vec::new();
                 push_text(&mut r, "demo");
                 r.extend(self.side.store.count().to_le_bytes());
-                r.extend([self.side.store.zones(), 0]);
+                r.extend([self.side.store.zones(), self.side.store.presets.borrow().len() as u8]);
                 r.extend(400u16.to_le_bytes());
                 r.push(0);
                 push_text(&mut r, "N0CALL");
@@ -260,6 +261,19 @@ impl DemoRadio {
 }
 
 /// The demo radio's channels and zones: a radio's worth around Ottawa, on the bands Ferrite covers.
+/// The demo radio's range presets (MENU 0 1 4): 2 m, 70 cm, airband and marine.
+pub fn demo_presets() -> Vec<ferrite_app::data::RangePreset> {
+    use crate::presets::PresetView;
+    [("2 m", "144", "148", "12.5 kHz", "NFM", "Global"), ("70 cm", "430", "450", "25 kHz", "NFM", "Global"), ("Airband", "118", "137", "25 kHz", "AM", "After 3 s"), ("Marine", "156", "162.025", "25 kHz", "FM", "Carrier drop")]
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (name, low, high, step, mode, resume))| {
+            let v = PresetView { name: (*name).into(), low: (*low).into(), high: (*high).into(), step: (*step).into(), mode: (*mode).into(), resume: (*resume).into(), ..PresetView::new(i as u8 + 1, name) };
+            v.preset().ok()
+        })
+        .collect()
+}
+
 pub fn demo_set() -> Set {
     let zone = |n: u8, name: &str, scan: bool| ZoneView { scan_all: scan, ..ZoneView::new(n, name) };
     #[allow(clippy::type_complexity)]

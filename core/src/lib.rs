@@ -15,6 +15,7 @@
 //! - [`keys`]: key names to stock key codes, `KEY` and knob payloads (never PTT).
 //! - [`uid`]: the unique ID as About shows it.
 //! - [`records`]: `READ`/`WRITE`/`DELETE`/`BEGIN`/`END` payloads, for channel and zone programming (phase 2).
+//! - [`presets`]: range presets (MENU 0 1 4) over the link, their checks and write plan.
 //! - [`library`]: the "Add channels" library: fixed sets, airports and TAFL sites near a place, as channels.
 //! - [`settings`]: the radio-wide settings record as the menu shows it (Radio Settings).
 //! - [`aprs`]: the heard list, messages, sending one, and the events a subscription brings (LINK-44 – LINK-46).
@@ -33,6 +34,7 @@ pub mod audio;
 pub mod aprs_settings;
 pub mod channels;
 pub mod chirp;
+pub mod crossband;
 #[cfg(test)]
 mod codeplug_example;
 pub mod demo;
@@ -43,6 +45,7 @@ pub mod library;
 pub mod liveview;
 pub mod log;
 pub mod plan;
+pub mod presets;
 pub mod radioside;
 pub mod records;
 pub mod session;

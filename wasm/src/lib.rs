@@ -110,7 +110,7 @@ pub fn protocol() -> String {
                  "DELETE": msg::DELETE, "BEGIN": msg::BEGIN, "END": msg::END, "SLOT": msg::SLOT, "BAUD": msg::BAUD,
                  "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY,
                  "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP,
-                 "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA },
+                 "MSG_DELETE": msg::MSG_DELETE, "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION },
         "caps": { "POSITION": ferrite_console_core::link::caps::POSITION },
         "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "HEARD": event::HEARD,
@@ -821,6 +821,12 @@ pub fn msg_send_payload(to: &str, text: &str) -> Result<Vec<u8>, JsError> {
     aprs::msg_send_payload(to, text).map_err(|e| JsError::new(&e))
 }
 
+/// LINK-52: `MSG_DELETE`'s payload for one message as `MSGS` listed it.
+#[wasm_bindgen]
+pub fn msg_delete_payload(inbound: bool, peer: &str, text: &str) -> Vec<u8> {
+    aprs::msg_delete_payload(inbound, peer, text)
+}
+
 #[wasm_bindgen]
 pub fn subscribe_payload(mask: u8, gap: u8, renew: bool, texts: bool) -> Vec<u8> {
     aprs::subscribe_payload(mask, gap, renew, texts)
@@ -915,4 +921,62 @@ pub fn aprs_backup(settings: &[u8], record: &[u8], ex: &str, saved: &str, radio:
 pub fn aprs_restore(text: &str) -> Result<String, JsError> {
     let (rec, b) = aprs_settings::restore(text).map_err(|e| JsError::new(&e))?;
     Ok(serde_json::json!({ "record": rec, "extras": b.extras, "saved": b.saved, "radio": b.radio }).to_string())
+}
+
+// Range presets (MENU 0 1 4, LINK-21's what 4): ferrite_console_core::presets.
+
+/// The presets editor's lists (steps, modes, resumes, the most presets, the longest name), as JSON.
+#[wasm_bindgen]
+pub fn preset_choices() -> String {
+    ferrite_console_core::presets::choices().to_string()
+}
+
+/// Preset records as read (JSON `[[..], ..]`, index order) to `{presets, bad}`.
+#[wasm_bindgen]
+pub fn decode_presets(records: &str) -> Result<String, JsError> {
+    let r: Vec<Vec<u8>> = from_json(records, "presets")?;
+    let (presets, bad) = ferrite_console_core::presets::from_records(&r);
+    Ok(serde_json::json!({ "presets": presets, "bad": bad }).to_string())
+}
+
+/// A preset as the radio would hold it, or why the radio would refuse it.
+#[wasm_bindgen]
+pub fn normalize_preset(view: &str) -> Result<String, JsError> {
+    let v: ferrite_console_core::presets::PresetView = from_json(view, "preset")?;
+    v.normal().map(|n| json(&n)).map_err(|e| JsError::new(&e))
+}
+
+/// A preset's problem as the radio would see it (ferrite's own link checks), or undefined.
+#[wasm_bindgen]
+pub fn check_preset(view: &str) -> Result<Option<String>, JsError> {
+    let v: ferrite_console_core::presets::PresetView = from_json(view, "preset")?;
+    Ok(ferrite_console_core::presets::check(&v))
+}
+
+#[wasm_bindgen]
+pub fn new_preset(number: u8, name: &str) -> String {
+    json(&ferrite_console_core::presets::PresetView::new(number, name))
+}
+
+/// The presets write plan from the radio's to the table's (JSON lists of presets).
+#[wasm_bindgen]
+pub fn presets_plan(base: &str, want: &str) -> Result<String, JsError> {
+    let b: Vec<ferrite_console_core::presets::PresetView> = from_json(base, "base")?;
+    let w: Vec<ferrite_console_core::presets::PresetView> = from_json(want, "table")?;
+    Ok(json(&ferrite_console_core::presets::plan(&b, &w)))
+}
+
+/// The presets as `.ferrite`'s presets.json. `radio` is JSON `{firmware, callsign, ...}`.
+#[wasm_bindgen]
+pub fn presets_file(list: &str, saved: &str, radio: &str) -> Result<String, JsError> {
+    let l: Vec<ferrite_console_core::presets::PresetView> = from_json(list, "presets")?;
+    let r = from_json(radio, "radio")?;
+    ferrite_console_core::presets::backup(&l, saved, r).map_err(|p| JsError::new(&format!("preset {}: {}", p.number, p.error)))
+}
+
+/// presets.json back to `{presets, saved, radio}`, or why not.
+#[wasm_bindgen]
+pub fn presets_restore(text: &str) -> Result<String, JsError> {
+    let (presets, b) = ferrite_console_core::presets::restore(text).map_err(|e| JsError::new(&e))?;
+    Ok(serde_json::json!({ "presets": presets, "saved": b.saved, "radio": b.radio }).to_string())
 }

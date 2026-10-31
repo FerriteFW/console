@@ -4,7 +4,7 @@
 //! so every check and refusal is the firmware's own, never a copy.
 
 use ferrite_app::chan::{ChanWrite, Channel, ChannelStore, Name, MAX_CHANNELS, NO_ZONE};
-use ferrite_app::data::{Data, Op, Pos, ZoneCfg};
+use ferrite_app::data::{Data, Op, Pos, RangePreset, ZoneCfg};
 use ferrite_app::link::Session;
 use ferrite_app::screens::alert::AlertInfo;
 use ferrite_app::settings::Settings;
@@ -24,6 +24,8 @@ pub struct MemStore {
     pub zones: RefCell<Vec<(Name, ZoneCfg)>>,
     /// Channel positions (CHAN-2, LINK-53), by number.
     pub pos: RefCell<BTreeMap<u16, Pos>>,
+    /// Range presets (MENU 0 1 4), in order; up to 16.
+    pub presets: RefCell<Vec<RangePreset>>,
     version: Cell<u32>,
 }
 
@@ -114,6 +116,12 @@ impl Data for MemStore {
     fn zone_cfg(&self, zone: u8) -> ZoneCfg {
         self.zones.borrow().get(zone as usize).map(|z| z.1).unwrap_or_default()
     }
+    fn presets(&self) -> u8 {
+        self.presets.borrow().len() as u8
+    }
+    fn preset(&self, i: u8) -> Option<RangePreset> {
+        self.presets.borrow().get(i as usize).copied()
+    }
     fn request(&self, op: Op) -> bool {
         let ok = match op {
             Op::DeleteChannel(n) => self.chans.borrow_mut().remove(&n).is_some(),
@@ -178,6 +186,26 @@ impl Data for MemStore {
                     zs.pop();
                 }
                 true
+            }
+            // As the radio's store: a preset written whole keeps its skips; a new one is the next; deleting one
+            // moves the ones after it up.
+            Op::PutPreset(i, p) | Op::Preset(i, p) => {
+                let mut ps = self.presets.borrow_mut();
+                match (i as usize).cmp(&ps.len()) {
+                    core::cmp::Ordering::Less => {
+                        ps[i as usize] = RangePreset { skips: ps[i as usize].skips, ..p };
+                        true
+                    }
+                    core::cmp::Ordering::Equal if ps.len() < 16 && matches!(op, Op::PutPreset(..)) => {
+                        ps.push(p);
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            Op::DeletePreset(i) => {
+                let mut ps = self.presets.borrow_mut();
+                ((i as usize) < ps.len()).then(|| ps.remove(i as usize)).is_some()
             }
             _ => false,
         };
@@ -303,6 +331,12 @@ impl RadioSide {
         let (s, rest) = self.ask(link::msg::WRITE_MANY, &p);
         let counted = s == 0 || s == link::Status::Invalid as u8 || rest.len() == 1;
         (s, if counted && !rest.is_empty() { rest[1..].to_vec() } else { rest })
+    }
+
+    /// Puts range presets straight into the store (a radio's starting state), bypassing the link's checks.
+    pub fn seed_presets(&mut self, presets: &[RangePreset]) {
+        *self.store.presets.borrow_mut() = presets.iter().take(16).copied().collect();
+        self.store.bump();
     }
 
     /// Puts zones and channels straight into the store (a radio's starting state), bypassing the link's checks.

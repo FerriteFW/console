@@ -188,6 +188,17 @@ pub fn msg_send_payload(to: &str, text: &str) -> Result<Vec<u8>, String> {
     Ok(p)
 }
 
+/// `MSG_DELETE`'s payload (LINK-52, decision 323): flags (1: one to us), then the station and the text as
+/// `MSG_STOP`'s, exactly as the list gave them (the radio deletes the newest that way with that station and text).
+pub fn msg_delete_payload(inbound: bool, peer: &str, text: &str) -> Vec<u8> {
+    let (peer, text) = (&peer.as_bytes()[..peer.len().min(255)], &text.as_bytes()[..text.len().min(255)]);
+    let mut p = vec![inbound as u8, peer.len() as u8];
+    p.extend_from_slice(peer);
+    p.push(text.len() as u8);
+    p.extend_from_slice(text);
+    p
+}
+
 /// `SUBSCRIBE`'s payload (LINK-46): the mask, the UI's least gap (100 ms units; 0 the radio's default), and the
 /// renew flag (a keepalive, changing nothing).
 /// `texts`: the Live View with the screen as drawn (LINK-19.5), from a radio that says so in `HELLO`.
@@ -259,6 +270,13 @@ pub(crate) mod tests {
         let m = parse_msgs(&rest).unwrap();
         assert!(!m.messages.is_empty());
         assert!(m.messages.iter().any(|m| m.inbound) && m.messages.iter().any(|m| !m.inbound));
+    }
+
+    /// LINK-52: MSG_DELETE names the message by direction, station and text (ferrite's `msg_delete` reads them so).
+    #[test]
+    fn delete_payload() {
+        assert_eq!(msg_delete_payload(true, "VE3KPW-9", "Hi"), b"\x01\x08VE3KPW-9\x02Hi");
+        assert_eq!(msg_delete_payload(false, "VA3RTX", "")[..2], [0, 6]);
     }
 
     /// APRS-13.1, LINK-49: a cancelled message (state 7) reads as "cancelled"; MSG_STOP's payload is MSG_SEND's.

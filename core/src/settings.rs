@@ -1033,6 +1033,7 @@ pub fn view(rec: &[u8], ex: &Extras) -> View {
         let a = format!("On APRS Settings (Tools › APRS › APRS Settings): {}.", on_aprs.join(", "));
         *n = if n.is_empty() { a } else { format!("{a} {n}") };
     }
+    groups.push(crate::crossband::group(&s)); // not in the menu tree: its start page's (MENU 0 3 5)
     groups.push(GroupView {
         path: "owner".into(),
         name: "Owner card".into(),
@@ -1048,6 +1049,9 @@ pub fn view(rec: &[u8], ex: &Extras) -> View {
 /// why not in the radio's words.
 pub fn set(rec: &[u8], ex: &Extras, id: &str, value: &str) -> Result<(Vec<u8>, Extras), String> {
     let mut s = settings_of(rec);
+    if let Some(r) = crate::crossband::set(&s, id, value) {
+        return r.map(|n| (record_of(&n), ex.clone()));
+    }
     if let Some(f) = text_field(id) {
         let v = f.check(value)?;
         (f.set)(&mut s, &v);
@@ -1429,6 +1433,7 @@ mod tests {
                 "Display, sound, power",
                 "Transmit",
                 "System",
+                "Crossband repeater",
                 "Owner card"
             ]
         );
