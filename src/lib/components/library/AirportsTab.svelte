@@ -3,16 +3,12 @@
   // sites.svelte.ts): their VHF airband frequencies with their uses, added as AM channels, RX only (Ferrite never
   // transmits on airband), named "ICAO TYPE" in 16 characters ("CYVR TWR 119.55" when an airport has two of a
   // type). An airport's box picks all its frequencies (the map picks them one by one; partly picked shows as such).
-  // The rows, picks and Add are nearby.svelte.ts's, shared with the map and the Licensed sites list. The common
-  // frequencies not tied to an airport come from the fixed "Airband (common)" set. The footer has the data's date,
-  // its offline copy and its attribution.
+  // The rows and picks are nearby.svelte.ts's, shared with the map and the Licensed sites list; Add and the data
+  // footer are Near me's (NearbyTab). The common frequencies not tied to an airport come from the fixed "Airband
+  // (common)" set.
   import { library } from "../../library.svelte";
   import { airportSites as data } from "../../sites.svelte";
   import { nearby } from "../../nearby.svelte";
-  import DataFooter from "./DataFooter.svelte";
-  import AddBar from "./AddBar.svelte";
-
-  let { onadded }: { onadded: () => void } = $props();
 
   const result = $derived(nearby.airportResult);
   const found = $derived(nearby.airports);
@@ -21,11 +17,11 @@
   const failed = $derived(result?.failed ?? []);
   /** Nothing to show at all: the data couldn't be reached and nothing is kept. */
   const down = $derived(!!result && !result.sources.length && failed.length > 0);
-  const here = $derived(new Set(found.length ? ["airports"] : []));
   const total = $derived(data.listed[0]?.rows);
   const keys = (a: (typeof found)[number]) => a.freqs.map((q) => q.key);
 </script>
 
+{#if nearby.show === "both"}<h3 class="kind">Airports</h3>{/if}
 {#if !library.place}
   <p class="sub">
     {#if total}
@@ -72,10 +68,15 @@
 {#if commonSet}
   <label class="common"><input type="checkbox" bind:checked={nearby.common} /> Also the {commonSet.frequencies.length} common airband frequencies (emergency 121.5, air-to-air, multicom, en route: the Airband set)</label>
 {/if}
-<AddBar each="One zone per airport" {onadded} />
-<DataFooter {data} {here} />
 
 <style>
+  .kind {
+    margin: 0;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--sub);
+  }
   .head {
     display: flex;
     gap: 6px;

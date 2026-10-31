@@ -1,8 +1,9 @@
 <script lang="ts">
-  // The "near me" map (Add channels › Airports or Licensed sites, Map): every layer near the place on one Leaflet map
-  // (bundled; OpenStreetMap tiles, attributed). One marker per site (a name at a position) with its frequency count;
+  // The "near me" map (Add channels › Near me, Map): the kinds shown (Licensed, Airports or Both; Canada and the US
+  // switched on: NearbyTab) near the place on one Leaflet map (bundled; OpenStreetMap tiles, attributed). It fills
+  // the big dialog; Picked is a slim column on its right (below it on a narrow window). One marker per site (a name at a position) with its frequency count;
   // nearby markers cluster into a count until zoomed in (cluster.ts). A marker opens a small popup with a box per
-  // frequency. Layers (Canada, US, Airports) switch on and off; digital-only sites hide unless asked for. Your pin is
+  // frequency. Digital-only sites hide unless asked for. Your pin is
   // the place; the circle is the search: drag its edge or use the slider and the results load again (debounced).
   // Sites outside the circle fade until they do. The Picked column lists the picks (shared with the lists:
   // nearby.svelte.ts) with the zone target and Add.
@@ -16,34 +17,17 @@
   import DataFooter from "./DataFooter.svelte";
   import AddBar from "./AddBar.svelte";
 
-  let { onadded }: { onadded: () => void } = $props();
+  let { each, onadded }: { each: string; onadded: () => void } = $props();
 
   type Row = { key: string; mhz: string; label: string; mobile: boolean; digital: boolean };
   type Site = { id: string; kind: "lic" | "air"; src: string; name: string; pos: LatLng; km: number; rows: Row[] };
 
-  const LAYERS = [
-    { src: "tafl", label: "Canada" },
-    { src: "fcc", label: "US" },
-    { src: "airports", label: "Airports" },
-  ];
-  /** Sites per layer near the place, whether shown or not (a layer with none has no chip). */
-  const counts = $derived.by(() => {
-    const c: Record<string, number> = { airports: nearby.airports.length };
-    const seen = new Set<string>();
-    for (const e of nearby.siteEntries) {
-      const id = `${e.src}|${e.name}|${e.pos}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      c[e.src] = (c[e.src] ?? 0) + 1;
-    }
-    return c;
-  });
   const on = (src: string) => nearby.layers[src] !== false;
 
   /** The markers' sites: licensed entries by name and position, airports as they are; frequencies in order. */
   const mapSites = $derived.by((): Site[] => {
     const by = new Map<string, Site>();
-    for (const e of nearby.siteAll) {
+    for (const e of nearby.showLic ? nearby.siteAll : []) {
       if (!on(e.src)) continue;
       const id = `s|${e.name}|${e.pos[0]}|${e.pos[1]}`;
       let s = by.get(id);
@@ -53,7 +37,7 @@
     }
     const out = [...by.values()];
     for (const s of out) s.rows.sort((a, b) => Number(a.mhz) - Number(b.mhz));
-    if (on("airports")) {
+    if (nearby.showAir) {
       for (const a of nearby.airports) {
         out.push({
           id: `a|${a.key}`,
@@ -125,10 +109,12 @@
           if (!t?.closest?.(".leaflet-marker-icon")) open = [];
         });
         zoom = m.getZoom();
-        // The dialog's layout settles after the map is made (and windows resize): Leaflet measures again.
+        // The dialog's layout settles after the map is made (the big dialog, windows resizing): Leaflet measures
+        // again, so the tiles fill it.
         const ro = new ResizeObserver(() => m.invalidateSize());
         ro.observe(el);
-        stop = () => ro.disconnect();
+        const raf = requestAnimationFrame(() => m.invalidateSize());
+        stop = () => (ro.disconnect(), cancelAnimationFrame(raf));
         map = m;
         L = l;
       })
@@ -274,9 +260,9 @@
   // What the status line says.
   const siteFailed = $derived(nearby.siteResult?.failed ?? []);
   const airFailed = $derived(nearby.airportResult?.failed ?? []);
-  const sitesDown = $derived(!!nearby.siteResult && !nearby.siteResult.sources.length && siteFailed.length > 0 && siteFailed.length >= sites.sources.length);
-  const airDown = $derived(!!nearby.airportResult && !nearby.airportResult.sources.length && airFailed.length > 0);
-  const loading = $derived(!!library.place && (!nearby.siteResult || !nearby.airportResult));
+  const sitesDown = $derived(nearby.showLic && !!nearby.siteResult && !nearby.siteResult.sources.length && siteFailed.length > 0 && siteFailed.length >= sites.sources.length);
+  const airDown = $derived(nearby.showAir && !!nearby.airportResult && !nearby.airportResult.sources.length && airFailed.length > 0);
+  const loading = $derived(!!library.place && ((nearby.showLic && !nearby.siteResult) || (nearby.showAir && !nearby.airportResult)));
   const siteHere = $derived(new Set(nearby.siteEntries.map((e) => e.src)));
   const airHere = $derived(new Set(nearby.airports.length ? ["airports"] : []));
   const nHiddenDigital = $derived(mapSites.filter(digitalOnly).length);
@@ -284,16 +270,6 @@
 
 <div class="nm">
   <div class="mapcol">
-    <div class="bar">
-      {#each LAYERS.filter((x) => counts[x.src]) as x (x.src)}
-        <button class="chip {x.src === 'airports' ? 'air' : 'lic'}" aria-pressed={on(x.src)} onclick={() => (nearby.layers = { ...nearby.layers, [x.src]: !on(x.src) })} title="Show or hide {x.label}">
-          <i class="dot"></i>{x.label} <span class="n">{counts[x.src]}</span>
-        </button>
-      {/each}
-      {#if nearby.nDigital}
-        <label class="chip plain"><input type="checkbox" bind:checked={nearby.digital} /> Show digital only ({nHiddenDigital})</label>
-      {/if}
-    </div>
     <div class="status" role="status">
       <label class="radius">
         Radius
@@ -307,16 +283,21 @@
       {:else}
         {shownSites.length} {shownSites.length === 1 ? "site" : "sites"} on the map within {library.radius} km.
       {/if}
+      {#if nearby.showLic && nearby.nDigital}
+        <label class="dig"><input type="checkbox" bind:checked={nearby.digital} /> Show digital only ({nHiddenDigital})</label>
+      {/if}
       {#if sitesDown}<span class="bad"><b>Licensed sites aren't available right now.</b> {siteFailed[0].error}. <button class="link" onclick={() => sites.retry()}>Try again</button></span>{/if}
       {#if airDown}<span class="bad"><b>Airports aren't available right now.</b> {airFailed[0].error}. <button class="link" onclick={() => airportSites.retry()}>Try again</button></span>{/if}
-      {#if !sitesDown && siteFailed.length}<span class="bad">{siteFailed.map((f) => `${sourceName(f.src, sites.source(f.src)?.title)}: ${f.error}`).join(" · ")}</span>{/if}
+      {#if nearby.showLic && !sitesDown && siteFailed.length}<span class="bad">{siteFailed.map((f) => `${sourceName(f.src, sites.source(f.src)?.title)}: ${f.error}`).join(" · ")}</span>{/if}
     </div>
     <div class="wrap" bind:this={wrap}>
       <div class="map" bind:this={el} data-map={L ? "ready" : "loading"} data-sites={shownSites.length} aria-label="Map of sites near the place"></div>
       {#if mapError}<div class="over">{mapError}</div>{/if}
       <div class="legend" aria-hidden="true">
-        <span><i class="dot you"></i>The place</span><span><i class="dot lic"></i>Licensed</span><span><i class="dot air"></i>Airport</span>
-        {#if nearby.digital}<span><i class="dot dig"></i>Digital only</span>{/if}<span><i class="dot pick"></i>Picked</span>
+        <span><i class="dot you"></i>The place</span>
+        {#if nearby.showLic}<span><i class="dot lic"></i>Licensed</span>{/if}
+        {#if nearby.showAir}<span><i class="dot air"></i>Airport</span>{/if}
+        {#if nearby.showLic && nearby.digital}<span><i class="dot dig"></i>Digital only</span>{/if}<span><i class="dot pick"></i>Picked</span>
       </div>
       {#if popSites.length && popAt}
         <div class="pop" bind:this={popEl} style:left="{popAt.left}px" style:top="{popAt.top}px" role="dialog" aria-label="Frequencies at {popSites[0].name}">
@@ -365,12 +346,12 @@
         <li class="empty">Click a marker, then tick its frequencies.</li>
       {/if}
     </ul>
-    <AddBar side each="One zone per group or airport" {onadded} />
+    <AddBar side {each} {onadded} />
   </aside>
 </div>
 <div class="feet">
-  <DataFooter data={sites} here={siteHere} inline />
-  <DataFooter data={airportSites} here={airHere} inline />
+  {#if nearby.showLic}<DataFooter data={sites} here={siteHere} inline />{/if}
+  {#if nearby.showAir}<DataFooter data={airportSites} here={airHere} inline />{/if}
 </div>
 
 <style>
@@ -378,7 +359,7 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 290px;
+    grid-template-columns: minmax(0, 1fr) 260px;
     gap: 12px;
   }
   .mapcol {
@@ -388,40 +369,6 @@
     min-width: 0;
     min-height: 0;
   }
-  .bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
-    font-size: 12px;
-  }
-  .chip {
-    font: inherit;
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
-    background: var(--raised);
-    color: var(--text);
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    padding: 3px 9px;
-    cursor: pointer;
-  }
-  .chip[aria-pressed="false"] {
-    color: var(--sub);
-    background: none;
-  }
-  .chip[aria-pressed="false"] .dot {
-    background: none;
-    border: 1.5px solid var(--sub);
-  }
-  .chip .n {
-    color: var(--sub);
-  }
-  .chip.plain {
-    cursor: default;
-    background: none;
-  }
   .dot {
     display: inline-block;
     width: 10px;
@@ -429,7 +376,6 @@
     border-radius: 50%;
     background: var(--map-lic);
   }
-  .air .dot,
   .dot.air {
     background: var(--map-air);
   }
@@ -441,6 +387,11 @@
   }
   .dot.you {
     background: var(--blue);
+  }
+  .dig {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
   }
   .radius {
     display: inline-flex;
@@ -725,7 +676,7 @@
     cursor: ew-resize;
     box-sizing: border-box;
   }
-  @media (max-width: 760px) {
+  @media (max-width: 900px) {
     .nm {
       display: flex;
       flex-direction: column;

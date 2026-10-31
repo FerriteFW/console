@@ -30,10 +30,10 @@ async function fetchJson<T>(name: string): Promise<T> {
 
 class Library {
   open = $state(false);
-  tab = $state<"fixed" | "airports" | "sites" | "repeaters">("fixed");
+  tab = $state<"fixed" | "near" | "repeaters">("fixed");
   fixed = $state<FixedSet[] | null>(null);
   error = $state("");
-  /** The place for Airports and licensed sites, as typed, and what it parses to. */
+  /** The place for Near me (airports and licensed sites), as typed, and what it parses to. */
   placeText = $state("");
   placeFrom = $state("");
   get place(): Place | null {
@@ -41,7 +41,7 @@ class Library {
   }
   /** Radius in km. */
   radius = $state(50);
-  /** Airports and Licensed sites: the map (the default) or the list. */
+  /** Near me: the map (the default) or the list. */
   view = $state<"map" | "list">("map");
   /** Asking the radio or the browser for the place. */
   asking = $state<"" | "radio" | "browser">("");

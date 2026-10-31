@@ -23,16 +23,20 @@ async function readRadio() {
   await expect(toolbar().getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
 }
 
+/** "Airports" and "Licensed sites" are Near me with that kind shown, as the list (Near me opens on the map: nearme.spec.ts). */
 async function openLibrary(tab: string) {
   await page.getByRole("button", { name: "Add from library…" }).click();
   await expect(lib()).toBeVisible();
-  await lib().getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
-  // Airports and Licensed sites open on the map (nearme.spec.ts); these tests use the lists.
-  if (tab === "Airports" || tab === "Licensed sites") await lib().getByRole("button", { name: "List", exact: true }).click();
+  const kind = tab === "Airports" ? "Airports" : tab === "Licensed sites" ? "Licensed" : "";
+  await lib().getByRole("tab", { name: new RegExp(`^${kind ? "Near me" : tab}`) }).click();
+  if (kind) await nearMe(lib(), kind, true);
 }
 
-/** The list view (Airports and Licensed sites open on the map). */
-const listView = (d: ReturnType<Page["getByRole"]>) => d.getByRole("button", { name: "List", exact: true }).click();
+/** Near me: what to show (Licensed, Airports or Both), and the list view if asked. */
+async function nearMe(d: ReturnType<Page["getByRole"]>, kind: string, list = false) {
+  await d.getByRole("group", { name: "Show" }).getByRole("button", { name: kind, exact: true }).click();
+  if (list) await d.getByRole("button", { name: "List", exact: true }).click();
+}
 
 /** Each group its own page, connected and read (the groups can run on two workers, each with its own simulator). */
 function hooks() {
@@ -259,7 +263,8 @@ test.describe("licensed sites, no radio", () => {
     await openConsole(p, "channels");
     await p.getByRole("button", { name: "Add from library…" }).first().click();
     const d = p.getByRole("dialog", { name: "Add channels" });
-    await d.getByRole("tab", { name: /^Licensed sites/ }).click();
+    await d.getByRole("tab", { name: /^Near me/ }).click();
+    await nearMe(d, "Licensed");
     await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
     await expect(d.getByText("Licensed sites aren't available right now.")).toBeVisible();
     await expect(d).toContainText("Can't reach https://data.ferritefw.dev");
@@ -273,8 +278,8 @@ test.describe("licensed sites, no radio", () => {
     await openConsole(p, "channels");
     await p.getByRole("button", { name: "Add from library…" }).first().click();
     const d = p.getByRole("dialog", { name: "Add channels" });
-    await d.getByRole("tab", { name: /^Licensed sites/ }).click();
-    await listView(d);
+    await d.getByRole("tab", { name: /^Near me/ }).click();
+    await nearMe(d, "Licensed", true);
     const save = d.getByRole("button", { name: /^Save Canada for offline \(\d+ KB\)$/ });
     await expect(save).toBeVisible();
     await save.click();
@@ -294,9 +299,9 @@ test.describe("licensed sites, no radio", () => {
     await openConsole(p, "channels");
     await p.getByRole("button", { name: "Add from library…" }).first().click();
     const d = p.getByRole("dialog", { name: "Add channels" });
-    await d.getByRole("tab", { name: /^Airports/ }).click();
-    await listView(d);
-    // Only the airports source in this tab's footer, not the licensed sites'.
+    await d.getByRole("tab", { name: /^Near me/ }).click();
+    await nearMe(d, "Airports", true);
+    // Airports only: only the airports source in the footer, not the licensed sites'.
     await expect(d.getByRole("button", { name: /^Save Canada for offline/ })).toHaveCount(0);
     const save = d.getByRole("button", { name: /^Save Airports for offline \(\d+ KB\)$/ });
     await expect(save).toBeVisible();
@@ -319,7 +324,8 @@ test.describe("licensed sites, no radio", () => {
     await openConsole(p, "channels");
     await p.getByRole("button", { name: "Add from library…" }).first().click();
     const d = p.getByRole("dialog", { name: "Add channels" });
-    await d.getByRole("tab", { name: /^Airports/ }).click();
+    await d.getByRole("tab", { name: /^Near me/ }).click();
+    await nearMe(d, "Airports");
     await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
     await expect(d.getByText("Airports aren't available right now.")).toBeVisible();
     await p.close();

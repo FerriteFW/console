@@ -1,6 +1,8 @@
 <script lang="ts">
-  // "Add channels": the channel library beside CHIRP import. Fixed sets, airports and licensed sites near a
-  // place (ported from NeonPlug), as a list or on the "near me" map (NearbyTab); repeaters not yet (see the tab).
+  // "Add channels": the channel library beside CHIRP import. Fixed sets; Near me: licensed sites and airports near a
+  // place (ported from NeonPlug), on the map or as a list (NearbyTab); repeaters not yet (see the tab). Near me makes
+  // the dialog nearly as big as the window (a desktop app's feel: the map gets the room), in both its views so
+  // switching between them doesn't jump.
   // Added channels go into the table as new rows, checked by ferrite's own code; Write then shows them in the diff
   // as usual.
   import { library } from "../../library.svelte";
@@ -10,8 +12,7 @@
 
   const tabs = [
     { id: "fixed", label: "Fixed sets", sub: "FRS, GMRS, MURS, PMR446, marine, weather, airband, resource roads, calling" },
-    { id: "airports", label: "Airports", sub: "Airband near a place, AM, RX only" },
-    { id: "sites", label: "Licensed sites", sub: "Canada and the US: VHF and UHF near a place" },
+    { id: "near", label: "Near me", sub: "Licensed sites (Canada, the US) and airports near a place, on a map" },
     { id: "repeaters", label: "Repeaters", sub: "Not yet" },
   ] as const;
 
@@ -26,7 +27,7 @@
 
 {#if library.open}
   <div class="overlay" role="presentation" onclick={(e) => e.target === e.currentTarget && close()}>
-    <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="lib-title">
+    <div class="dialog card" class:big={library.tab === "near"} role="dialog" aria-modal="true" aria-labelledby="lib-title">
       <header>
         <h2 id="lib-title">Add channels</h2>
         <span class="sub">{channels.table.channels.length} in the table · room for {room} more · {channels.table.zones.length} zones</span>
@@ -46,8 +47,8 @@
           {#if library.error}<div class="banner">{library.error}</div>{/if}
           {#if library.tab === "fixed"}
             <FixedTab onadded={close} />
-          {:else if library.tab === "airports" || library.tab === "sites"}
-            <NearbyTab tab={library.tab} onadded={close} />
+          {:else if library.tab === "near"}
+            <NearbyTab onadded={close} />
           {:else}
             <div class="stub">
               <h3>Repeaters: not yet</h3>
@@ -85,6 +86,13 @@
     flex-direction: column;
     gap: 12px;
     padding: 14px 16px;
+  }
+  .dialog.big {
+    width: min(96vw, calc(100vw - 32px), 1800px);
+    height: min(92vh, calc(100vh - 32px), 1200px);
+  }
+  .big .body {
+    grid-template-columns: 190px 1fr;
   }
   header {
     display: flex;
@@ -184,10 +192,12 @@
     font-size: 12px;
   }
   @media (max-width: 760px) {
-    .dialog {
+    .dialog,
+    .dialog.big {
       height: calc(100vh - 32px);
     }
-    .body {
+    .body,
+    .big .body {
       grid-template-columns: 1fr;
       grid-template-rows: auto 1fr;
     }

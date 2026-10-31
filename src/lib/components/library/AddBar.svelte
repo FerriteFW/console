@@ -1,11 +1,11 @@
 <script lang="ts">
-  // The Add bar under Airports, Licensed sites and the map: the licensed sites' options (RX only, the mode for an
-  // unknown one), the zone target and Add, for every pick (nearby.svelte.ts: list and map share them). `side`: the
-  // map's narrow Picked column.
+  // Near me's Add bar (under the list, and in the map's Picked column: `side`): the licensed sites' options (RX only,
+  // the mode for an unknown one) when Licensed shows, the zone target and Add. Add takes the picks shown
+  // (nearby.svelte.ts: list and map share them); picks of a hidden kind are counted apart, not added.
   import { nearby } from "../../nearby.svelte";
   import ZoneTarget from "./ZoneTarget.svelte";
 
-  let { each, onadded, licensed = false, side = false }: { each: string; onadded: () => void; licensed?: boolean; side?: boolean } = $props();
+  let { each, onadded, side = false }: { each: string; onadded: () => void; side?: boolean } = $props();
 
   const n = $derived(nearby.items.length);
   const nSites = $derived(nearby.pickedSites.length);
@@ -20,7 +20,7 @@
   }
 </script>
 
-{#if licensed || nSites}
+{#if nearby.showLic}
   <div class="opts">
     <label title="Licensed sites are other licensees' channels: listen only"><input type="checkbox" bind:checked={nearby.rxOnly} /> {side ? "RX only (licensed sites)" : "RX only (listen; these are other licensees' channels)"}</label>
     <label>
@@ -33,6 +33,7 @@
   <ZoneTarget bind:value={nearby.target} {each} />
   <span class="spacer"></span>
   {#if summary}<span class="sub">{summary}</span>{/if}
+  {#if nearby.nHidden}<span class="sub hidden" title="Picked while showing another kind or source: shown again, they're added too">{nearby.nHidden} more picked but hidden, not added</span>{/if}
   <button class="btn primary" disabled={!n} onclick={add}>Add {n} {n === 1 ? "channel" : "channels"}</button>
 </div>
 

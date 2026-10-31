@@ -1,5 +1,7 @@
-// Add channels "near a place": the rows Airports and Licensed sites show (List) and the "near me" map shows (Map),
-// and the one set of picks both views share. Picks are per frequency: a licensed entry (`s|name|half kHz`, its
+// Add channels › Near me: the rows the lists show (List) and the map shows (Map), and the one set of picks both
+// views share. What shows is one choice: Licensed, Airports or Both (`show`, remembered in this browser); Canada and
+// the US are sub-filters of Licensed. Add takes only the picks shown (its count is what the user can see); picks of
+// a hidden kind stay picked for when it shows again. Picks are per frequency: a licensed entry (`s|name|half kHz`, its
 // nearest site) or an airport's frequency (`a|ICAO|lat|lon|kHz`). Add turns every pick into channels, each layer
 // shaped its own way: licensed sites NFM or FM from the data (digital and unknown as the "unknown mode" choice), RX
 // only by choice, merged per zone and frequency; airports AM, RX only always, named "CYVR TWR" (airportName); both
@@ -27,7 +29,35 @@ function current(d: Sites): Near | null {
   return p && n && n.key === Sites.key(p.lat, p.lon, library.radius) ? n : null;
 }
 
+export type Show = "lic" | "air" | "both";
+const SHOW_KEY = "ferrite.nearme.show";
+function loadShow(): Show {
+  try {
+    const v = localStorage.getItem(SHOW_KEY);
+    if (v === "lic" || v === "air" || v === "both") return v;
+  } catch {
+    /* no storage: the default */
+  }
+  return "lic";
+}
+
 class Nearby {
+  /** What Near me shows, on the map and in the list. */
+  #show = $state<Show>(loadShow());
+  get show() {
+    return this.#show;
+  }
+  set show(v: Show) {
+    this.#show = v;
+    try {
+      localStorage.setItem(SHOW_KEY, v);
+    } catch {
+      /* not kept: fine */
+    }
+  }
+  showLic = $derived(this.#show !== "air");
+  showAir = $derived(this.#show !== "lic");
+
   picks = $state<Set<string>>(new Set());
   /** Licensed sites: RX only (other licensees' channels), digital only shown, the mode for an unknown one. */
   rxOnly = $state(true);
@@ -36,8 +66,8 @@ class Nearby {
   /** Airports: also the common airband frequencies (the fixed Airband set). */
   common = $state(false);
   target = $state<Target>({ kind: "each", name: "Near me", existing: 0 });
-  /** The map's layers on or off, by source. */
-  layers = $state<Record<string, boolean>>({ tafl: true, fcc: true, airports: true });
+  /** Licensed sites' sources on or off (Canada, the US): the map and the list. */
+  layers = $state<Record<string, boolean>>({ tafl: true, fcc: true });
 
   siteResult = $derived(current(sites));
   airportResult = $derived(current(airportSites));
@@ -62,6 +92,8 @@ class Nearby {
   nDigital = $derived(this.siteAll.filter((e) => e.m === MODE_DIGITAL).length);
   /** What shows: digital only hidden unless asked for. */
   siteEntries = $derived(this.digital ? this.siteAll : this.siteAll.filter((e) => e.m !== MODE_DIGITAL));
+  /** The entries the list shows: a source switched off goes too. */
+  siteShown = $derived(this.siteEntries.filter((e) => this.layers[e.src] !== false));
 
   /** Airports near the place (rows are one per frequency: here by name and position, frequencies in order). */
   airports = $derived.by((): Airport[] => {
@@ -89,11 +121,20 @@ class Nearby {
   /** The fixed set of airband frequencies not tied to one airport. */
   commonSet = $derived<FixedSet | undefined>(library.fixed?.find((s) => s.name === "Airband"));
 
-  pickedSites = $derived(this.siteEntries.filter((e) => this.picks.has(e.key)));
+  /** The picks Add takes: only those of the kinds (and sources) shown. */
+  pickedSites = $derived(this.showLic ? this.siteShown.filter((e) => this.picks.has(e.key)) : []);
   pickedAirports = $derived(
-    this.airports.map((a) => ({ a, freqs: a.freqs.filter((q) => this.picks.has(q.key)) })).filter((x) => x.freqs.length),
+    this.showAir ? this.airports.map((a) => ({ a, freqs: a.freqs.filter((q) => this.picks.has(q.key)) })).filter((x) => x.freqs.length) : [],
   );
-  nCommon = $derived(this.common ? (this.commonSet?.frequencies.length ?? 0) : 0);
+  nCommon = $derived(this.showAir && this.common ? (this.commonSet?.frequencies.length ?? 0) : 0);
+  /** Picks near the place that Add leaves out because their kind, source or digital sites are hidden. */
+  nHidden = $derived.by(() => {
+    const sites = this.siteAll.filter((e) => this.picks.has(e.key)).length - this.pickedSites.length;
+    let air = 0;
+    for (const a of this.airports) for (const q of a.freqs) if (this.picks.has(q.key)) air++;
+    for (const x of this.pickedAirports) air -= x.freqs.length;
+    return sites + air;
+  });
 
   /** The channels Add makes from the picks (shown as its count). */
   items = $derived.by((): LibraryItem[] => {
@@ -161,7 +202,7 @@ class Nearby {
     this.picks = new Set();
   }
 
-  /** Every pick (and the common set) into the table; the picks then clear. */
+  /** Every pick shown (and the common set) into the table; those picks then clear (hidden ones stay). */
   add() {
     const s = this.pickedSites.length;
     const a = this.pickedAirports;
@@ -171,8 +212,8 @@ class Nearby {
       this.nCommon && !a.length ? "common airband frequencies" : "",
     ].filter(Boolean);
     library.add($state.snapshot(this.items) as LibraryItem[], what.join(", "));
-    this.picks = new Set();
-    this.common = false;
+    this.set([...this.pickedSites.map((e) => e.key), ...a.flatMap((x) => x.freqs.map((q) => q.key))], false);
+    if (this.nCommon) this.common = false;
   }
 }
 

@@ -3,22 +3,18 @@
   // data.ferritefw.dev (sites.svelte.ts). Licensee names grouped by their first words, one entry per name and
   // frequency. RX only by default: these are other people's licensed channels. Each row's mode comes from the data
   // (NFM or FM; digital only is hidden unless asked for; unknown takes the "unknown mode" choice). The rows, the
-  // picks and Add are nearby.svelte.ts's, shared with the map and the Airports list. The footer has each source's
-  // attribution, its offline copy ("Save for offline") and the update the server offers.
+  // picks are nearby.svelte.ts's, shared with the map and the Airports list; Add and the data footers are Near me's
+  // (NearbyTab). Canada and the US switched off there leave the list too.
   import { library } from "../../library.svelte";
   import { sites, sourceName } from "../../sites.svelte";
   import { MODE_DIGITAL } from "../../sitedata";
   import { MOBILE, mhz, modeLabel, nearby, type SiteEntry } from "../../nearby.svelte";
-  import DataFooter from "./DataFooter.svelte";
-  import AddBar from "./AddBar.svelte";
-
-  let { onadded }: { onadded: () => void } = $props();
 
   const result = $derived(nearby.siteResult);
   let filter = $state("");
   let open = $state<Set<string>>(new Set());
 
-  const entries = $derived(nearby.siteEntries);
+  const entries = $derived(nearby.siteShown);
   const nDigital = $derived(nearby.nDigital);
   /** The sources with rows here (a place near the border has both). */
   const here = $derived(new Set(entries.map((e) => e.src)));
@@ -43,6 +39,7 @@
   const down = $derived(!!result && !result.sources.length && failed.length > 0 && failed.length >= sites.sources.length);
 </script>
 
+{#if nearby.show === "both"}<h3 class="kind">Licensed sites</h3>{/if}
 {#if !library.place}
   <p class="sub">
     {#if sites.top}
@@ -112,10 +109,15 @@
     {/each}
   </div>
 {/if}
-<AddBar each="One zone per name group" licensed {onadded} />
-<DataFooter data={sites} {here} />
 
 <style>
+  .kind {
+    margin: 0;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--sub);
+  }
   .head {
     display: flex;
     gap: 8px;
