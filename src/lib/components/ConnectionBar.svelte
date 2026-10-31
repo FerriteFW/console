@@ -26,10 +26,10 @@
     return { dot: "off", text: "Disconnected" };
   });
 
-  const buttons: { kind: TransportKind; name: string }[] = [
-    { kind: "cable", name: "Cable" },
-    { kind: "bluetooth", name: "Bluetooth" },
-    ...(DEV_TOOLS ? [{ kind: "demo" as TransportKind, name: "Demo radio" }] : []),
+  const buttons: { kind: TransportKind; name: string; how: string }[] = [
+    { kind: "cable", name: "Connect with cable", how: "Connect over the programming cable" },
+    { kind: "bluetooth", name: "Connect with Bluetooth", how: "Connect over the radio's Bluetooth" },
+    ...(DEV_TOOLS ? [{ kind: "demo" as TransportKind, name: "Demo radio", how: "A simulated radio (developer builds)" }] : []),
   ];
 
   function sendPin(e: SubmitEvent) {
@@ -54,13 +54,12 @@
 
   <div class="actions">
     {#if radio.phase === "idle"}
-      <span class="hint">Connect:</span>
       {#each buttons as b (b.kind)}
         <button
           class="btn"
           class:primary={b.kind === "cable"}
           disabled={avail[b.kind] !== true}
-          title={avail[b.kind] === true ? `Connect over ${b.name.toLowerCase()}` : String(avail[b.kind])}
+          title={avail[b.kind] === true ? b.how : String(avail[b.kind])}
           onclick={() => radio.connect(b.kind)}>{b.name}</button
         >
       {/each}
@@ -124,8 +123,7 @@
   .text {
     font-weight: 500;
   }
-  .note,
-  .hint {
+  .note {
     color: var(--sub);
   }
   .note.warn {

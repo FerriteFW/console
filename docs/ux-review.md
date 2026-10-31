@@ -50,17 +50,18 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
    Proposed: auto-read, about 8 columns plus "more", row checkboxes with a bulk bar, one File menu.
 7. **Navigation follows UV Studio** (Viewer, Tools, Console); APRS is 5 of 11 items. Proposed: Home, Live, Channels,
    Settings, APRS (tabs), Firmware (Update, Install, Back to stock); Terminal, Event log, About under More.
-8. **Contrast and layout**: `--dim` text about 3:1 (needs 4.5:1); errors absolutely positioned over the page; the
+8. **Contrast and layout**: ~~`--dim` text about 3:1 (needs 4.5:1)~~ (done Oct 30: 4.8:1 dark, 5.2:1 light at worst); errors absolutely positioned over the page; the
    narrow-screen drawer has no backdrop or Esc.
 
 ## Quick wins
 
-- About: "channel programming next" is stale; "Never transmits" isn't true with APRS messages ("never keys the radio
-  itself"); drop the UV Studio history line.
+- [x] About: "channel programming next" is stale; "Never transmits" isn't true with APRS messages ("never keys the radio
+  itself"); drop the UV Studio history line. (Oct 30: says what Console does today; "Never: keys the radio itself",
+  APRS messages queued for the radio to send.)
 - Firmware: `href="#install"` opens focus mode with no way back (use `#/install`); "(Connect › Cable)" matches no
   label; "Before:{…}" missing a space.
-- Top bar: label the buttons "Connect with cable" / "Connect with Bluetooth"; the theme toggle reads like a state
-  (use an icon).
+- [x] Top bar: label the buttons "Connect with cable" / "Connect with Bluetooth"; the theme toggle reads like a state
+  (use an icon). (Oct 30: both done; the theme is one icon.)
 - Install: "No reader image in this copy of Console" is jargon; hide Back to stock once installed.
 - Channels: empty rows should offer Read from radio and Import CHIRP.
 - Live View: B/s, ms and the screen ID are developer details.

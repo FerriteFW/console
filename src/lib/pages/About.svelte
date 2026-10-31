@@ -8,7 +8,8 @@
   <Wordmark size={44} />
   <p>
     Ferrite Console is the companion app for Ferrite, firmware for the Radtel RT-950 Pro and radios built on the same hardware: the radio's screen and
-    keys from the computer now, channel programming next.
+    keys on the computer, its channels, zones and settings read and written, APRS messages and stations heard, and
+    firmware installed and updated.
   </p>
   <p class="sub">
     How to use the radio: the <a href="https://manual.ferritefw.dev" target="_blank" rel="noopener">user guide</a>.
@@ -22,9 +23,8 @@
     <dt>Connections</dt>
     <dd>The programming cable (Web Serial, 115200 8N1, raised to 230400 when the radio takes it) and the radio's Bluetooth (Web Bluetooth, FFE0/FFE1)</dd>
     <dt>Never</dt>
-    <dd>Transmits, writes calibration, or touches the Bluetooth module's own settings</dd>
+    <dd>Keys the radio itself (APRS messages you send are queued for the radio to send), writes calibration, or touches the Bluetooth module's own settings</dd>
   </dl>
-  <p class="sub">Its sections follow F4HWN's UV Studio (a viewer, tools, and about), in Ferrite's own look.</p>
 </div>
 
 <style>

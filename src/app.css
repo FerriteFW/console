@@ -41,7 +41,7 @@
   --line: #2a2f36;
   --text: #f0f3f6;
   --sub: #9aa3ae;
-  --dim: #5a616b;
+  --dim: #7f8792; /* 4.8:1 on --raised, 5.4:1 on --bg (WCAG AA for text) */
   --blue: #4da3ff;
   --blue-fg: #08121f;
   --green: #7ce38b;
@@ -67,7 +67,7 @@
   --line: #b3bcc7;
   --text: #0b0d10;
   --sub: #3d4652;
-  --dim: #7a838e;
+  --dim: #5c6570; /* 5.2:1 on --surface, 5.9:1 on --bg */
   --blue: #0057c2;
   --blue-fg: #ffffff;
   --green: #0e7a2a;
