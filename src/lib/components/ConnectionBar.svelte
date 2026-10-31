@@ -1,5 +1,6 @@
 <script lang="ts">
   import { radio } from "../radio.svelte";
+  import { theme, type ThemeMode } from "../theme.svelte";
   import { firmware } from "../firmware.svelte";
   import type { TransportKind } from "../transport";
   import { bridgeEnabled, bridgeUrl } from "../transport/bridge";
@@ -11,17 +12,8 @@
 
   const avail = $derived(radio.available());
   let pin = $state("");
-  let theme = $state(document.documentElement.dataset.theme === "light" ? "light" : "dark");
-
-  function toggleTheme() {
-    theme = theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem("theme", theme);
-    } catch {
-      /* not kept */
-    }
-  }
+  const themeIcon = $derived(theme.mode === "auto" ? "◐" : theme.mode === "light" ? "☀" : "☾");
+  const themeName = $derived(theme.mode === "auto" ? `Auto (${theme.shown})` : theme.mode === "light" ? "Light" : "Dark");
 
   const status = $derived.by(() => {
     if (radio.phase === "connecting") return { dot: "busy", text: "Connecting…" };
@@ -90,9 +82,20 @@
         onclick={() => radio.disconnect()}>Disconnect</button
       >
     {/if}
-    <button class="btn quiet" onclick={toggleTheme} title="Light or dark" aria-label="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
-      >{theme === "dark" ? "Light" : "Dark"}</button
-    >
+    <button class="btn quiet icon" popovertarget="theme-menu" title="Theme: {themeName}" aria-label="Theme: {themeName}">{themeIcon}</button>
+    <div id="theme-menu" popover class="theme-menu" role="menu" aria-label="Theme">
+      {#each [["light", "☀", "Light"], ["dark", "☾", "Dark"], ["auto", "◐", "Auto (follow the system)"]] as [m, ic, name] (m)}
+        <button
+          class="btn quiet"
+          role="menuitemradio"
+          aria-checked={theme.mode === m}
+          class:on={theme.mode === m}
+          popovertarget="theme-menu"
+          popovertargetaction="hide"
+          onclick={() => theme.set(m as ThemeMode)}><span class="ic" aria-hidden="true">{ic}</span>{name}</button
+        >
+      {/each}
+    </div>
   </div>
 </div>
 {#if radio.error}
@@ -193,5 +196,39 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .icon {
+    min-width: 36px;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .theme-menu {
+    position: fixed;
+    inset: auto;
+    top: 52px;
+    right: 16px;
+    margin: 0;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    color: var(--text);
+  }
+  .theme-menu:popover-open {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .theme-menu .btn {
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .theme-menu .btn.on {
+    color: var(--blue);
+  }
+  .theme-menu .ic {
+    display: inline-block;
+    width: 1.6em;
   }
 </style>
