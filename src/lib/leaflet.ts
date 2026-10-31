@@ -2,6 +2,9 @@
 // that loads the first time a map opens. Tiles are OpenStreetMap's standard ones, attributed on the map (a low-traffic
 // use, within their tile policy).
 export const TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+/** Opened from disk (the single-file build): OpenStreetMap's tile policy refuses pages with no Referer, so the map
+ * goes without its background there (markers, the circle and picks still work). */
+export const NO_TILES = typeof location !== "undefined" && location.protocol === "file:";
 export const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 // The parts of Leaflet Console's maps use (APRS › Map, the Add channels "near me" map).

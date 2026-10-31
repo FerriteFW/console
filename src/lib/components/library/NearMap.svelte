@@ -12,7 +12,7 @@
   import { airportSites, repeaterSites, sites, sourceName } from "../../sites.svelte";
   import { MOBILE, mhz, modeLabel, nearby, offsetLabel, toneLabel } from "../../nearby.svelte";
   import { gridCluster } from "../../cluster";
-  import { ATTRIBUTION, loadLeaflet, TILES, type LatLng, type LCircle, type Leaflet, type LGroup, type LMap, type LMarker } from "../../leaflet";
+  import { ATTRIBUTION, loadLeaflet, NO_TILES, TILES, type LatLng, type LCircle, type Leaflet, type LGroup, type LMap, type LMarker } from "../../leaflet";
   import DataCredits from "./DataCredits.svelte";
   import AddBar from "./AddBar.svelte";
 
@@ -116,7 +116,7 @@
       .then((l) => {
         if (gone) return;
         const m = l.map(el, { worldCopyJump: true, zoomSnap: 0.5 }).setView([50, -100], 3);
-        l.tileLayer(TILES, { maxZoom: 18, attribution: ATTRIBUTION }).addTo(m);
+        if (!NO_TILES) l.tileLayer(TILES, { maxZoom: 18, attribution: ATTRIBUTION }).addTo(m);
         markers = l.layerGroup().addTo(m);
         m.on("zoomend", () => (zoom = m.getZoom()));
         m.on("move", () => moved++);
@@ -313,6 +313,7 @@
     <div class="wrap" bind:this={wrap}>
       <div class="map" bind:this={el} data-map={L ? "ready" : "loading"} data-sites={shownSites.length} aria-label="Map of sites near the place"></div>
       {#if mapError}<div class="over">{mapError}</div>{/if}
+      {#if NO_TILES}<div class="notiles">No map background when Console is opened from a file (OpenStreetMap's tile policy). The markers still work; for the full map use <a href="https://console.ferritefw.dev" target="_blank" rel="noreferrer">console.ferritefw.dev</a> or the desktop app.</div>{/if}
       <div class="legend" aria-hidden="true">
         <span><i class="dot you"></i>The place</span>
         {#if nearby.showLic}<span><i class="dot lic"></i>Business &amp; public</span>{/if}
@@ -727,5 +728,20 @@
     .radius input {
       width: 110px;
     }
+  }
+  .notiles {
+    position: absolute;
+    left: 50%;
+    top: 10px;
+    transform: translateX(-50%);
+    z-index: 500;
+    max-width: min(520px, 90%);
+    padding: 6px 10px;
+    border-radius: 7px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--sub);
+    text-align: center;
   }
 </style>
