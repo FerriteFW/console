@@ -7,6 +7,7 @@
   import ReadbackScreen from "../components/ReadbackScreen.svelte";
   import RadioInfo from "../components/RadioInfo.svelte";
   import KeyboardHelp from "../components/KeyboardHelp.svelte";
+  import LivePanel from "../components/LivePanel.svelte";
   import { radio } from "../radio.svelte";
   import { listen } from "../listen.svelte";
   import { presser, turn } from "../press.svelte";
@@ -42,11 +43,38 @@
     // From the radio's left edge to the window's right (its own box only wraps the radio, so it never grows).
     room = { w: Math.max(200, innerWidth - r.left - 24), h: Math.max(200, innerHeight - r.top - 16) };
   });
-  const fit = $derived.by(() => {
+  function fitIn(roomW: number, roomH: number) {
     const [w, h] = showKeypad ? [490, 920] : [256, 336];
-    const most = Math.min((1.5 * room.w) / w, (1.5 * room.h) / h);
+    const most = Math.min((1.5 * roomW) / w, (1.5 * roomH) / h);
     return [2, 1.5, 1].find((k) => k <= most) ?? Math.max(0.5, most);
+  }
+  // The side panel (LivePanel): on a window from WIDE px, when the radio still fits beside it at the scale it would
+  // have alone (or at least 1x); else hidden. The Panel switch hides it too (remembered on this computer).
+  const WIDE = 1200;
+  const PANEL_MIN = 300;
+  const PANEL_GAP = 20;
+  const PANEL_KEY = "ferrite.livePanel";
+  let panelOn = $state(readPanel());
+  function readPanel() {
+    try {
+      return localStorage.getItem(PANEL_KEY) !== "0";
+    } catch {
+      return true;
+    }
+  }
+  $effect(() => {
+    const v = panelOn ? "1" : "0";
+    try {
+      localStorage.setItem(PANEL_KEY, v);
+    } catch {
+      /* private window: not remembered */
+    }
   });
+  const alone = $derived(fitIn(room.w, room.h));
+  const beside = $derived(fitIn(room.w - PANEL_MIN - PANEL_GAP, room.h));
+  const roomy = $derived(innerWidth >= WIDE && beside >= Math.min(1, alone));
+  const panelShown = $derived(panelOn && roomy);
+  const fit = $derived(panelShown ? beside : alone);
   let seqOpen = $state(false);
   const DEV = import.meta.env.VITE_DEV_TOOLS === "1" || import.meta.env.DEV;
 
@@ -147,6 +175,7 @@
       {#if listen.error}<span class="meta err">{listen.error}</span>{/if}
     </span>
     <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
+    {#if roomy}<label title="Slots, stations heard and the radio's state beside the radio"><input type="checkbox" bind:checked={panelOn} /> Panel</label>{/if}
     <span class="spacer"></span>
     {#if shotNote}<span class="meta" aria-live="polite">{shotNote}</span>{/if}
     <span class="group">
@@ -194,34 +223,37 @@
     </form>
   {/if}
 
-  <section class="radio" aria-label="The radio" bind:this={area}>
-    {#snippet screen()}
-      {#if radio.ui && connected}
-        <ReadbackScreen ui={radio.ui} />
+  <div class="stage">
+    <section class="radio" aria-label="The radio" bind:this={area}>
+      {#snippet screen()}
+        {#if radio.ui && connected}
+          <ReadbackScreen ui={radio.ui} />
+        {:else}
+          <div class="idle">
+            {#if radio.phase === "connecting"}
+              <b>Connecting…</b>
+            {:else if radio.phase === "pin"}
+              <b>PIN</b><span>Type the radio's PIN above.</span>
+            {:else if connected}
+              <b>Reading the screen…</b>
+            {:else}
+              <b>Ready to connect</b>
+              <span>Cable or Bluetooth, at the top.{#if DEV} No radio? Try the demo radio.{/if}</span>
+            {/if}
+          </div>
+        {/if}
+      {/snippet}
+      {#if showKeypad}
+        <!-- The whole radio scales as one (keys and knob with the screen), drawn at 1.5x and zoomed to fit. -->
+        <div style:zoom={fit / 1.5}><RadioFace {screen} scale={1.5} disabled={!connected} {asleep} /></div>
       {:else}
-        <div class="idle">
-          {#if radio.phase === "connecting"}
-            <b>Connecting…</b>
-          {:else if radio.phase === "pin"}
-            <b>PIN</b><span>Type the radio's PIN above.</span>
-          {:else if connected}
-            <b>Reading the screen…</b>
-          {:else}
-            <b>Ready to connect</b>
-            <span>Cable or Bluetooth, at the top.{#if DEV} No radio? Try the demo radio.{/if}</span>
-          {/if}
+        <div class="bare" title={asleep ? "The radio's screen is dark" : undefined} class:asleep style:width={`${240 * fit}px`} style:height={`${320 * fit}px`}>
+          <div style:transform={`scale(${fit})`} style:transform-origin="0 0">{@render screen()}</div>
         </div>
       {/if}
-    {/snippet}
-    {#if showKeypad}
-      <!-- The whole radio scales as one (keys and knob with the screen), drawn at 1.5x and zoomed to fit. -->
-      <div style:zoom={fit / 1.5}><RadioFace {screen} scale={1.5} disabled={!connected} {asleep} /></div>
-    {:else}
-      <div class="bare" title={asleep ? "The radio's screen is dark" : undefined} class:asleep style:width={`${240 * fit}px`} style:height={`${320 * fit}px`}>
-        <div style:transform={`scale(${fit})`} style:transform-origin="0 0">{@render screen()}</div>
-      </div>
-    {/if}
-  </section>
+    </section>
+    {#if panelShown}<LivePanel {hearing} />{/if}
+  </div>
 
   <div id="radio-info" popover class="pop"><RadioInfo /></div>
   <div id="shot-menu" popover class="pop menu">
@@ -334,6 +366,12 @@
   }
   .pop::backdrop {
     background: rgba(0, 0, 0, 0.4);
+  }
+  .stage {
+    display: flex;
+    gap: 20px; /* PANEL_GAP */
+    align-items: flex-start;
+    width: 100%;
   }
   .radio {
     flex: none;
