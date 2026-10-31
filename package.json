@@ -16,14 +16,16 @@
     "e2e:xeon": "tools/e2e-xeon.sh",
     "tauri": "tauri",
     "bundle-firmware": "node scripts/bundle-firmware.mjs",
-    "build:dev": "npm run wasm && VITE_DEV_TOOLS=1 vite build"
+    "build:dev": "npm run wasm && VITE_DEV_TOOLS=1 vite build",
+    "build:single": "npm run wasm && vite build --mode single"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tauri-apps/cli": "^2.12.3",
     "svelte": "^5.57.2",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "vite-plugin-singlefile": "2.3.3"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

@@ -20,6 +20,7 @@ import { Link, TimeoutError } from "./link";
 import { radio } from "./radio.svelte";
 import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
 import { sleep, type Transport } from "./transport/types";
+import { appFetch } from "./appfetch";
 
 const CMD_PROBE = 0x42;
 const ACK = 0x06;
@@ -81,7 +82,7 @@ class Firmware {
   async loadBundled() {
     if (this.bundled) return;
     try {
-      const r = await fetch("firmware/manifest.json", { cache: "no-cache" });
+      const r = await appFetch("firmware/manifest.json", { cache: "no-cache" });
       if (r.ok) this.bundled = (await r.json()).ferrite ?? null;
     } catch {
       // no bundled release in this copy of Console: a file only
@@ -96,7 +97,7 @@ class Firmware {
     const r = this.bundled;
     if (this.running || !r) return;
     try {
-      const res = await fetch(`firmware/${r.file}`, { cache: "no-cache" });
+      const res = await appFetch(`firmware/${r.file}`, { cache: "no-cache" });
       if (!res.ok) throw new Error(`${r.file}: ${res.status}`);
       const b = new Uint8Array(await res.arrayBuffer());
       await loadCore();

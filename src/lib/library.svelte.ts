@@ -5,6 +5,7 @@
 import { libraryAdd, parsePlace, type LibraryAdded, type LibraryItem, type Place } from "./core";
 import { channels } from "./channels.svelte";
 import { radio } from "./radio.svelte";
+import { appFetch } from "./appfetch";
 
 export type FixedFreq = { number: number; name: string; rx: number; tx: number; notes?: string; ctcss?: number; dcs?: number };
 export type FixedSet = {
@@ -23,7 +24,7 @@ const url = (name: string) => `${import.meta.env.BASE_URL}data/${name}`;
 
 /** A JSON file from public/data. */
 async function fetchJson<T>(name: string): Promise<T> {
-  const r = await fetch(url(name));
+  const r = await appFetch(url(name));
   if (!r.ok) throw new Error(`${name}: ${r.status} ${r.statusText}`);
   return (await r.json()) as T;
 }

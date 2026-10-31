@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # The desktop app for Linux and Windows, built in Docker on the Xeon (tools/desktop/Dockerfile): copies the last
 # commit of this repo and of ../ferrite there (what's committed, not the working tree), builds, and brings the
-# bundles back to target/desktop/. Usage: tools/desktop-build.sh [linux|windows|all] [--host USER@HOST]
+# bundles back to target/desktop/. `mac` builds the macOS app (.app and .dmg) here instead (macOS only; unsigned:
+# fine on the Mac that built it). Usage: tools/desktop-build.sh [linux|windows|mac|all] [--host USER@HOST]
+# (all = linux and windows; mac separately)
 # Windows: cargo-xwin downloads Microsoft's CRT and Windows SDK on its first run (kept in a cache volume there);
 # using them means accepting Microsoft's licence for them. Besides the NSIS setup.exe it brings back the bare app
 # ("Ferrite Console portable.exe"), which runs without installing.
@@ -10,12 +12,22 @@ host=${FERRITE_XEON:-infamy@192.168.7.162}
 what=all
 while [ $# -gt 0 ]; do
   case $1 in
-    linux|windows|all) what=$1; shift ;;
+    linux|windows|mac|all) what=$1; shift ;;
     --host) host=$2; shift 2 ;;
-    *) echo "usage: $0 [linux|windows|all] [--host USER@HOST]" >&2; exit 2 ;;
+    *) echo "usage: $0 [linux|windows|mac|all] [--host USER@HOST]" >&2; exit 2 ;;
   esac
 done
 here=$(cd "$(dirname "$0")/.." && pwd)
+if [ "$what" = mac ]; then
+  [ "$(uname)" = Darwin ] || { echo "mac: build on a Mac" >&2; exit 1; }
+  cd "$here"
+  npx tauri build --bundles app,dmg 2>&1 | tail -n 8
+  mkdir -p target/desktop
+  rm -rf "target/desktop/Ferrite Console.app"
+  cp -R target/release/bundle/macos/*.app target/release/bundle/dmg/*.dmg target/desktop/
+  ls -la target/desktop
+  exit 0
+fi
 dir=code/console-build
 ssh="ssh -o ControlMaster=auto -o ControlPath=$HOME/.ssh/cm-desk-%C -o ControlPersist=120"
 for i in $(seq 12); do $ssh -o ConnectTimeout=5 "$host" true 2>/dev/null && break; sleep 10; done

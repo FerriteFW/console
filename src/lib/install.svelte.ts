@@ -42,6 +42,7 @@ import { signatureOf, signatureText, splitPicked, type Signed } from "./signatur
 import { Link, TimeoutError } from "./link";
 import { radio } from "./radio.svelte";
 import { sleep, type Transport } from "./transport/types";
+import { appFetch } from "./appfetch";
 
 /** The reader's fdump rates, fastest first (fdump_proto.py's RATES: the radio's 8 MHz UART makes these exact). */
 const READER_RATES = [500_000, 250_000, 115_200];
@@ -286,7 +287,7 @@ class Install {
     }
     let m: Manifest;
     try {
-      const r = await fetch("firmware/manifest.json", { cache: "no-cache" });
+      const r = await appFetch("firmware/manifest.json", { cache: "no-cache" });
       if (!r.ok) throw new Error(String(r.status));
       m = await r.json();
     } catch {
@@ -309,7 +310,7 @@ class Install {
   /** UPD-15: a bundled file is used only when its SHA-256 is the manifest's. */
   private async fetchChecked(r: Release): Promise<Uint8Array | null> {
     try {
-      const res = await fetch(`firmware/${r.file}`, { cache: "no-cache" });
+      const res = await appFetch(`firmware/${r.file}`, { cache: "no-cache" });
       if (!res.ok) throw new Error(`${r.file}: ${res.status}`);
       const b = new Uint8Array(await res.arrayBuffer());
       if (sha256Hex(b) !== r.sha256.toLowerCase()) {
