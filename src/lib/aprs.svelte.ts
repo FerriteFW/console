@@ -202,6 +202,21 @@ class Aprs {
     if (!(radio.subMask & 2)) await this.refresh();
   }
 
+  /** LINK-52 (decision 323): one message deleted on the radio, as its own Delete message does; the lists are read
+   *  again after. */
+  async remove(m: Message): Promise<void> {
+    const link = radio.connectedLink;
+    if (!link) throw new Error("Connect to a radio first.");
+    try {
+      await link.msgDelete(m.inbound, m.peer, m.text);
+    } catch (e) {
+      if (e instanceof RadioError && e.status === 2) throw new Error("This radio's firmware can't delete a message over the link yet (LINK-52): update it.");
+      throw e;
+    } finally {
+      await this.refresh();
+    }
+  }
+
   /** The heard station named `call`, if any. */
   station(call: string) {
     return this.stations.find((s) => s.call.toUpperCase() === call.toUpperCase());

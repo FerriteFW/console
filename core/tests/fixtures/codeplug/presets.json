@@ -1,0 +1,32 @@
+{
+  "format": "ferrite-console-presets",
+  "version": 1,
+  "saved": "2026-10-30T21:12:00.000Z",
+  "radio": {
+    "callsign": "VA7IF",
+    "connection": "Cable",
+    "firmware": "0.8.2"
+  },
+  "presets": [
+    {
+      "number": 1,
+      "name": "2 m",
+      "low": "144.00000",
+      "high": "148.00000",
+      "step": "12.5 kHz",
+      "mode": "NFM",
+      "resume": "Global",
+      "record": "32206d00000000000000000000badb0080d4e1000a010100"
+    },
+    {
+      "number": 2,
+      "name": "Airband",
+      "low": "118.00000",
+      "high": "137.00000",
+      "step": "25 kHz",
+      "mode": "AM",
+      "resume": "After 3 s",
+      "record": "41697262616e640000000000c00db400a00bd1000b020003"
+    }
+  ]
+}

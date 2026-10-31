@@ -1,10 +1,12 @@
 <script lang="ts">
   // The settings as the radio's menu lists them: an index of the groups beside one column of even rows, each row
-  // its menu number, name and control (a choice, a level, typed text, or read only). Radio Settings and APRS
-  // settings both show their records with it; the values and choices are the core's.
+  // its menu number, name and control (a choice, a level, typed text, read only with its reason, or a link to the
+  // page that edits it). Radio Settings and APRS settings both show their records with it; the values and choices
+  // are the core's.
   import type { SettingItem } from "../core";
 
-  type Group = { path: string; name: string; items: SettingItem[]; note: string };
+  type Item = Omit<SettingItem, "kind"> & { kind: SettingItem["kind"] | "link"; href?: string };
+  type Group = { path: string; name: string; items: Item[]; note: string };
   let {
     groups,
     dirty,
@@ -16,11 +18,11 @@
   function jump(path: string) {
     document.getElementById(`g-${path}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  const changedIn = (g: { items: SettingItem[] }) => g.items.filter((i) => dirty.has(i.id)).length;
-  const label = (i: SettingItem) => (i.path ? `${i.path} ${i.name}` : i.name);
-  const options = (i: SettingItem) => (i.choices.includes(i.value) ? i.choices : [i.value, ...i.choices]);
-  const at = (i: SettingItem) => i.choices.indexOf(i.value);
-  function step(i: SettingItem, d: number) {
+  const changedIn = (g: { items: Item[] }) => g.items.filter((i) => dirty.has(i.id)).length;
+  const label = (i: Item) => (i.path ? `${i.path} ${i.name}` : i.name);
+  const options = (i: Item) => (i.choices.includes(i.value) ? i.choices : [i.value, ...i.choices]);
+  const at = (i: Item) => i.choices.indexOf(i.value);
+  function step(i: Item, d: number) {
     const k = at(i) + d;
     if (k >= 0 && k < i.choices.length) change(i.id, i.choices[k]);
   }
@@ -72,11 +74,13 @@
                       disabled={busy}
                       onchange={(e) => change(i.id, e.currentTarget.value)}
                     />
+                  {:else if i.kind === "link"}
+                    <a class="go" href={i.href} aria-label={label(i)}>{i.value} ›</a>
                   {:else}
-                    <span class="ro" aria-label={label(i)} title={i.note || "Changes only on the radio"}>{i.value || "–"}</span>
+                    <span class="ro" aria-label={label(i)} title={i.note || "Set on the radio only"}>{i.value || "–"}</span>
                   {/if}
                 </span>
-                {#if i.kind === "readonly" && i.note}<span class="note">{i.note}</span>{/if}
+                {#if (i.kind === "readonly" || i.kind === "link") && i.note}<span class="note" data-reason>{i.note}</span>{/if}
                 {#if refused[i.id]}<span class="err">{refused[i.id]}</span>{/if}
               </div>
             {/each}
@@ -270,9 +274,24 @@
   }
   .note {
     grid-column: 2 / -1;
-    color: var(--dim);
-    font-size: 11px;
-    text-align: right;
+    color: var(--sub);
+    font-size: 11.5px;
+  }
+  .go {
+    display: flex;
+    align-items: center;
+    height: 30px;
+    box-sizing: border-box;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--blue);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  .go:hover {
+    border-color: var(--blue);
+    background: var(--focus);
   }
   .err {
     grid-column: 2 / -1;

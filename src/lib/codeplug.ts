@@ -1,5 +1,5 @@
 // The .ferrite codeplug: one zip holding a manifest and the JSON Console already writes for each part (channels and
-// zones, Radio Settings, APRS settings, APRS contacts). Pure: no Svelte state, no DOM (unit-tested in Node:
+// zones, range presets, Radio Settings, APRS settings, APRS contacts). Pure: no Svelte state, no DOM (unit-tested in Node:
 // tests/unit/codeplug.test.ts). The format is docs/dev/codeplug-format.md in the docs repo; codeplug.svelte.ts
 // gathers the parts from the pages and loads them back.
 import { createZip, readZip } from "./zip.ts";
@@ -8,7 +8,7 @@ export const FORMAT = "ferrite-codeplug";
 /** The format version this Console writes and the newest it reads. */
 export const VERSION = 1;
 /** The parts, in the order they are written; each is `<part>.json` in the zip. */
-export const PARTS = ["channels", "settings", "aprs", "contacts"] as const;
+export const PARTS = ["channels", "presets", "settings", "aprs", "contacts"] as const;
 export type Part = (typeof PARTS)[number];
 
 /** What the radio said about itself when the file was saved (each only when known). Never its unique ID: codeplugs

@@ -3,11 +3,15 @@
   // itself when the page opens on a connected radio), the core columns edited in place and every field in the side
   // panel, several rows at once from the bulk bar, and written back after a backup file and a diff. One toolbar:
   // Read, Write (with the count of changes), File (saved files, CHIRP CSV, a radio backup), Undo. Unwritten changes
-  // survive a reload (channels.svelte.ts keeps them); deletes are undone from the notice or with Ctrl/Cmd+Z.
+  // survive a reload (channels.svelte.ts keeps them); deletes are undone from the notice or with Ctrl/Cmd+Z. The
+  // radio's range presets (MENU 0 1 4) are a third tab: read and written with the channels, in the same table, since
+  // they're programmed as the channels are and a band scan of one goes with the channel scans it sits beside.
   import { SvelteSet } from "svelte/reactivity";
   import ChannelRow from "../components/ChannelRow.svelte";
   import ChannelDetails from "../components/ChannelDetails.svelte";
   import ZonesEditor from "../components/ZonesEditor.svelte";
+  import PresetsEditor from "../components/PresetsEditor.svelte";
+  import { route } from "../route.svelte";
   import WriteDialog from "../components/WriteDialog.svelte";
   import ImportDialog from "../components/ImportDialog.svelte";
   import LibraryDialog from "../components/library/LibraryDialog.svelte";
@@ -24,7 +28,14 @@
   let choices = $state<Choices | null>(null);
   loadCore().then(() => (choices = channelChoices()));
 
-  let tab = $state<"channels" | "zones">("channels");
+  type Tab = "channels" | "zones" | "presets";
+  const tabOf = (v: string | null): Tab => (v === "zones" || v === "presets" ? v : "channels");
+  let tab = $state<Tab>(tabOf(route.params.get("tab")));
+  // `#/channels?tab=presets` (Radio Settings' 0 1 4 row) opens that tab.
+  $effect(() => {
+    const want = route.params.get("tab");
+    if (want) tab = tabOf(want);
+  });
   let zoneFilter = $state("all");
   let search = $state("");
   let chirpInput: HTMLInputElement;
@@ -59,6 +70,16 @@
   const toneWords = $derived(choices ? ["off", ...choices.ctcss, ...choices.dcs.flatMap((d) => [`D${d}N`, `D${d}I`])] : []);
   const shownPicked = $derived(shown.filter((c) => selected.has(c.number)).length);
   const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  /** What isn't written yet, in words: only the kinds that have changes. */
+  const unwritten = $derived.by(() => {
+    const d = dirty;
+    const out: string[] = [];
+    if (d.changed.size || d.deleted) out.push(`${plural(d.changed.size, "channel")} changed or added${d.deleted ? `, ${d.deleted} deleted` : ""}`);
+    if (d.zones.size || d.zonesDeleted) out.push(plural(d.zones.size + d.zonesDeleted, "zone"));
+    if (d.presets.size || d.presetsDeleted) out.push(plural(d.presets.size + d.presetsDeleted, "range preset"));
+    if (d.home) out.push("the home channel");
+    return out.join(", ");
+  });
 
   // Ticks and the panel follow the table: a row gone (deleted, a new read) drops out of both.
   $effect(() => {
@@ -139,7 +160,7 @@
     }
   }
 
-  const anything = $derived(!!(t.channels.length || t.zones.length || settings.record || aprsSettings.record || contacts.loaded || contacts.pending));
+  const anything = $derived(!!(t.channels.length || t.zones.length || channels.presets.length || settings.record || aprsSettings.record || contacts.loaded || contacts.pending));
 
   function choose(f: () => void) {
     menuOpen = false;
@@ -206,7 +227,7 @@
 <div class="page">
   <div class="toolbar" role="toolbar" aria-label="Channels">
     <div class="grp">
-      <button class="btn" disabled={!connected || busy} onclick={read} title="Read every zone and channel from the radio">Read from radio</button>
+      <button class="btn" disabled={!connected || busy} onclick={read} title="Read every zone, channel and range preset from the radio">Read from radio</button>
       <button
         class="btn"
         class:primary={pending > 0}
@@ -275,11 +296,9 @@
       <span>{channels.progress.label}</span>
     {:else if channels.source}
       <span>{channels.source}</span>
-      <span class="sub">· {plural(t.channels.length, "channel")}, {plural(t.zones.length, "zone")}</span>
+      <span class="sub">· {plural(t.channels.length, "channel")}, {plural(t.zones.length, "zone")}{#if channels.presets.length}, {plural(channels.presets.length, "range preset")}{/if}</span>
       {#if dirty.any}
-        <span class="dirty"
-          >· not written: {plural(dirty.changed.size, "channel")} changed or added{#if dirty.deleted}, {dirty.deleted} deleted{/if}{#if dirty.zones.size || dirty.zonesDeleted}, {plural(dirty.zones.size + dirty.zonesDeleted, "zone")}{/if}{#if dirty.home}, the home channel{/if}</span
-        >
+        <span class="dirty">· not written: {unwritten}</span>
       {/if}
     {/if}
   </div>
@@ -295,6 +314,9 @@
     <div class="tabs" role="tablist">
       <button role="tab" aria-selected={tab === "channels"} class:on={tab === "channels"} onclick={() => (tab = "channels")}>Channels <span>{t.channels.length}</span></button>
       <button role="tab" aria-selected={tab === "zones"} class:on={tab === "zones"} onclick={() => (tab = "zones")}>Zones <span>{t.zones.length}</span></button>
+      <button role="tab" aria-selected={tab === "presets"} class:on={tab === "presets"} onclick={() => (tab = "presets")} title="MENU 0 1 4: band scans of your own"
+        >Range presets <span>{channels.presets.length}</span></button
+      >
     </div>
     <div class="grp adds">
       {#if tab === "channels"}
@@ -412,8 +434,10 @@
           {/if}
         </div>
       {/if}
-    {:else}
+    {:else if tab === "zones"}
       <ZonesEditor {choices} onsay={say} />
+    {:else}
+      <PresetsEditor onsay={say} />
     {/if}
   {/if}
 </div>

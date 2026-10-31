@@ -65,3 +65,15 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
 - Channels: empty rows should offer Read from radio and Import CHIRP.
 - Live View: B/s, ms and the screen ID are developer details.
 - Terminal: under More/Advanced.
+- [x] Range presets (Oct 30, LINK-21, MENU 0 1 4): a third tab on Channels & Zones, read and written with the
+  channels (one Read, one Write diff, one undo list, restore and "N unwritten"), since they're programmed like
+  channels and a band scan sits beside the channel scans. NeonPlug list and detail: name, start and end MHz, step,
+  mode, resume, checked as the radio checks them (SCAN-14's 18 and 64 MHz edges too). Deletions go first so each
+  kept preset keeps its skipped frequencies; those aren't on the link, so the editor says so. `presets.json` in the
+  `.ferrite`. Radio Settings' 0 1 4 and 0 1 5 rows link to the tab. `PresetsEditor.svelte`.
+- [x] Delete one APRS message (Oct 30, LINK-52): Delete on each message, an in-page "Delete it on the radio?" with
+  Keep, then the list reads again.
+- [x] Crossband repeater settings (Oct 30): a Radio Settings group (sides, power, timeout, hang time, tone gate, ID,
+  speaker) edited through the settings record with the start page's own choices (power never above Mid).
+- [x] Read-only settings say why (Oct 30, LINK-5, LINK-7): region and Extend TX for safety, the PIN never over the
+  link, the cable port and KISS would cut this connection; Dry TX says what it is.

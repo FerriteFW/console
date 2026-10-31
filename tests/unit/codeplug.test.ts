@@ -32,7 +32,7 @@ test("the documented example round-trips", async () => {
   assert.ok(isZip(file));
   // The zip holds exactly the manifest and the listed parts, byte for byte.
   const files = await readZip(file);
-  assert.deepEqual([...files.keys()], ["manifest.json", "channels.json", "aprs.json", "contacts.json"]);
+  assert.deepEqual([...files.keys()], ["manifest.json", "channels.json", "presets.json", "aprs.json", "contacts.json"]);
   assert.deepEqual(JSON.parse(new TextDecoder().decode(files.get("manifest.json"))), m);
   const back = await readCodeplug(file);
   assert.deepEqual(back.manifest, m);
@@ -43,7 +43,7 @@ test("the documented example round-trips", async () => {
 
 test("the example's manifest is what Console writes", () => {
   const m: Manifest = JSON.parse(fx("manifest.json"));
-  const parts: Parts = { channels: "{}", aprs: "{}", contacts: "{}" };
+  const parts: Parts = { channels: "{}", presets: "{}", aprs: "{}", contacts: "{}" };
   const made = manifest(parts, m.radio, m.console, new Date(m.created), m.radio_fingerprint);
   assert.deepEqual(made, m);
   // Byte for byte as Console writes it (buildCodeplug: JSON.stringify(.., null, 2)), key order included.
@@ -52,7 +52,7 @@ test("the example's manifest is what Console writes", () => {
   // Unknown radio facts are left out, not written empty.
   assert.deepEqual(manifest({ settings: "{}" }, { callsign: "" }, "0.1.0").radio, {});
   assert.deepEqual(manifest({ contacts: "{}", channels: "{}" }, {}, "0.1.0").parts, ["channels", "contacts"], "in PARTS order");
-  assert.deepEqual([...PARTS], ["channels", "settings", "aprs", "contacts"]);
+  assert.deepEqual([...PARTS], ["channels", "presets", "settings", "aprs", "contacts"]);
 });
 
 test("the example's contacts.json is what Console writes", () => {
@@ -64,7 +64,7 @@ test("the example's contacts.json is what Console writes", () => {
 const doc = new URL("../../../docs/dev/codeplug-format.md", import.meta.url);
 test("the format doc shows the example as it is", { skip: !existsSync(doc) && "no docs checkout beside this one" }, () => {
   const text = readFileSync(doc, "utf8");
-  for (const n of ["manifest.json", "channels.json", "aprs.json", "contacts.json"]) {
+  for (const n of ["manifest.json", "channels.json", "presets.json", "aprs.json", "contacts.json"]) {
     const at = text.indexOf(`\`${n}\``, text.indexOf("## Example"));
     assert.ok(at > 0, `the doc's example has ${n}`);
     const open = text.indexOf("```json\n", at) + "```json\n".length;
@@ -141,11 +141,11 @@ test("refused: not a zip, not a codeplug, a newer version, a listed part missing
 });
 
 test("a part this Console doesn't know (added later in the same version) is left alone", async () => {
-  const m = { ...manifest({ contacts: "x" }, {}, "0.1.0"), parts: ["contacts", "presets"] };
+  const m = { ...manifest({ contacts: "x" }, {}, "0.1.0"), parts: ["contacts", "waypoints"] };
   const file = await bytes(await createZip([
     { name: "manifest.json", data: JSON.stringify(m) },
     { name: "contacts.json", data: fx("contacts.json") },
-    { name: "presets.json", data: "{}" },
+    { name: "waypoints.json", data: "{}" },
   ]));
   const back = await readCodeplug(file);
   assert.deepEqual(Object.keys(back.parts), ["contacts"]);

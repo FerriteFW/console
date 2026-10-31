@@ -10,6 +10,7 @@ import {
   keyPayload,
   knobPayloads,
   logReadPayload,
+  msgDeletePayload,
   msgSendPayload,
   parseHeard,
   parseHello,
@@ -793,6 +794,14 @@ export class Link {
   }
 
   /**
+   * LINK-52 (decision 323): one message deleted, named by its direction, station and text as MSGS listed it (the
+   * newest that matches goes, as the radio's own Delete message). Firmware from before it answers `unknown type`.
+   */
+  async msgDelete(inbound: boolean, peer: string, text: string): Promise<void> {
+    await this.ok(P.msg.MSG_DELETE, msgDeletePayload(inbound, peer, text));
+  }
+
+  /**
    * LINK-42: the event log, newest first, every page (below `before`; 0xFFFFFFFF from the newest). `progress` with
    * the records so far.
    */
@@ -906,7 +915,7 @@ function wholeRecord(op: PlanOp): { what: number; entry: Uint8Array } | null {
   const p = op.payloads[0];
   const off = p[3] | (p[4] << 8);
   const total = p[5] | (p[6] << 8);
-  if ((p[0] !== 2 && p[0] !== 3) || off !== 0 || total !== p.length - 7 || total > 255) return null;
+  if ((p[0] !== 2 && p[0] !== 3 && p[0] !== 4) || off !== 0 || total !== p.length - 7 || total > 255) return null;
   return { what: p[0], entry: new Uint8Array([p[1], p[2], total, ...p.slice(7)]) };
 }
 

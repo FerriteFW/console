@@ -6,8 +6,12 @@
 
   const w = $derived(channels.write);
   const plan = $derived(w && w.step !== "backup" ? w.plan : null);
+  /** The range presets' part rides along: their changes and problems shown with the channels'. */
+  const pre = $derived(w && w.step !== "backup" ? w.presets : null);
+  const problems = $derived([...(plan?.problems ?? []), ...(pre?.problems ?? [])]);
+  const changes = $derived([...(plan?.changes ?? []), ...(pre?.changes ?? [])]);
   const groups = $derived.by(() => {
-    const c = plan?.changes ?? [];
+    const c = changes;
     const of = (k: Change["kind"]) => c.filter((x) => x.kind === k);
     return [
       { kind: "added", title: "Added", items: of("added") },
@@ -26,10 +30,13 @@
     pri1: "priority 1",
     pri2: "priority 2",
     keep: "other flags",
+    low: "start",
+    high: "end",
   };
+  const whatName = (c: Change) => (c.what === "zone" ? "Zone" : c.what === "preset" ? "Preset" : "Ch");
   /** LINK-53: the radio can't store positions: the write leaves them out and says so once. */
   const skipped = $derived(w && w.step !== "backup" ? skippedPositions(w) : 0);
-  const canGo = $derived(!!w && w.step === "review" && !w.plan.problems.length && (writeCount(w) > 0 || skipped > 0));
+  const canGo = $derived(!!w && w.step === "review" && !problems.length && (writeCount(w) > 0 || skipped > 0));
 </script>
 
 {#if w}
@@ -48,11 +55,11 @@
         {#if w.drifted}
           <p class="note">The radio changed since the table was read: this diff is against the radio as it is now.</p>
         {/if}
-        {#if w.plan.problems.length}
+        {#if problems.length}
           <div class="problems">
-            <b>The radio would refuse {w.plan.problems.length === 1 ? "this" : "these"}; fix {w.plan.problems.length === 1 ? "it" : "them"} first:</b>
+            <b>The radio would refuse {problems.length === 1 ? "this" : "these"}; fix {problems.length === 1 ? "it" : "them"} first:</b>
             <ul>
-              {#each w.plan.problems as p, i (i)}<li>{p.what === "set" ? "" : `${p.what} ${p.number}: `}{p.error}</li>{/each}
+              {#each problems as p, i (i)}<li>{p.what === "set" ? "" : `${p.what === "preset" ? "range preset" : p.what}${p.number ? ` ${p.number}` : "s"}: `}{p.error}</li>{/each}
             </ul>
           </div>
         {/if}
@@ -62,7 +69,7 @@
             in the table and in .ferrite files; the rest is written.
           </p>
         {/if}
-        {#if !w.plan.changes.length && !w.home}
+        {#if !changes.length && !w.home}
           <p>Nothing to write: the radio already holds the table.</p>
         {:else}
           <div class="diff">
@@ -71,7 +78,7 @@
               <ul>
                 {#each g.items as c (c.what + c.number)}
                   <li>
-                    <span class="what">{c.what === "zone" ? "Zone" : "Ch"} {c.number}</span>
+                    <span class="what">{whatName(c)} {c.number}</span>
                     <span class="nm">{c.name || "(no name)"}</span>
                     {#if c.fields.length}
                       <span class="fields">

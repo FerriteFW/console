@@ -83,7 +83,7 @@ test("read: the record as the radio's menu shows it", async ({}, info) => {
   await expect(page.getByLabel("0 7 1 Theme", { exact: true }).locator("option")).toHaveText(["Dark", "Daylight", "Night red", "Cyberpunk"]);
   await expect(beep().locator("option")).toHaveText(["Off", "On"]);
   const region = page.locator('[data-id="0 9 4"]');
-  await expect(region).toContainText("changes only on the radio");
+  await expect(region).toContainText("Set on the radio, for safety");
   await expect(region.locator("select, input, button")).toHaveCount(0);
   // MENU 0 5's other settings are named, pointing at APRS Settings; Shared VHF in the radio's own words.
   await expect(page.getByRole("region", { name: "APRS" })).toContainText("On APRS Settings");

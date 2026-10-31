@@ -1,9 +1,9 @@
 // The .ferrite codeplug, Console's one file kind (docs/dev/codeplug-format.md): Save as… gathers every part the
-// pages hold (channels and zones; Radio Settings, APRS settings and contacts when read or opened this session) into
+// pages hold (channels and zones, range presets; Radio Settings, APRS settings and contacts when read or opened this session) into
 // one file; Open… loads each part a file holds into its page as unwritten changes (Write to radio, per page, puts
 // it on the radio). The older per-page `-backup.json` files still open, each into its own page. In the desktop app
 // the file goes through the native save dialog (the shell's `save_file`); in a browser it downloads.
-import { aprsBackup, backupFile, settingsCodeplugPart } from "./core";
+import { aprsBackup, backupFile, presetsFile, presetsRestore, settingsCodeplugPart } from "./core";
 import { aprsSettings } from "./aprsSettings.svelte";
 import { channels, type ChannelsFile } from "./channels.svelte";
 import { buildCodeplug, codeplugName, contactsJson, fingerprint, isZip, manifest, readCodeplug, readContacts, type Part, type Parts, type RadioMeta } from "./codeplug.ts";
@@ -40,6 +40,8 @@ export function gather(saved: string): Parts {
   const parts: Parts = {};
   const t = channels.table;
   if (t.channels.length || t.zones.length) parts.channels = channels.fileText(saved, r);
+  // Range presets: when read (even none: the file then says the radio has none) or added.
+  if (channels.basePresets !== null || channels.presets.length) parts.presets = channels.presetsText(saved, r);
   // Never the PIN lock: settings.json leaves it out, and opening keeps the radio's own.
   if (settings.record) parts.settings = settingsCodeplugPart(settings.record, settings.extras, saved, r);
   if (aprsSettings.record) parts.aprs = aprsBackup(aprsSettings.settingsRec, aprsSettings.record, aprsSettings.extras, saved, r);
@@ -91,8 +93,10 @@ export async function backUp(part: "channels" | "settings" | "aprs"): Promise<st
   const r = partRadio();
   let text: string;
   if (part === "channels") {
-    const { set } = await channels.readRadio();
+    const { set, presets } = await channels.readRadio();
     text = backupFile(set, saved, r);
+    // The range presets are read with the channels, so they go with them.
+    if (presets) return saveParts({ channels: text, presets: presetsFile(presets, saved, r) }, "Backed up");
   } else if (part === "settings") {
     const { record, extras } = await settings.readRadio();
     text = settingsCodeplugPart(record, extras, saved, r);
@@ -103,7 +107,7 @@ export async function backUp(part: "channels" | "settings" | "aprs"): Promise<st
   return saveParts({ [part]: text }, "Backed up");
 }
 
-const PART_NAME: Record<Part, string> = { channels: "channels", settings: "settings", aprs: "APRS settings", contacts: "contacts" };
+const PART_NAME: Record<Part, string> = { channels: "channels", presets: "range presets", settings: "settings", aprs: "APRS settings", contacts: "contacts" };
 
 function list(order: readonly Part[], parts: Parts): string {
   return order
@@ -114,6 +118,13 @@ function list(order: readonly Part[], parts: Parts): string {
           return `channels (${f.channels.length}) and zones (${f.zones.length})`;
         } catch {
           return "channels and zones";
+        }
+      }
+      if (p === "presets") {
+        try {
+          return `range presets (${presetsRestore(parts.presets!).presets.length})`;
+        } catch {
+          return "range presets";
         }
       }
       if (p === "contacts") {
@@ -133,6 +144,8 @@ function loadPart(p: Part, text: string, from: string): string {
   switch (p) {
     case "channels":
       return channels.loadFile(text, from) ? "" : channels.error;
+    case "presets":
+      return channels.loadPresets(text, from) ? "" : channels.error;
     case "settings":
       return settings.loadFile(text, from, true) ? "" : settings.error;
     case "aprs":
@@ -159,7 +172,9 @@ function partOf(text: string): Part | null {
           ? "aprs"
           : f === "ferrite-console-contacts"
             ? "contacts"
-            : null;
+            : f === "ferrite-console-presets"
+              ? "presets"
+              : null;
   } catch {
     return null;
   }

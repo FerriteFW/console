@@ -11,6 +11,7 @@
   "radio_fingerprint": "7f755785",
   "parts": [
     "channels",
+    "presets",
     "aprs",
     "contacts"
   ]

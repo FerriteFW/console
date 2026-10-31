@@ -65,7 +65,7 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "AUDIO" | "AUDIO_DATA", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA", number>;
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION", number>;
   /** LINK-35.2: HELLO's caps bits the UI asks about by name (link.ts has the transport ones). */
   caps: Record<"POSITION", number>;
@@ -165,9 +165,9 @@ export type Choices = {
   maxZones: number;
 };
 export type Field = { field: string; from: string; to: string };
-export type Change = { what: "zone" | "channel"; number: number; kind: "added" | "changed" | "deleted"; name: string; fields: Field[] };
+export type Change = { what: "zone" | "channel" | "preset"; number: number; kind: "added" | "changed" | "deleted"; name: string; fields: Field[] };
 export type Problem = { what: string; number: number; error: string };
-export type PlanOp = { kind: "write" | "delete"; what: "zone" | "channel" | "settings" | "aprs"; number: number; msg: number; payloads: number[][] };
+export type PlanOp = { kind: "write" | "delete"; what: "zone" | "channel" | "preset" | "settings" | "aprs"; number: number; msg: number; payloads: number[][] };
 /** `positions`: the channels whose position changes (LINK-53), sent after the ops to a radio that can store them. */
 export type Plan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[]; positions: number[] };
 export type ChirpImport = { channels: Channel[]; notes: string[]; skipped: number };
@@ -204,6 +204,37 @@ export const chirpNewZone = (channels: Channel[], table: ChannelSet, name: strin
   JSON.parse(wasm.chirp_new_zone(js(channels), js(table), name));
 export const chirpZoneName = (file: string, zones: Zone[]): string => wasm.chirp_zone_name(file, js(zones));
 export const recordReader = (what: number, index: number) => new wasm.RecordReader(what, index);
+
+// Range presets (MENU 0 1 4, LINK-21's what 4: core/src/presets.rs). A preset's skipped frequencies (SCAN-10) aren't in
+// the link's record: the radio keeps them with the preset it holds, so `origin` (the number a preset was read as)
+// says which preset is which, and the plan never moves a kept one to another's place.
+
+export type Preset = {
+  number: number;
+  name: string;
+  low: string;
+  high: string;
+  step: string;
+  mode: string;
+  resume: string;
+  /** The number it was read as; absent for one added here (or opened from a file). */
+  origin?: number;
+};
+export type PresetChoices = { steps: string[]; modes: string[]; resumes: string[]; max: number; nameLen: number };
+export type PresetPlan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[] };
+
+export const presetChoices = (): PresetChoices => JSON.parse(wasm.preset_choices());
+export const decodePresets = (records: Uint8Array[]): { presets: Preset[]; bad: string[] } =>
+  JSON.parse(wasm.decode_presets(js(records.map((r) => [...r]))));
+/** A preset as the radio would hold it; throws the radio's reason. */
+export const normalizePreset = (p: Preset): Preset => JSON.parse(wasm.normalize_preset(js(p)));
+export const checkPreset = (p: Preset): string | undefined => wasm.check_preset(js(p)) ?? undefined;
+export const newPreset = (number: number, name: string): Preset => JSON.parse(wasm.new_preset(number, name));
+export const presetsPlan = (base: Preset[], want: Preset[]): PresetPlan => JSON.parse(wasm.presets_plan(js(base), js(want)));
+/** `.ferrite`'s presets.json (docs/dev/codeplug-format.md). */
+export const presetsFile = (list: Preset[], saved: string, radio: Record<string, string>): string => wasm.presets_file(js(list), saved, js(radio));
+export const presetsRestore = (text: string): { presets: Preset[]; saved: string; radio: Record<string, string> } =>
+  JSON.parse(wasm.presets_restore(text));
 
 // The channel library ("Add channels": core/src/library.rs): entries to channels and zones through ferrite's checks,
 // places, distances, airport names, TAFL groups.
@@ -389,6 +420,8 @@ export const parseMsgs = (rest: Uint8Array): { count: number; messages: Message[
 export const parseEvent = (payload: Uint8Array): AprsEvent | null => JSON.parse(wasm.parse_event(payload));
 /** MSG_SEND's payload; throws Console's copy of the radio's rules (the radio checks again). */
 export const msgSendPayload = (to: string, text: string): Uint8Array => wasm.msg_send_payload(to, text);
+/** LINK-52: MSG_DELETE's payload for one message as MSGS listed it (its direction, station and text). */
+export const msgDeletePayload = (inbound: boolean, peer: string, text: string): Uint8Array => wasm.msg_delete_payload(inbound, peer, text);
 export const subscribePayload = (mask: number, gap: number, renew: boolean, texts = false): Uint8Array =>
   wasm.subscribe_payload(mask, gap, renew, texts);
 

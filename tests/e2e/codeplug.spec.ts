@@ -56,8 +56,10 @@ test("Save as… a .ferrite, discard, Open… it: the table back, unwritten", as
   expect(await table()).toEqual(read);
 
   await page.locator('input[type=file][accept^=".json"]').setInputFiles({ name: d.suggestedFilename(), mimeType: "application/zip", buffer: bytes });
+  // The range presets ride along (their own part): loaded in place of the radio's, so nothing changes.
+  const presets = await state(page, (f) => f.channels.presets.length as number);
   await expect(page.locator(".toast")).toContainText(
-    `Loaded channels (${read.channels.length}) and zones (${read.zones.length}) from ${d.suggestedFilename()}`,
+    `Loaded channels (${read.channels.length}) and zones (${read.zones.length}), range presets (${presets}) from ${d.suggestedFilename()}`,
   );
   expect(await table()).toEqual(edited);
   await expect.poll(() => state(page, (f) => f.channels.pending)).toBe(1);

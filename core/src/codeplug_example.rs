@@ -7,6 +7,7 @@
 use crate::aprs_settings;
 use crate::channels::{ChanView, Position, ZoneView};
 use crate::plan::{self, Set};
+use crate::presets::{self, PresetView};
 use crate::radioside::RadioSide;
 use crate::records::Reader;
 use crate::settings::{self, read_extras, record_of};
@@ -55,6 +56,16 @@ fn set() -> Set {
     Set { zones: vec![z1, z2], channels: vec![a, b, c] }
 }
 
+/// Two range presets: 2 m in 12.5 kHz steps, the airband in AM with its own resume.
+fn preset_list() -> Vec<PresetView> {
+    let mut a = PresetView::new(1, "2 m");
+    a.origin = Some(1);
+    let mut b = PresetView::new(2, "Airband");
+    b.origin = Some(2);
+    (b.low, b.high, b.step, b.mode, b.resume) = ("118".into(), "137".into(), "25 kHz".into(), "AM".into(), "After 3 s".into());
+    vec![a, b]
+}
+
 fn aprs_record() -> Vec<u8> {
     let mut rs = RadioSide::new();
     let mut r = Reader::new(what::APRS, 0);
@@ -69,6 +80,7 @@ fn aprs_record() -> Vec<u8> {
 /// The parts as Console writes them, by file name.
 fn parts() -> Vec<(&'static str, String)> {
     let channels = plan::backup(&set(), SAVED, radio()).unwrap();
+    let presets = presets::backup(&preset_list(), SAVED, radio()).unwrap();
     let ex = read_extras(&mut RadioSide::new());
     let aprs = aprs_settings::backup(&record_of(&Settings::DEFAULT), &aprs_record(), &ex, SAVED, radio());
     // Console writes these two in TypeScript (codeplug.ts: JSON.stringify(.., null, 2)); the structs keep its key
@@ -111,7 +123,7 @@ fn parts() -> Vec<(&'static str, String)> {
         console: &'static str,
         radio: Radio,
         radio_fingerprint: &'static str,
-        parts: [&'static str; 3],
+        parts: [&'static str; 4],
     }
     // Saved before Radio Settings was read: no settings part (a part may be missing).
     let manifest = serde_json::to_string_pretty(&Manifest {
@@ -122,10 +134,16 @@ fn parts() -> Vec<(&'static str, String)> {
         radio: Radio { callsign: "VA7IF", firmware: "0.8.2", build: "tx" },
         // SHA-256 of the UID bytes 10 32 54 76 98 ba dc fe 01 23 45 67, its first 8 hex digits.
         radio_fingerprint: "7f755785",
-        parts: ["channels", "aprs", "contacts"],
+        parts: ["channels", "presets", "aprs", "contacts"],
     })
     .unwrap();
-    vec![("manifest.json", manifest), ("channels.json", channels), ("aprs.json", aprs), ("contacts.json", contacts)]
+    vec![
+        ("manifest.json", manifest),
+        ("channels.json", channels),
+        ("presets.json", presets),
+        ("aprs.json", aprs),
+        ("contacts.json", contacts),
+    ]
 }
 
 #[test]
@@ -153,6 +171,11 @@ fn parts_round_trip() {
     let (set, b) = plan::restore(&ch).unwrap();
     assert_eq!(plan::backup(&set, &b.saved, b.radio).unwrap(), ch);
     assert_eq!((set.zones.len(), set.channels.len()), (2, 3));
+
+    let pr = read("presets.json");
+    let (list, b) = presets::restore(&pr).unwrap();
+    assert_eq!(presets::backup(&list, &b.saved, b.radio).unwrap(), pr);
+    assert_eq!(list.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["2 m", "Airband"]);
 
     let ap = read("aprs.json");
     let (rec, b) = aprs_settings::restore(&ap).unwrap();

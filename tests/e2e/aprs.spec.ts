@@ -100,3 +100,29 @@ test("messages: conversations by station, and one sent (queued: waits for APRS m
   expect(await state(page, (f) => f.aprs.readAt as number)).toBe(readAt);
   await shot(page, info, "aprs-05-sent");
 });
+
+test("messages: one deleted on the radio (MSG_DELETE, LINK-52) after an in-page confirm; the list reads again", async ({ page }, info) => {
+  await openConsole(page, "aprs-messages");
+  await connect(page);
+  await loaded(page);
+  if (onRadio()) return; // a radio's messages are its owner's
+  const threads = page.getByRole("navigation", { name: "Conversations" }).locator("[data-peer]");
+  const n = await state(page, (f) => f.aprs.messages.length as number);
+  await threads.filter({ hasText: "VE3JLH" }).click();
+  const conv = page.getByRole("region", { name: "Conversation with VE3JLH" });
+  const msg = conv.locator("li").filter({ hasText: "73, thanks for the QSO" });
+  await msg.hover();
+  await msg.getByRole("button", { name: "Delete message" }).click();
+  // Asked in the page, never a browser dialog; Keep leaves it.
+  const ask = msg.getByRole("group", { name: "Delete this message?" });
+  await expect(ask).toContainText("can't be undone");
+  await shot(page, info, "aprs-06-delete-ask");
+  await ask.getByRole("button", { name: "Keep" }).click();
+  await expect(ask).toHaveCount(0);
+  await msg.hover();
+  await msg.getByRole("button", { name: "Delete message" }).click();
+  await msg.getByRole("group", { name: "Delete this message?" }).getByRole("button", { name: "Delete" }).click();
+  await expect.poll(() => state(page, (f) => f.aprs.messages.length as number)).toBe(n - 1);
+  await expect(threads.filter({ hasText: "VE3JLH" })).toHaveCount(0);
+  await expect(page.getByRole("note")).toContainText("Deleted from the radio.");
+});

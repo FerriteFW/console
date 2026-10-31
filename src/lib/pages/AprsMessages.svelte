@@ -2,7 +2,8 @@
   // APRS › Messages: the radio's messages in and out (APRS-13; MSGS, LINK-44) as conversations, one per station,
   // kept current by events (LINK-46). Compose queues one on the radio (MSG_SEND, LINK-45), which sends it by its own
   // rules: now if APRS mode is on, else when it is turned on. States follow from the radio (pending, retrying,
-  // acked, failed, rejected, cancelled); one still being tried can be stopped (LINK-49, APRS-13.1).
+  // acked, failed, rejected, cancelled); one still being tried can be stopped (LINK-49, APRS-13.1). Any one can be
+  // deleted on the radio (LINK-52), after an in-page "Delete?" on that message.
   import { ago, aprs, when, type MsgRow } from "../aprs.svelte";
   import { radio } from "../radio.svelte";
   import { route } from "../route.svelte";
@@ -14,6 +15,9 @@
   let note = $state("");
   let sendError = $state("");
   let sending = $state(false);
+  /** The message asking "Delete?" (by its row id), and one being deleted. */
+  let asking = $state<number | null>(null);
+  let deleting = $state<number | null>(null);
   const connected = $derived(radio.phase === "connected");
 
   $effect(() => aprs.use());
@@ -58,6 +62,20 @@
       note = "Stopped: it stays, cancelled.";
     } catch (err) {
       sendError = (err as Error).message;
+    }
+  }
+
+  /** LINK-52: one message off the radio; the conversation is read again. */
+  async function remove(m: MsgRow) {
+    note = sendError = "";
+    deleting = m.id;
+    try {
+      await aprs.remove(m);
+      note = "Deleted from the radio.";
+    } catch (err) {
+      sendError = (err as Error).message;
+    } finally {
+      deleting = asking = null;
     }
   }
 
@@ -121,7 +139,17 @@
                 {#if !m.inbound && (m.state === "pending" || m.state === "retrying")}
                   <button class="stop" disabled={!connected} onclick={() => stop(m)} title="No more tries; it stays, cancelled">Stop sending</button>
                 {/if}
+                {#if asking !== m.id}
+                  <button class="del" disabled={!connected || deleting !== null} onclick={() => (asking = m.id)} aria-label="Delete message" title="Delete this message on the radio">Delete</button>
+                {/if}
               </div>
+              {#if asking === m.id}
+                <div class="ask" role="group" aria-label="Delete this message?">
+                  <span>Delete it on the radio? This can't be undone.</span>
+                  <button class="btn quiet sm" onclick={() => (asking = null)} disabled={deleting === m.id}>Keep</button>
+                  <button class="btn danger sm" onclick={() => remove(m)} disabled={deleting === m.id}>{deleting === m.id ? "Deleting…" : "Delete"}</button>
+                </div>
+              {/if}
             </li>
           {/each}
         </ol>
@@ -136,7 +164,7 @@
         <span class="dim left" class:over={left < 0}>{left}</span>
         <button class="btn primary" type="submit" disabled={!connected || sending || !to.trim() || !text}>Send</button>
       </form>
-      {#if note}<p class="note" role="note">{note} The radio sends it by its own rules (path, power, retries); Dry TX holds the PA if it's on.</p>{/if}
+      {#if note}<p class="note" role="note">{note}{#if note.startsWith("Queued")} The radio sends it by its own rules (path, power, retries); Dry TX holds the PA if it's on.{/if}</p>{/if}
       {#if sendError}<p class="pg-banner">{sendError}</p>{/if}
     </section>
   </div>
@@ -260,6 +288,58 @@
   }
   .stop:hover:not(:disabled) {
     color: var(--text);
+  }
+  .del {
+    margin-left: auto;
+    font: inherit;
+    font-size: 11px;
+    color: var(--sub);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 1px 6px;
+    cursor: pointer;
+    opacity: 0;
+  }
+  .stop + .del {
+    margin-left: 4px;
+  }
+  li:hover .del,
+  .del:focus-visible {
+    opacity: 1;
+  }
+  .del:hover:not(:disabled) {
+    color: var(--red);
+    border-color: var(--red);
+  }
+  @media (hover: none) {
+    .del {
+      opacity: 1;
+    }
+  }
+  .ask {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+  }
+  .ask span {
+    flex: 1;
+    min-width: 140px;
+  }
+  .sm {
+    padding: 2px 10px;
+    font-size: 12px;
+  }
+  .btn.danger {
+    color: var(--red);
+  }
+  .btn.danger:hover:not(:disabled) {
+    border-color: var(--red);
   }
   .compose {
     display: grid;
