@@ -51,7 +51,7 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 1. Fixed sets › FRS › Add 22 into a new zone. Green rows, one new zone. Write; check the zone on the radio.
 2. Airports › From radio: the radio's GPS fix (or fixed position) fills the place.
 3. Pick the nearest airport, add. AM, RX only rows. Write; PTT on one does nothing.
-4. Canadian sites (TAFL): filter, add a group. RX only, NFM rows.
+4. Licensed sites: filter, add a group. RX only rows, NFM or FM as listed. Near a border, both countries list. Save for offline once.
 5. Undo edits if you don't want them.
 
 ## Desktop app (macOS)

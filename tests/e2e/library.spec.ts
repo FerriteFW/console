@@ -1,7 +1,12 @@
 // Add channels (the channel library): a fixed set into a new zone, written to the radio and read back; airports
-// near a typed place as AM, RX-only rows; Canadian TAFL sites near it. The write test runs on the simulator only:
-// on a radio it would add 22 channels (FERRITE_E2E_LIBRARY_WRITE=1 lets it, at your own risk).
-import { type Page } from "@playwright/test";
+// near a typed place as AM, RX-only rows; licensed sites (Canada and the US) near it. The write test runs on the
+// simulator only: on a radio it would add 22 channels (FERRITE_E2E_LIBRARY_WRITE=1 lets it, at your own risk).
+// Licensed sites never use the network: data.ferritefw.dev is served from tests/e2e/fixtures/sitedata (a few tiny
+// tiles), its zips made from them here.
+import { type Page, type Route } from "@playwright/test";
+import { readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createZip } from "../../src/lib/zip.ts";
 import { connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
 
 let page: Page;
@@ -24,6 +29,46 @@ async function openLibrary(tab: string) {
   await page.getByRole("button", { name: "Add from library…" }).click();
   await expect(lib()).toBeVisible();
   await lib().getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
+}
+
+const DATA = "https://data.ferritefw.dev";
+const FIX = new URL("./fixtures/sitedata/", import.meta.url);
+
+/** A source's fixture tiles as its zip. */
+async function fixtureZip(src: string): Promise<Buffer> {
+  const dir = new URL(`${src}/`, FIX);
+  const entries = readdirSync(dir).map((f) => ({ name: `${src}/${f}`, data: new Uint8Array(readFileSync(new URL(f, dir))) }));
+  return Buffer.from(await (await createZip(entries)).arrayBuffer());
+}
+
+/** data.ferritefw.dev from the fixtures; the top index carries the zips' real sizes and SHA-256. Returns the paths asked. */
+async function serveData(p: Page): Promise<string[]> {
+  const zips = new Map<string, Buffer>();
+  for (const src of ["tafl", "fcc"]) zips.set(`${src}.zip`, await fixtureZip(src));
+  const asked: string[] = [];
+  await p.route(`${DATA}/**`, async (route: Route) => {
+    const path = new URL(route.request().url()).pathname.slice(1);
+    asked.push(path);
+    const zip = zips.get(path);
+    if (zip) return route.fulfill({ body: zip, contentType: "application/zip", headers: { "Access-Control-Allow-Origin": "*" } });
+    let body: string;
+    try {
+      body = readFileSync(new URL(path, FIX), "utf8");
+    } catch {
+      return route.fulfill({ status: 404, body: "Not Found", headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    if (path === "index.json") {
+      const top = JSON.parse(body);
+      for (const s of top.sources) {
+        const z = zips.get(s.bundle)!;
+        s.bundle_bytes = z.length;
+        s.bundle_sha256 = createHash("sha256").update(z).digest("hex");
+      }
+      body = JSON.stringify(top);
+    }
+    return route.fulfill({ body, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" } });
+  });
+  return asked;
 }
 
 /** Each group its own page, connected and read (the groups can run on two workers, each with its own simulator). */
@@ -132,21 +177,53 @@ test.describe.serial("near a place", () => {
     await shot(page, info, "35-library-airport-rows");
   });
 
-  test("TAFL: Canadian sites near the place, RX only", async ({}, info) => {
-    await openLibrary("Canadian sites");
-    await expect(lib().getByLabel("Filter TAFL entries")).toBeVisible({ timeout: 30_000 });
-    await lib().getByLabel("Filter TAFL entries").fill("ferries");
-    const group = lib().getByRole("checkbox", { name: /^Group / }).first();
-    await expect(group).toBeVisible();
-    await group.check();
-    await shot(page, info, "36-library-tafl");
+  test("licensed sites: Canada and the US near the place, modes, digital hidden, positions kept", async ({}, info) => {
+    const asked = await serveData(page);
+    await openLibrary("Licensed sites");
+    const filter = lib().getByLabel("Filter licensed sites");
+    await expect(filter).toBeVisible({ timeout: 30_000 });
+    // Near Vancouver: CN89 is split, so its subsquares come (je, ke), and the US square south of it (CN88).
+    expect(asked.filter((p) => !p.endsWith("index.json")).sort()).toEqual(["fcc/CN88.json", "tafl/CN89je.json", "tafl/CN89ke.json"]);
+    const list = lib().getByLabel("Licensed sites near the place");
+    await expect(list).toContainText("point roberts"); // US
+    await expect(list).toContainText("richmond works"); // Canada
+    // Both sources' attribution lines.
+    await expect(lib()).toContainText("Open Government Licence – Canada");
+    await expect(lib()).toContainText("Federal Communications Commission");
+    // Digital only is hidden until asked for.
+    await expect(list).not.toContainText("ecomm");
+    const dig = lib().getByRole("checkbox", { name: /Show digital only \(1\)/ });
+    await dig.check();
+    await expect(list).toContainText("ecomm");
+    await expect(list).toContainText("Digital");
+    await dig.uncheck();
+    await expect(list).not.toContainText("ecomm");
+
+    // BC Ferries (3 frequencies, NFM, one a mobile's) and the fire department (FM).
+    await filter.fill("ferries");
+    await lib().getByRole("button", { name: "All shown" }).click();
+    await list.getByRole("button", { name: /3 entries/ }).click();
+    await expect(list.locator(".tag.mob")).toHaveCount(1);
+    await shot(page, info, "36-library-sites");
+    await filter.fill("fire");
+    await lib().getByRole("button", { name: "All shown" }).click();
+    await expect(lib().getByRole("button", { name: "Add 4 entries" })).toBeEnabled();
     const before = await state(page, (f) => f.channels.table.channels.length);
-    await lib().getByRole("button", { name: /^Add \d+ entr(y|ies)$/ }).click();
+    await lib().getByRole("button", { name: "Add 4 entries" }).click();
     await expect(lib()).toHaveCount(0);
-    const added = await state(page, (f) => f.channels.table.channels.slice(-200).filter((c: any) => c.rx_only && c.mode === "NFM"));
-    expect(await state(page, (f) => f.channels.table.channels.length)).toBeGreaterThan(before);
-    expect(added.length).toBeGreaterThan(0);
-    await shot(page, info, "37-library-tafl-rows");
+    const added = await state(page, (f) => f.channels.table.channels.filter((c: any) => c.name === "bc ferries" || c.name === "vancouver fire"));
+    expect(await state(page, (f) => f.channels.table.channels.length)).toBe(before + 4);
+    const by = (name: string) => added.filter((c: any) => c.name === name);
+    expect(by("bc ferries").map((c: any) => [c.rx, c.mode, c.rx_only]).sort()).toEqual([
+      ["156.80000", "NFM", true],
+      ["159.25500", "NFM", true],
+      ["163.25500", "NFM", true],
+    ]);
+    expect(by("vancouver fire").map((c: any) => [c.rx, c.mode])).toEqual([["154.43000", "FM"]]);
+    // The site's licensed position goes with the channel (LINK-53).
+    expect(by("vancouver fire")[0].pos).toEqual([49.205, -123.21]);
+    expect(by("bc ferries").find((c: any) => c.rx === "156.80000").pos).toEqual([49.195, -123.18]);
+    await shot(page, info, "37-library-sites-rows");
     // Leave the table as read (nothing of this test is written).
     await toolbar().getByRole("button", { name: /^File/ }).click();
     await page.getByRole("menuitem", { name: /^Discard unwritten changes/ }).click();
@@ -158,5 +235,43 @@ test.describe.serial("near a place", () => {
     await expect(lib()).toContainText("Repeaters: not yet");
     await shot(page, info, "38-library-repeaters");
     await lib().getByRole("button", { name: "Close" }).click();
+  });
+});
+
+// Licensed sites without a radio: the data not reachable, and a source saved for offline then read without the
+// network. Each test its own page (its own Cache Storage).
+test.describe("licensed sites, no radio", () => {
+  test("data not reachable: says so, no crash", async ({ browser }, info) => {
+    const p = await browser.newPage();
+    await p.route(`${DATA}/**`, (r) => r.abort("internetdisconnected"));
+    await openConsole(p, "channels");
+    await p.getByRole("button", { name: "Add from library…" }).first().click();
+    const d = p.getByRole("dialog", { name: "Add channels" });
+    await d.getByRole("tab", { name: /^Licensed sites/ }).click();
+    await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
+    await expect(d.getByText("Licensed sites aren't available right now.")).toBeVisible();
+    await expect(d).toContainText("Can't reach https://data.ferritefw.dev");
+    await shot(p, info, "39-library-sites-offline");
+    await p.close();
+  });
+
+  test("save for offline: the zip checked and kept, then read without the network", async ({ browser }, info) => {
+    const p = await browser.newPage();
+    await serveData(p);
+    await openConsole(p, "channels");
+    await p.getByRole("button", { name: "Add from library…" }).first().click();
+    const d = p.getByRole("dialog", { name: "Add channels" });
+    await d.getByRole("tab", { name: /^Licensed sites/ }).click();
+    const save = d.getByRole("button", { name: /^Save Canada for offline \(\d+ KB\)$/ });
+    await expect(save).toBeVisible();
+    await save.click();
+    await expect(d.getByText("Saved for offline")).toBeVisible();
+    await shot(p, info, "40-library-sites-saved");
+    // The network gone: Ottawa (never looked at) comes from the saved copy.
+    await p.unroute(`${DATA}/**`);
+    await p.route(`${DATA}/**`, (r) => r.abort("internetdisconnected"));
+    await d.getByLabel("Place: latitude, longitude or grid square").fill("45.42, -75.70");
+    await expect(d.getByLabel("Licensed sites near the place")).toContainText("ottawa hydro");
+    await p.close();
   });
 });

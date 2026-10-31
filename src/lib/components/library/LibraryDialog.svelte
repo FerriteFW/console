@@ -1,17 +1,17 @@
 <script lang="ts">
-  // "Add channels": the channel library beside CHIRP import. Fixed sets, airports and TAFL sites near a place
-  // (ported from NeonPlug); repeaters not yet (see the tab). Added channels go into the table as new rows, checked
+  // "Add channels": the channel library beside CHIRP import. Fixed sets, airports and licensed sites near a
+  // place (ported from NeonPlug); repeaters not yet (see the tab). Added channels go into the table as new rows, checked
   // by ferrite's own code; Write then shows them in the diff as usual.
   import { library } from "../../library.svelte";
   import FixedTab from "./FixedTab.svelte";
   import AirportsTab from "./AirportsTab.svelte";
-  import TaflTab from "./TaflTab.svelte";
+  import SitesTab from "./SitesTab.svelte";
   import { channels } from "../../channels.svelte";
 
   const tabs = [
     { id: "fixed", label: "Fixed sets", sub: "FRS, GMRS, MURS, PMR446, marine, weather, resource roads, calling" },
     { id: "airports", label: "Airports", sub: "Airband near a place, AM, RX only" },
-    { id: "tafl", label: "Canadian sites (TAFL)", sub: "Licensed VHF and UHF near a place" },
+    { id: "sites", label: "Licensed sites", sub: "Canada and the US: VHF and UHF near a place" },
     { id: "repeaters", label: "Repeaters", sub: "Not yet" },
   ] as const;
 
@@ -48,8 +48,8 @@
             <FixedTab onadded={close} />
           {:else if library.tab === "airports"}
             <AirportsTab onadded={close} />
-          {:else if library.tab === "tafl"}
-            <TaflTab onadded={close} />
+          {:else if library.tab === "sites"}
+            <SitesTab onadded={close} />
           {:else}
             <div class="stub">
               <h3>Repeaters: not yet</h3>

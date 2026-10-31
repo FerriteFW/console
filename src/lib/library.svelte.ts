@@ -1,7 +1,8 @@
-// The channel library ("Add channels"), ported from NeonPlug: fixed sets, airports near a place, and Canadian
-// licensed sites (TAFL) near a place. The data is in public/data/ (tools/library/README.md says where it comes
-// from); the airport and TAFL files are big, so each loads only when its tab first opens. Turning entries into
-// channels (numbers, zones, names, ferrite's own checks) is the core's (core/src/library.rs).
+// The channel library ("Add channels"), ported from NeonPlug: fixed sets, airports near a place, and licensed sites
+// (Canada and the US) near a place. Fixed sets and airports are in public/data/ (tools/library/README.md says where
+// they come from); the airport file is big, so it loads only when its tab first opens. Licensed sites come tiled
+// from data.ferritefw.dev (sites.svelte.ts, sitedata.ts). Turning entries into channels (numbers, zones, names,
+// ferrite's own checks) is the core's (core/src/library.rs).
 import { libraryAdd, parsePlace, type LibraryAdded, type LibraryItem, type Place } from "./core";
 import { channels } from "./channels.svelte";
 import { radio } from "./radio.svelte";
@@ -18,8 +19,6 @@ export type FixedSet = {
 };
 /** An airport as airports.json holds it: ICAO, [lat, lon], VHF frequencies in kHz with a type code. */
 export type Airport = { c: string; l: [number, number]; f: (number | [number, string])[] | [number, string] | number };
-/** A TAFL entry: a short licensee name, [lat, lon], the frequency in kHz. */
-export type Tafl = { c: string; l: [number, number]; f: number };
 
 export type Loaded<T> = { rows: T[]; coords: Float64Array };
 type Load = { label: string; done: number; total: number };
@@ -61,13 +60,12 @@ function withCoords<T extends { l: [number, number] }>(rows: T[]): Loaded<T> {
 
 class Library {
   open = $state(false);
-  tab = $state<"fixed" | "airports" | "tafl" | "repeaters">("fixed");
+  tab = $state<"fixed" | "airports" | "sites" | "repeaters">("fixed");
   fixed = $state<FixedSet[] | null>(null);
   airports = $state.raw<Loaded<Airport> | null>(null);
-  tafl = $state.raw<Loaded<Tafl> | null>(null);
   loading = $state<Load | null>(null);
   error = $state("");
-  /** The place for Airports and TAFL, as typed, and what it parses to. */
+  /** The place for Airports and licensed sites, as typed, and what it parses to. */
   placeText = $state("");
   placeFrom = $state("");
   get place(): Place | null {
@@ -102,16 +100,6 @@ class Library {
     try {
       const rows = await this.once("airports", () => fetchJson<Airport[]>("airports.json", (p) => (this.loading = p)));
       this.airports = withCoords(rows);
-    } catch (e) {
-      this.error = (e as Error).message;
-    }
-  }
-
-  async loadTafl() {
-    if (this.tafl) return;
-    try {
-      const rows = await this.once("tafl", () => fetchJson<Tafl[]>("tafl.json", (p) => (this.loading = p)));
-      this.tafl = withCoords(rows);
     } catch (e) {
       this.error = (e as Error).message;
     }

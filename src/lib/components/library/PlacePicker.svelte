@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The place and radius for Airports and TAFL: typed (lat,lon or a grid square) or from the radio (its GPS fix,
+  // The place and radius for Airports and licensed sites: typed (lat,lon or a grid square) or from the radio (its GPS fix,
   // else its fixed position).
   import { library } from "../../library.svelte";
   import { radio } from "../../radio.svelte";

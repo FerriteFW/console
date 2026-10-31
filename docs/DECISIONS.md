@@ -65,14 +65,19 @@
 ## Channel library (Add channels)
 
 - Ported from NeonPlug (Alex's app): fixed sets, airports and TAFL. Data and generators copied, small fixes.
-- The data is static files in `public/data/`. Big files load only when their tab opens.
+- Fixed sets and airports are static files in `public/data/`. Airports load only when their tab opens.
+- Licensed sites (Canada's TAFL, the US FCC's ULS) come from FerriteFW/data at data.ferritefw.dev, tiled by grid square (Oct 30, 2026).
+  Only the tiles a place's circle touches are fetched. They stay in Cache Storage (web and desktop alike), keyed by the source's build date.
+  A newer build is offered as "Update channel data", never fetched by itself.
+  "Save for offline" in the tab's footer downloads a source's zip, checks its SHA-256, and keeps every tile.
+- Each site's mode comes from the data: NFM or FM. Digital only is hidden unless asked for; unknown takes the tab's mode. Mobile frequencies are kept and marked.
 - Entries become channels in the core (`library.rs`), not in the UI.
 - Every channel goes through ferrite's own check. If ferrite refuses TX, it is retried as RX only and said so.
 - A set takes the first run of free numbers that holds it all; else the gaps.
 - Zones match by name, or a new one is made at the end.
 - An entry the table already holds (same RX, TX, mode, zone) is skipped.
 - Airband is AM and RX only. Names are "ICAO TYPE", with the MHz when an airport has two of a type.
-- TAFL defaults to RX only and NFM. These are other licensees' channels.
+- Licensed sites default to RX only. These are other licensees' channels.
 - Places: lat,lon, a grid square (centre, as ferrite's GPS-21), or the radio's `gps` / `get 0 6 9` answer.
 - Distances in km (great circle).
 - No repeaters yet: NeonPlug's list is RadioID's DMR list. No tones, no coordinates, mostly DMR only.

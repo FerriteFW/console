@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  /** Where added channels go: one zone per group (airport, TAFL name), a new zone, an existing one, or none. */
+  /** Where added channels go: one zone per group (airport, licensee name), a new zone, an existing one, or none. */
   export type Target = { kind: "each" | "new" | "existing" | "none"; name: string; existing: number };
   /** The zone's name for a channel of `group`, by the target. */
   export function zoneName(t: Target, group: string, zones: { name: string }[]): string {
