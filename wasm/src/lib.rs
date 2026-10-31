@@ -512,7 +512,7 @@ pub fn near(lat: f64, lon: f64, radius_km: f64, coords: &[f64], limit: usize) ->
         .collect()
 }
 
-/// An airport frequency's type name from its code (or its frequency when there's none).
+/// An airport frequency's type name from OurAirports' type string (or its frequency when there's none).
 #[wasm_bindgen]
 pub fn airport_type(code: &str, khz: u32) -> String {
     library::airport_type(code, khz)

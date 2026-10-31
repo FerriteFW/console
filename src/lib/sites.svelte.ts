@@ -1,20 +1,20 @@
-// Licensed sites for the channel library's tab (Canada's TAFL and the US FCC's ULS, from data.ferritefw.dev
-// through sitedata.ts): the sites near the library's place, the sources' attribution and dates, updates the server
-// offers, and each source's offline copy ("Save for offline").
+// Data from data.ferritefw.dev (through sitedata.ts) for the channel library's tabs: licensed sites (Canada's TAFL and
+// the US FCC's ULS) and airports (OurAirports). Per tab: the rows near the library's place, the sources' attribution
+// and dates, updates the server offers, and each source's offline copy ("Save for offline"). One client for both,
+// so the indexes and tiles are fetched and kept once.
 import { untrack } from "svelte";
 import { SiteData, type NearResult, type Site, type TopIndex, type TopSource } from "./sitedata.ts";
 
 /** Short names for the sources the data repo publishes; another source shows its title. */
-const NAMES: Record<string, string> = { tafl: "Canada", fcc: "US" };
-/** The sources to ask for when the top index can't be read (the cache may still hold their tiles). */
-const KNOWN = ["tafl", "fcc"];
+const NAMES: Record<string, string> = { tafl: "Canada", fcc: "US", airports: "Airports" };
+const client = new SiteData();
 
 export const sourceName = (src: string, title = src) => NAMES[src] ?? title;
 
 export type Near = NearResult & { coords: Float64Array; key: string };
 
 export class Sites {
-  client = new SiteData();
+  client = client;
   top = $state.raw<TopIndex | null>(null);
   /** Why the top index didn't load (offline, not published yet). */
   topError = $state("");
@@ -33,9 +33,18 @@ export class Sites {
   private last: [number, number, number] | null = null;
   private started: Promise<void> | null = null;
 
+  /**
+   * `known`: this tab's sources (the data repo publishes others for other tabs), also what to ask for when the top
+   * index can't be read (the cache may still hold their tiles).
+   */
+  constructor(readonly known: string[]) {}
+
   get sources(): string[] {
-    // The licensed sites only: the data repo also publishes other sources (airports) for other tabs.
-    return this.top?.sources.map((s) => s.source).filter((s) => KNOWN.includes(s)) ?? KNOWN;
+    return this.top?.sources.map((s) => s.source).filter((s) => this.known.includes(s)) ?? this.known;
+  }
+  /** This tab's sources as the top index lists them (the footer's). */
+  get listed(): TopSource[] {
+    return this.top?.sources.filter((s) => this.known.includes(s.source)) ?? [];
   }
   source(src: string): TopSource | undefined {
     return this.top?.sources.find((s) => s.source === src);
@@ -135,4 +144,7 @@ export class Sites {
   }
 }
 
-export const sites = new Sites();
+/** Licensed sites (the Licensed sites tab). */
+export const sites = new Sites(["tafl", "fcc"]);
+/** Airports (the Airports tab). */
+export const airportSites = new Sites(["airports"]);

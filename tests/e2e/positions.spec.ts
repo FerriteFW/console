@@ -5,6 +5,7 @@
 import { type Page } from "@playwright/test";
 import { join } from "node:path";
 import { connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
+import { serveData } from "./sitedata";
 
 let page: Page;
 const long = () => (onRadio() ? 120_000 : 30_000);
@@ -170,6 +171,7 @@ test.describe.serial("imports carry positions", () => {
   });
 
   test("library: airports carry the airport's position", async () => {
+    await serveData(page);
     await page.getByRole("button", { name: "Add from library…" }).first().click();
     const lib = page.getByRole("dialog", { name: "Add channels" });
     await lib.getByRole("tab", { name: /^Airports/ }).click();

@@ -1,7 +1,6 @@
 // The channel library ("Add channels"), ported from NeonPlug: fixed sets, airports near a place, and licensed sites
-// (Canada and the US) near a place. Fixed sets and airports are in public/data/ (tools/library/README.md says where
-// they come from); the airport file is big, so it loads only when its tab first opens. Licensed sites come tiled
-// from data.ferritefw.dev (sites.svelte.ts, sitedata.ts). Turning entries into channels (numbers, zones, names,
+// (Canada and the US) near a place. Fixed sets are in public/data/ (tools/library/README.md says where they come
+// from). Airports and licensed sites come tiled from data.ferritefw.dev (sites.svelte.ts, sitedata.ts). Turning entries into channels (numbers, zones, names,
 // ferrite's own checks) is the core's (core/src/library.rs).
 import { libraryAdd, parsePlace, type LibraryAdded, type LibraryItem, type Place } from "./core";
 import { channels } from "./channels.svelte";
@@ -14,56 +13,25 @@ export type FixedSet = {
   description: string;
   defaultPower: string;
   defaultBandwidth: string;
+  /** "AM" for airband; else ("Analog") NFM or FM by the bandwidth. */
+  defaultMode?: string;
   rxOnly?: boolean;
   frequencies: FixedFreq[];
 };
-/** An airport as airports.json holds it: ICAO, [lat, lon], VHF frequencies in kHz with a type code. */
-export type Airport = { c: string; l: [number, number]; f: (number | [number, string])[] | [number, string] | number };
-
-export type Loaded<T> = { rows: T[]; coords: Float64Array };
-type Load = { label: string; done: number; total: number };
 
 const url = (name: string) => `${import.meta.env.BASE_URL}data/${name}`;
 
-/** A JSON file from public/data, with progress (bytes). */
-async function fetchJson<T>(name: string, progress: (p: Load) => void): Promise<T> {
+/** A JSON file from public/data. */
+async function fetchJson<T>(name: string): Promise<T> {
   const r = await fetch(url(name));
-  if (!r.ok || !r.body) throw new Error(`${name}: ${r.status} ${r.statusText}`);
-  const total = Number(r.headers.get("Content-Length") ?? 0);
-  const reader = r.body.getReader();
-  const parts: Uint8Array[] = [];
-  let done = 0;
-  for (;;) {
-    const { done: end, value } = await reader.read();
-    if (end) break;
-    parts.push(value);
-    done += value.length;
-    progress({ label: `Loading ${name}`, done, total });
-  }
-  const all = new Uint8Array(done);
-  let o = 0;
-  for (const p of parts) {
-    all.set(p, o);
-    o += p.length;
-  }
-  return JSON.parse(new TextDecoder().decode(all)) as T;
-}
-
-function withCoords<T extends { l: [number, number] }>(rows: T[]): Loaded<T> {
-  const coords = new Float64Array(rows.length * 2);
-  rows.forEach((r, i) => {
-    coords[2 * i] = r.l[0];
-    coords[2 * i + 1] = r.l[1];
-  });
-  return { rows, coords };
+  if (!r.ok) throw new Error(`${name}: ${r.status} ${r.statusText}`);
+  return (await r.json()) as T;
 }
 
 class Library {
   open = $state(false);
   tab = $state<"fixed" | "airports" | "sites" | "repeaters">("fixed");
   fixed = $state<FixedSet[] | null>(null);
-  airports = $state.raw<Loaded<Airport> | null>(null);
-  loading = $state<Load | null>(null);
   error = $state("");
   /** The place for Airports and licensed sites, as typed, and what it parses to. */
   placeText = $state("");
@@ -79,7 +47,7 @@ class Library {
   private once<T>(key: string, f: () => Promise<T>): Promise<T> {
     let p = this.pending.get(key) as Promise<T> | undefined;
     if (!p) {
-      p = f().finally(() => (this.loading = null));
+      p = f();
       p.catch(() => this.pending.delete(key));
       this.pending.set(key, p);
     }
@@ -89,17 +57,7 @@ class Library {
   async loadFixed() {
     if (this.fixed) return;
     try {
-      this.fixed = await this.once("fixed", () => fetchJson<FixedSet[]>("fixed-channels.json", () => {}));
-    } catch (e) {
-      this.error = (e as Error).message;
-    }
-  }
-
-  async loadAirports() {
-    if (this.airports) return;
-    try {
-      const rows = await this.once("airports", () => fetchJson<Airport[]>("airports.json", (p) => (this.loading = p)));
-      this.airports = withCoords(rows);
+      this.fixed = await this.once("fixed", () => fetchJson<FixedSet[]>("fixed-channels.json"));
     } catch (e) {
       this.error = (e as Error).message;
     }

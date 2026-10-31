@@ -10,6 +10,7 @@
   import { MODE_DIGITAL, MODE_FM, MODE_NFM } from "../../sitedata";
   import { near, taflGroups, type LibraryItem } from "../../core";
   import PlacePicker from "./PlacePicker.svelte";
+  import DataFooter from "./DataFooter.svelte";
   import ZoneTarget, { zoneName, type Target } from "./ZoneTarget.svelte";
 
   let { onadded }: { onadded: () => void } = $props();
@@ -83,7 +84,6 @@
   const mhz = (f: number) => (f / 2000).toFixed(4).replace(/0$/, "");
   const modeLabel = (m: number) => (m === MODE_NFM ? "NFM" : m === MODE_FM ? "FM" : m === MODE_DIGITAL ? "Digital" : "Mode ?");
   const modeOf = (m: number): "NFM" | "FM" => (m === MODE_NFM ? "NFM" : m === MODE_FM ? "FM" : mode);
-  const mb = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
   const MOBILE = "A mobile's frequency: often a repeater's input, or the centre of a mobile area";
 
   function add() {
@@ -121,7 +121,7 @@
 {#if !library.place}
   <p class="sub">
     {#if sites.top}
-      Licensed VHF and UHF sites: {sites.top.sources.map((s) => `${sourceName(s.source, s.title)} ${s.rows.toLocaleString()}`).join(", ")}. Give a place to list the ones near it.
+      Licensed VHF and UHF sites: {sites.listed.map((s) => `${sourceName(s.source, s.title)} ${s.rows.toLocaleString()}`).join(", ")}. Give a place to list the ones near it.
     {:else if sites.topError}
       Licensed VHF and UHF sites in Canada and the US. Give a place to list the ones near it. (The data isn't reachable right now: {sites.topError}.)
     {:else}
@@ -196,31 +196,7 @@
   <span class="spacer"></span>
   <button class="btn primary" disabled={!picked.size} onclick={add}>Add {picked.size} {picked.size === 1 ? "entry" : "entries"}</button>
 </div>
-<footer class="data" aria-label="Channel data">
-  {#each sites.top?.sources ?? [] as s (s.source)}
-    {@const name = sourceName(s.source, s.title)}
-    {@const saving = sites.saving?.src === s.source ? sites.saving : null}
-    <div class="src">
-      <span><b>{name}</b> · data of {s.source_date}</span>
-      {#if sites.newer[s.source]}
-        <button class="btn quiet sm" disabled={!!sites.saving} onclick={() => sites.update(s.source)} title={sites.offline[s.source] ? `Downloads ${name} again (${mb(s.bundle_bytes)})` : "Loads the new data as you look"}>
-          Update channel data ({sites.newer[s.source]})
-        </button>
-      {/if}
-      {#if saving}
-        <span class="sub" role="status">Saving {name}… {saving.total ? Math.round((100 * saving.done) / saving.total) : 0}% of {mb(saving.total)}</span>
-      {:else if sites.offline[s.source]}
-        <span class="sub">Saved for offline</span>
-      {:else if sites.canKeep}
-        <button class="btn quiet sm" disabled={!!sites.saving} onclick={() => sites.save(s.source)} title="Downloads all of {name}'s sites once, so they work without a connection">
-          Save {name} for offline ({mb(s.bundle_bytes)})
-        </button>
-      {/if}
-    </div>
-    {#if !library.place || here.has(s.source)}<p class="attr">{s.attribution}</p>{/if}
-  {/each}
-  {#if sites.saveError}<p class="warn">{sites.saveError}</p>{/if}
-</footer>
+<DataFooter data={sites} {here} />
 
 <style>
   .head {
@@ -324,27 +300,6 @@
     align-items: center;
     border-top: 1px solid var(--line);
     padding-top: 12px;
-  }
-  .data {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: 11px;
-    color: var(--sub);
-  }
-  .src {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 10px;
-    align-items: center;
-  }
-  .src .sm {
-    font-size: 11px;
-    padding: 1px 8px;
-  }
-  .attr {
-    margin: 0 0 4px;
-    line-height: 1.35;
   }
   .msg {
     display: flex;

@@ -9,7 +9,7 @@
   import { channels } from "../../channels.svelte";
 
   const tabs = [
-    { id: "fixed", label: "Fixed sets", sub: "FRS, GMRS, MURS, PMR446, marine, weather, resource roads, calling" },
+    { id: "fixed", label: "Fixed sets", sub: "FRS, GMRS, MURS, PMR446, marine, weather, airband, resource roads, calling" },
     { id: "airports", label: "Airports", sub: "Airband near a place, AM, RX only" },
     { id: "sites", label: "Licensed sites", sub: "Canada and the US: VHF and UHF near a place" },
     { id: "repeaters", label: "Repeaters", sub: "Not yet" },

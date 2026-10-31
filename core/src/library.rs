@@ -226,6 +226,9 @@ pub struct FixedSet {
     pub default_power: String,
     /// "12.5kHz" (NFM) or "25kHz" (FM).
     pub default_bandwidth: String,
+    /// "AM" makes AM channels (airband); anything else ("Analog") FM or NFM by the bandwidth.
+    #[serde(default)]
+    pub default_mode: Option<String>,
     #[serde(default)]
     pub rx_only: bool,
     pub frequencies: Vec<FixedFreq>,
@@ -247,7 +250,11 @@ pub struct FixedFreq {
 
 /// The picked channels of a fixed set (indices into its frequencies) as entries for [`add`], into `zone`.
 pub fn fixed_items(set: &FixedSet, picks: &[usize], zone: &str) -> Vec<Item> {
-    let mode = if set.default_bandwidth.starts_with("12.5") { "NFM" } else { "FM" };
+    let mode = match set.default_mode.as_deref() {
+        Some("AM") => "AM",
+        _ if set.default_bandwidth.starts_with("12.5") => "NFM",
+        _ => "FM",
+    };
     picks
         .iter()
         .filter_map(|&i| set.frequencies.get(i))
@@ -381,51 +388,114 @@ pub fn near(at: Place, radius_km: f64, coords: &[f64], limit: usize) -> Vec<(u32
 
 // ---- airports ----
 
-/// Airport frequency type codes (NeonPlug's airportdata.py) to the type's name and the short form for channel
-/// names.
-pub const AIRPORT_TYPES: [(&str, &str, &str); 33] = [
-    ("C", "CTAF", "CTAF"),
-    ("U", "UNICOM", "UNI"),
-    ("T", "TOWER", "TWR"),
-    ("G", "GROUND", "GND"),
-    ("A", "APP", "APP"),
-    ("I", "ATIS", "ATIS"),
-    ("D", "DEP", "DEP"),
-    ("M", "MISC", "MISC"),
-    ("S", "ASOW", "ASOW"),
-    ("F", "FSS", "FSS"),
-    ("R", "RADIO", "RAD"),
-    ("L", "CLD", "CLD"),
-    ("N", "INFO", "INFO"),
-    ("Z", "AFIS", "AFIS"),
-    ("Y", "A/G", "A/G"),
-    ("O", "OPS", "OPS"),
-    ("X", "RADAR", "RDR"),
-    ("P", "APRON", "APR"),
-    ("H", "ATF", "ATF"),
-    ("Q", "RCO", "RCO"),
-    ("V", "TRAFFIC", "TRF"),
-    ("W", "TMA", "TMA"),
-    ("B", "ASOS", "ASOS"),
-    ("J", "PAL", "PAL"),
-    ("K", "AAS", "AAS"),
-    ("E", "DIR", "DIR"),
-    ("AA", "A/A", "A/A"),
-    ("FC", "FCC", "FCC"),
-    ("AC", "ACP", "ACP"),
-    ("TB", "TIBA", "TIBA"),
-    ("AD", "A/D", "A/D"),
-    ("CC", "ACC", "ACC"),
-    ("RT", "ARTC", "ARTC"),
+/// Airport frequency types: the name the Airports tab shows, and the short form in channel names.
+pub const AIRPORT_TYPES: [(&str, &str); 44] = [
+    ("TOWER", "TWR"),
+    ("GROUND", "GND"),
+    ("CLEARANCE", "CLD"),
+    ("ATIS", "ATIS"),
+    ("APP", "APP"),
+    ("DEP", "DEP"),
+    ("APP/DEP", "A/D"),
+    ("ARR", "ARR"),
+    ("CENTRE", "CTR"),
+    ("RADAR", "RDR"),
+    ("DIR", "DIR"),
+    ("TERMINAL", "TML"),
+    ("TCA", "TCA"),
+    ("TMA", "TMA"),
+    ("CTAF", "CTAF"),
+    ("UNICOM", "UNI"),
+    ("MULTICOM", "MULTI"),
+    ("ATF", "ATF"),
+    ("MF", "MF"),
+    ("A/G", "A/G"),
+    ("RADIO", "RAD"),
+    ("RCO", "RCO"),
+    ("FSS", "FSS"),
+    ("FIS", "FIS"),
+    ("AFIS", "AFIS"),
+    ("INFO", "INFO"),
+    ("AAS", "AAS"),
+    ("AWOS", "AWOS"),
+    ("ASOS", "ASOS"),
+    ("VOLMET", "VOLMET"),
+    ("RAMP", "RMP"),
+    ("OPS", "OPS"),
+    ("A/A", "A/A"),
+    ("EMERG", "EMERG"),
+    ("SAFETYCOM", "SAFETY"),
+    ("TIBA", "TIBA"),
+    ("PAL", "PAL"),
+    ("PMSV", "PMSV"),
+    ("GCA", "GCA"),
+    ("PTD", "PTD"),
+    ("ACP", "ACP"),
+    ("TRAFFIC", "TRF"),
+    ("MISC", "MISC"),
+    ("AIR", "AIR"),
 ];
 
-/// A type code's name ("T" is TOWER); an unknown code as it is, or by the frequency when there is none.
-pub fn airport_type(code: &str, khz: u32) -> String {
-    if let Some(t) = AIRPORT_TYPES.iter().find(|t| t.0 == code) {
-        return t.1.into();
+/// OurAirports' type strings (the airports data's `tn`, upper case) that aren't a name above, to the name. The
+/// common ones, by how often they occur; anything else shows as it is.
+pub const AIRPORT_ALIASES: [(&str, &str); 43] = [
+    ("UNIC", "UNICOM"),
+    ("UC", "UNICOM"),
+    ("CTAF/UNICOM", "CTAF"),
+    ("TWR", "TOWER"),
+    ("TOWER PRIMARY", "TOWER"),
+    ("GND", "GROUND"),
+    ("SMC", "GROUND"),
+    ("GMC", "GROUND"),
+    ("GNDC", "GROUND"),
+    ("GRD", "GROUND"),
+    ("GRN", "GROUND"),
+    ("CLD", "CLEARANCE"),
+    ("CLR", "CLEARANCE"),
+    ("CLNC DEL", "CLEARANCE"),
+    ("DEL", "CLEARANCE"),
+    ("DELIVERY", "CLEARANCE"),
+    ("DLV", "CLEARANCE"),
+    ("D-ATIS", "ATIS"),
+    ("APPROACH", "APP"),
+    ("APPR", "APP"),
+    ("APCH", "APP"),
+    ("A/D", "APP/DEP"),
+    ("CNTR", "CENTRE"),
+    ("CTR", "CENTRE"),
+    ("CENTER", "CENTRE"),
+    ("ACC", "CENTRE"),
+    ("ACC SECTOR", "CENTRE"),
+    ("AREA CONTROL", "CENTRE"),
+    ("ARTC", "CENTRE"),
+    ("ARTCC", "CENTRE"),
+    ("RDR", "RADAR"),
+    ("TML", "TERMINAL"),
+    ("MULT", "MULTICOM"),
+    ("RDO", "RADIO"),
+    ("RFSS", "FSS"),
+    ("FIC", "FIS"),
+    ("INF", "INFO"),
+    ("INFORMATION", "INFO"),
+    ("AWOS-3", "AWOS"),
+    ("RMP", "RAMP"),
+    ("APRON", "RAMP"),
+    ("EMR", "EMERG"),
+    ("SAFETY COMM", "SAFETYCOM"),
+];
+
+/// A frequency's type name from OurAirports' type string ("TWR" is TOWER, "CNTR" CENTRE); an unknown one as it is
+/// (upper case), or by the frequency when there is none.
+pub fn airport_type(raw: &str, khz: u32) -> String {
+    let up = raw.trim().to_ascii_uppercase();
+    if let Some(t) = AIRPORT_TYPES.iter().find(|t| t.0 == up) {
+        return t.0.into();
     }
-    if !code.is_empty() {
-        return code.to_ascii_uppercase();
+    if let Some(a) = AIRPORT_ALIASES.iter().find(|a| a.0 == up) {
+        return a.1.into();
+    }
+    if !up.is_empty() {
+        return up;
     }
     match khz {
         121_500 => "EMERG".into(),
@@ -439,7 +509,7 @@ pub fn airport_type(code: &str, khz: u32) -> String {
 /// A channel name for an airport's frequency: "CYVR TWR", "KSEA ATIS", in 16 characters (the frequency's kHz
 /// added when the airport has two of one type: "CYVR TWR 119.55").
 pub fn airport_name(icao: &str, type_name: &str, khz: u32, repeat: bool) -> String {
-    let short = AIRPORT_TYPES.iter().find(|t| t.1 == type_name).map_or(type_name, |t| t.2);
+    let short = AIRPORT_TYPES.iter().find(|t| t.0 == type_name).map_or(type_name, |t| t.1);
     let mut n = format!("{icao} {short}");
     if repeat {
         let mhz = format!("{}.{:03}", khz / 1000, khz % 1000);
@@ -614,10 +684,63 @@ mod tests {
         assert_eq!(clean_zone_name("Club @ 5*"), "Club @ 5*");
         assert_eq!(airport_name("CYVR", "TOWER", 119_550, false), "CYVR TWR");
         assert_eq!(airport_name("CYVR", "TOWER", 119_550, true), "CYVR TWR 119.55");
-        assert_eq!(airport_name("KSEA", &airport_type("I", 118_000), 118_000, false), "KSEA ATIS");
-        assert_eq!(airport_type("", 121_500), "EMERG");
-        assert_eq!(airport_type("ARCAL", 122_900), "ARCAL");
+        assert_eq!(airport_name("KSEA", &airport_type("ATIS", 118_000), 118_000, false), "KSEA ATIS");
         assert!(airport_name("ABCDEFGHIJ", "TRAFFIC", 123_450, true).len() <= 16);
+    }
+
+    /// OurAirports' type strings (the airports data's `tn`) onto the types and their short forms.
+    #[test]
+    fn airport_types() {
+        let t = |raw: &str| airport_type(raw, 119_000);
+        for (raw, name) in [
+            ("TWR", "TOWER"),
+            ("GND", "GROUND"),
+            ("CLD", "CLEARANCE"),
+            ("CLNC DEL", "CLEARANCE"),
+            ("DEL", "CLEARANCE"),
+            ("UNIC", "UNICOM"),
+            ("CTAF", "CTAF"),
+            ("ATIS", "ATIS"),
+            ("D-ATIS", "ATIS"),
+            ("APP", "APP"),
+            ("A/D", "APP/DEP"),
+            ("CNTR", "CENTRE"),
+            ("ACC", "CENTRE"),
+            ("RDO", "RADIO"),
+            ("A/G", "A/G"),
+            ("ATF", "ATF"),
+            ("MF", "MF"),
+            ("RCO", "RCO"),
+            ("AWOS", "AWOS"),
+            ("ASOS", "ASOS"),
+            ("AFIS", "AFIS"),
+            ("FSS", "FSS"),
+            ("RMP", "RAMP"),
+            ("TML", "TERMINAL"),
+            ("tower", "TOWER"),
+            (" twr ", "TOWER"),
+        ] {
+            assert_eq!(t(raw), name, "{raw}");
+        }
+        // Unknown: as it is, upper case; none: by the frequency.
+        assert_eq!(t("ARCAL"), "ARCAL");
+        assert_eq!(t("melbourne centre"), "MELBOURNE CENTRE");
+        assert_eq!(airport_type("", 121_500), "EMERG");
+        assert_eq!(airport_type("", 122_800), "CTAF");
+        // Every alias lands on a type with a short form; short forms fit a name beside an ICAO code.
+        for (raw, name) in AIRPORT_ALIASES {
+            assert!(AIRPORT_TYPES.iter().any(|t| t.0 == name), "{raw} -> {name}");
+        }
+        for (name, short) in AIRPORT_TYPES {
+            assert!(short.len() <= 6, "{name}");
+        }
+        let n = |raw: &str| airport_name("CYVR", &t(raw), 118_700, false);
+        assert_eq!(n("TWR"), "CYVR TWR");
+        assert_eq!(n("CLD"), "CYVR CLD");
+        assert_eq!(n("UNIC"), "CYVR UNI");
+        assert_eq!(n("CNTR"), "CYVR CTR");
+        assert_eq!(n("A/D"), "CYVR A/D");
+        assert_eq!(n("MELBOURNE CENTRE"), "CYVR MELBOURNE C");
     }
 
     /// Every channel of every fixed set goes in as ferrite takes it (TX, or RX only where ferrite won't
@@ -652,6 +775,12 @@ mod tests {
         let wx = sets.iter().find(|s| s.name == "Weather").unwrap();
         let a = add(&fixed_items(wx, &[0], "WX"), &Set::default());
         assert!(a.channels[0].rx_only && a.channels[0].mode == "FM");
+        // Airband: AM and RX only, every channel.
+        let air = sets.iter().find(|s| s.name == "Airband").unwrap();
+        let picks: Vec<usize> = (0..air.frequencies.len()).collect();
+        let a = add(&fixed_items(air, &picks, "Airband"), &Set::default());
+        assert_eq!(a.channels.len(), air.frequencies.len());
+        assert!(a.channels.iter().all(|c| c.rx_only && c.mode == "AM"), "{:?}", a.channels);
     }
 
     #[test]

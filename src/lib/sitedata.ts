@@ -1,7 +1,7 @@
 /**
- * Licensed sites (Canada's TAFL, the US FCC's ULS) from the FerriteFW/data repo, published at
- * https://data.ferritefw.dev (its README's "Output" is the format). Each source is tiled by grid square: a place and
- * radius fetch only the tiles the circle's box touches. Tiles are decoded once and kept in memory, and kept in Cache
+ * Licensed sites (Canada's TAFL, the US FCC's ULS) and airports (OurAirports) from the FerriteFW/data repo, published
+ * at https://data.ferritefw.dev (its README's "Output" is the format). Each source is tiled by grid square (airports
+ * by 2-character field: its index's `level`): a place and radius fetch only the tiles the circle's box touches. Tiles are decoded once and kept in memory, and kept in Cache
  * Storage (the browser's and the Tauri webview's) under their URL plus the source's build date, so the next visit
  * and offline use read them from there. A newer build date is offered as an update, never fetched by itself.
  * "Save for offline" fetches a source's whole zip, checks its SHA-256 and stores every tile.
@@ -39,14 +39,26 @@ export type SourceIndex = {
   licence_url: string;
   attribution: string;
   format: string;
+  /** The tiles' grid size: 2 (fields, `CN`) or 4 (squares, `CN89`, some split into `CN89kg`). 4 when missing. */
+  level?: number;
   rows: number;
   tiles: Record<string, number>;
   split: string[];
 };
-/** A tile as published (`columnar-1`). */
-export type TileJson = { n: string[]; c: number[]; a: number[]; o: number[]; f: number[]; m: number[]; s?: number[] };
-/** A decoded tile: columns, one entry per row. `f` in half kHz. */
-export type Tile = { names: string[]; name: Uint32Array; lat: Float64Array; lon: Float64Array; f: Int32Array; m: Uint8Array; s: Uint8Array };
+/** A tile as published (`columnar-1`). `m` missing: every row unknown (airports); `tn`/`t`: the uses (airports). */
+export type TileJson = { n: string[]; c: number[]; a: number[]; o: number[]; f: number[]; m?: number[]; s?: number[]; tn?: string[]; t?: number[] };
+/** A decoded tile: columns, one entry per row. `f` in half kHz; `t` indexes `types` (-1: none). */
+export type Tile = {
+  names: string[];
+  name: Uint32Array;
+  lat: Float64Array;
+  lon: Float64Array;
+  f: Int32Array;
+  m: Uint8Array;
+  s: Uint8Array;
+  types: string[];
+  t: Int16Array;
+};
 
 /** Modes (`m`): 0 analog FM under 14 kHz, 1 analog FM 16-20 kHz, 2 digital or data only, 3 unknown. */
 export const MODE_NFM = 0;
@@ -54,14 +66,16 @@ export const MODE_FM = 1;
 export const MODE_DIGITAL = 2;
 export const MODE_UNKNOWN = 3;
 
-/** One licensed site and frequency. */
-export type Site = { src: string; name: string; lat: number; lon: number; f: number; m: number; mobile: boolean };
+/** One site and frequency (a licensed site's, an airport's). `type`: the frequency's use (airports: "TWR"), or "". */
+export type Site = { src: string; name: string; lat: number; lon: number; f: number; m: number; mobile: boolean; type: string };
 
 /** A tile's columns into rows: running sums of `a`, `o` and `f` from 0. */
 export function decodeTile(t: TileJson): Tile {
   const n = t.c.length;
-  for (const k of ["a", "o", "f", "m"] as const) if (t[k].length !== n) throw new Error(`Bad tile: column ${k} has ${t[k].length} rows, not ${n}`);
-  if (t.s && t.s.length !== n) throw new Error(`Bad tile: column s has ${t.s.length} rows, not ${n}`);
+  for (const k of ["a", "o", "f", "m", "s", "t"] as const) {
+    const col = t[k];
+    if (col && col.length !== n) throw new Error(`Bad tile: column ${k} has ${col.length} rows, not ${n}`);
+  }
   const out: Tile = {
     names: t.n,
     name: new Uint32Array(n),
@@ -70,6 +84,8 @@ export function decodeTile(t: TileJson): Tile {
     f: new Int32Array(n),
     m: new Uint8Array(n),
     s: new Uint8Array(n),
+    types: t.tn ?? [],
+    t: new Int16Array(n),
   };
   let a = 0;
   let o = 0;
@@ -82,8 +98,9 @@ export function decodeTile(t: TileJson): Tile {
     out.lat[i] = a / 1e5;
     out.lon[i] = o / 1e5;
     out.f[i] = f;
-    out.m[i] = t.m[i];
+    out.m[i] = t.m ? t.m[i] : MODE_UNKNOWN;
     out.s[i] = t.s ? t.s[i] : 0;
+    out.t[i] = t.t ? t.t[i] : -1;
   }
   return out;
 }
@@ -92,7 +109,8 @@ export function decodeTile(t: TileJson): Tile {
 export function tileSites(src: string, t: Tile): Site[] {
   const out: Site[] = new Array(t.f.length);
   for (let i = 0; i < t.f.length; i++) {
-    out[i] = { src, name: t.names[t.name[i]] ?? "", lat: t.lat[i], lon: t.lon[i], f: t.f[i], m: t.m[i], mobile: t.s[i] === 1 };
+    const ty = t.t[i];
+    out[i] = { src, name: t.names[t.name[i]] ?? "", lat: t.lat[i], lon: t.lon[i], f: t.f[i], m: t.m[i], mobile: t.s[i] === 1, type: ty >= 0 ? (t.types[ty] ?? "") : "" };
   }
   return out;
 }
@@ -107,10 +125,11 @@ function square(lonCell: number, latCell: number): string {
   );
 }
 
-/** The grid square of a place, 4 or 6 characters (`CN89`, `CN89kg`). */
-export function gridSquare(lat: number, lon: number, chars: 4 | 6 = 4): string {
+/** The grid square of a place, 2, 4 or 6 characters (`CN`, `CN89`, `CN89kg`). */
+export function gridSquare(lat: number, lon: number, chars: 2 | 4 | 6 = 4): string {
   const x = Math.min(Math.max(lon + 180, 0), 359.999999);
   const y = Math.min(Math.max(lat + 90, 0), 179.999999);
+  if (chars === 2) return String.fromCharCode(A + Math.floor(x / 20), A + Math.floor(y / 10));
   const sq = square(Math.floor(x / 2), Math.floor(y));
   if (chars === 4) return sq;
   return sq + String.fromCharCode(a + Math.floor((x % 2) * 12), a + Math.floor((y % 1) * 24));
@@ -129,17 +148,27 @@ export function circleBox(lat: number, lon: number, radiusKm: number): [number, 
 }
 
 /**
- * The tiles of `index` a circle's box touches: its 4-character squares that have a tile, and for a square in
- * `split`, the 6-character subsquares in the box that have one.
+ * The tiles of `index` a circle's box touches. Level 4 (the default): its 4-character squares that have a tile, and
+ * for a square in `split`, the 6-character subsquares in the box that have one. Level 2: its 2-character fields
+ * (20 by 10 degrees) that have a tile.
  */
-export function tilesFor(index: Pick<SourceIndex, "tiles" | "split">, lat: number, lon: number, radiusKm: number): string[] {
+export function tilesFor(index: Pick<SourceIndex, "tiles" | "split" | "level">, lat: number, lon: number, radiusKm: number): string[] {
   const [s, w, n, e] = circleBox(lat, lon, radiusKm);
-  const split = new Set(index.split);
+  const split = new Set(index.split ?? []);
   const x0 = w + 180;
   const x1 = Math.min(e + 180, 359.999999);
   const y0 = s + 90;
   const y1 = Math.min(n + 90, 179.999999);
   const out: string[] = [];
+  if (index.level === 2) {
+    for (let fy = Math.floor(y0 / 10); fy <= Math.floor(y1 / 10); fy++) {
+      for (let fx = Math.floor(x0 / 20); fx <= Math.floor(x1 / 20); fx++) {
+        const f = String.fromCharCode(A + fx, A + fy);
+        if (f in index.tiles) out.push(f);
+      }
+    }
+    return out;
+  }
   for (let lc = Math.floor(y0); lc <= Math.floor(y1); lc++) {
     for (let xc = Math.floor(x0 / 2); xc <= Math.floor(x1 / 2); xc++) {
       const sq = square(xc, lc);
@@ -286,9 +315,9 @@ export class SiteData {
     } catch (e) {
       if (!kept) throw e;
     }
-    if (server && server.index.format !== "columnar-1") {
+    if (server && (server.index.format !== "columnar-1" || ![undefined, 2, 4].includes(server.index.level))) {
       if (kept) return kept;
-      throw new Error(`${src}: format ${server.index.format} is newer than this Console reads; update Console`);
+      throw new Error(`${src}: format ${server.index.format} (level ${server.index.level ?? 4}) is newer than this Console reads; update Console`);
     }
     if (kept) {
       if (server && server.index.build_date !== kept.build_date) this.newer.set(src, server.index.build_date);
@@ -393,7 +422,7 @@ export class SiteData {
     const index = JSON.parse(indexText) as SourceIndex;
     await this.forget(src);
     for (const [name, bytes] of files) {
-      const m = name.match(/^([^/]+)\/([A-Za-z]{2}\d{2}(?:[a-x]{2})?)\.json$/);
+      const m = name.match(/^([^/]+)\/([A-Za-z]{2}(?:\d{2}(?:[a-x]{2})?)?)\.json$/);
       if (!m || m[1] !== src) continue;
       await store.put(this.tileKey(src, index.build_date, m[2]), new Response(dec.decode(bytes)));
     }

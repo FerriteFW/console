@@ -1474,5 +1474,100 @@
         "notes": "Commercial intership"
       }
     ]
+  },
+  {
+    "name": "Airband",
+    "displayName": "Airband (common)",
+    "description": "Aircraft frequencies not tied to one airport: emergency, air-to-air, multicom, en route. AM, receive only",
+    "defaultPower": "Low",
+    "defaultBandwidth": "25kHz",
+    "defaultMode": "AM",
+    "rxOnly": true,
+    "frequencies": [
+      {
+        "number": 1,
+        "rx": 121.5,
+        "tx": 121.5,
+        "name": "Emergency 121.5",
+        "notes": "Emergency and guard, Canada and US (FAA AIM 6-3-1; TC AIM COM 1.4.2)"
+      },
+      {
+        "number": 2,
+        "rx": 123.1,
+        "tx": 123.1,
+        "name": "SAR 123.1",
+        "notes": "Search and rescue on scene: US SAR aircraft and boats carry it (FAA AIP GEN 3.6)"
+      },
+      {
+        "number": 3,
+        "rx": 122.75,
+        "tx": 122.75,
+        "name": "Air-Air 122.75",
+        "notes": "US: air-to-air, private fixed wing (FAA AIM table 4-1-11)"
+      },
+      {
+        "number": 4,
+        "rx": 123.025,
+        "tx": 123.025,
+        "name": "Helo A-A 123.025",
+        "notes": "US: helicopter air-to-air (FAA AIM table 4-1-11)"
+      },
+      {
+        "number": 5,
+        "rx": 123.45,
+        "tx": 123.45,
+        "name": "Air-Air 123.45",
+        "notes": "Canada: inter-pilot air-to-air, mainly oceanic (TC AIM RAC 11.7.14); US: flight test (FAA AIM table 4-1-11)"
+      },
+      {
+        "number": 6,
+        "rx": 122.9,
+        "tx": 122.9,
+        "name": "Multicom 122.9",
+        "notes": "US: airports with no tower, FSS or UNICOM; temporary, emergency and SAR work (FAA AIM table 4-1-11)"
+      },
+      {
+        "number": 7,
+        "rx": 122.925,
+        "tx": 122.925,
+        "name": "Multicom 122.925",
+        "notes": "US: forestry, firefighting, fish and game (FAA AIM table 4-1-11)"
+      },
+      {
+        "number": 8,
+        "rx": 123.2,
+        "tx": 123.2,
+        "name": "ATF 123.2",
+        "notes": "Canada: uncontrolled aerodromes with no MF or ATF published (TC AIM RAC 4.5.1, 4.5.5)"
+      },
+      {
+        "number": 9,
+        "rx": 126.7,
+        "tx": 126.7,
+        "name": "En route 126.7",
+        "notes": "Canada: VFR en route broadcasts in uncontrolled airspace (TC AIM RAC 5.1, SAR 4.2)"
+      },
+      {
+        "number": 10,
+        "rx": 122.2,
+        "tx": 122.2,
+        "name": "FSS 122.2",
+        "notes": "US: the common en route frequency of most FSSs (FAA AIM 4-2-14)"
+      },
+      {
+        "number": 11,
+        "rx": 123.3,
+        "tx": 123.3,
+        "name": "Training 123.3",
+        "notes": "US: flight training, gliders, balloons (FAA AIM table 4-1-11); Canada: a UNICOM frequency (TC AIM RAC 1.2.1)"
+      },
+      {
+        "number": 12,
+        "rx": 123.5,
+        "tx": 123.5,
+        "name": "Training 123.5",
+        "notes": "US: flight training, gliders, balloons (FAA AIM table 4-1-11); Canada: a UNICOM frequency (TC AIM RAC 1.2.1)"
+      }
+    ]
   }
 ]

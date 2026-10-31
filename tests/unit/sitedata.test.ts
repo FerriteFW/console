@@ -1,11 +1,12 @@
-// src/lib/sitedata.ts (licensed sites from data.ferritefw.dev): the columnar decode, grid squares, the tiles a
-// circle touches (across a square's edge, a split square's subsquares), and the client over a fake server and cache
-// (tests/e2e/fixtures/sitedata): cached tiles, a newer build offered not fetched, a failed source, the offline zip.
+// src/lib/sitedata.ts (licensed sites and airports from data.ferritefw.dev): the columnar decode, grid squares, the
+// tiles a circle touches (across a square's edge, a split square's subsquares, airports' level-2 fields), and the
+// client over a fake server and cache (tests/e2e/fixtures/sitedata): cached tiles, a newer build offered not fetched,
+// a failed source, the offline zip.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { createZip } from "../../src/lib/zip.ts";
-import { SiteData, decodeTile, gridSquare, sha256Hex, tileSites, tilesFor, type Store, type TopIndex } from "../../src/lib/sitedata.ts";
+import { MODE_UNKNOWN, SiteData, decodeTile, gridSquare, sha256Hex, tileSites, tilesFor, type Store, type TopIndex } from "../../src/lib/sitedata.ts";
 
 const FIX = new URL("../e2e/fixtures/sitedata/", import.meta.url);
 const BASE = "https://data.test";
@@ -16,14 +17,27 @@ test("decode: running sums from 0; degrees, half kHz, modes, mobile", () => {
   assert.deepEqual([...t.lon], [-123.2, -123.18, -123.1801]);
   assert.deepEqual([...t.f], [313600, 318510, 318508]);
   const s = tileSites("tafl", t);
-  assert.deepEqual(s[1], { src: "tafl", name: "a", lat: 49.195, lon: -123.18, f: 318510, m: 1, mobile: true });
+  assert.deepEqual(s[1], { src: "tafl", name: "a", lat: 49.195, lon: -123.18, f: 318510, m: 1, mobile: true, type: "" });
   assert.equal(s[0].name, "b");
   // `s` missing: every row 0.
   assert.deepEqual([...decodeTile({ n: ["x"], c: [0], a: [1], o: [1], f: [1], m: [3] }).s], [0]);
   assert.throws(() => decodeTile({ n: [], c: [0, 0], a: [1], o: [1, 1], f: [1, 1], m: [0, 0] }), /column a/);
 });
 
-test("grid squares, 4 and 6 characters", () => {
+test("decode: airports: no modes (unknown), uses from tn/t, -1 none", () => {
+  const t = decodeTile({ n: ["CYVR"], c: [0, 0, 0], a: [4919000, 0, 0], o: [-12318000, 0, 0], f: [237400, 2600, 1], tn: ["TWR", "GND"], t: [0, 1, -1] });
+  const s = tileSites("airports", t);
+  assert.deepEqual(s.map((x) => [x.f / 2000, x.type, x.m]), [
+    [118.7, "TWR", MODE_UNKNOWN],
+    [120.0, "GND", MODE_UNKNOWN],
+    [120.0005, "", MODE_UNKNOWN],
+  ]);
+  assert.throws(() => decodeTile({ n: ["x"], c: [0], a: [1], o: [1], f: [1], tn: ["TWR"], t: [0, 0] }), /column t/);
+});
+
+test("grid squares, 2, 4 and 6 characters", () => {
+  assert.equal(gridSquare(49.1947, -123.1792, 2), "CN");
+  assert.equal(gridSquare(45.4215, -75.6972, 2), "FN");
   assert.equal(gridSquare(49.1947, -123.1792), "CN89");
   assert.equal(gridSquare(49.1947, -123.1792, 6), "CN89je");
   assert.equal(gridSquare(45.4215, -75.6972, 6), "FN25dk");
@@ -49,6 +63,18 @@ test("tiles: a split square gives its subsquares in the box that exist", () => {
   assert.ok(!got.includes("CN89aa") && !got.includes("CN89"));
   // 60 km from Vancouver also reaches CN88 (not split).
   assert.ok(tilesFor(idx, 49.1947, -123.1792, 60).includes("CN88"));
+});
+
+test("tiles: level 2 (airports): the 2-character fields the box touches", () => {
+  const idx = { level: 2, tiles: { CN: 1, CO: 1, DN: 1, FN: 1 }, split: [] };
+  // Vancouver, 50 km: CN only (120-140 W, 40-50 N).
+  assert.deepEqual(tilesFor(idx, 49.1947, -123.1792, 50), ["CN"]);
+  // 49.9 N is 11 km from CN/CO's edge (50 N): both.
+  assert.deepEqual(tilesFor(idx, 49.9, -123.0, 20).sort(), ["CN", "CO"]);
+  // -120 is CN/DN's edge; 30 km over it reaches DN; CM (south) has no tile.
+  assert.deepEqual(tilesFor(idx, 40.1, -120.2, 30).sort(), ["CN", "DN"]);
+  // Level 4 names are never asked of a level-2 index.
+  assert.deepEqual(tilesFor({ ...idx, tiles: { CN89: 1 } }, 49.1947, -123.1792, 50), []);
 });
 
 /** A fake server over the fixtures (with build dates and zips as given) and a Map as the cache. */
@@ -160,4 +186,25 @@ test("download all: checked, unzipped into the cache, then read offline", async 
   const d2 = new SiteData({ base: BASE, fetch: fake({ zips: new Map([["tafl.zip", bad]]) }).fetchFn, store });
   await assert.rejects(d2.downloadAll(top), /checksum/);
   assert.equal(await d2.offline("tafl"), "2026-10-30");
+});
+
+test("client: airports (level 2) near Vancouver and Ottawa; saved whole, read offline", async () => {
+  const store = memStore();
+  const a = fake();
+  const d = new SiteData({ base: BASE, fetch: a.fetchFn, store });
+  const r = await d.near(["airports"], 49.1947, -123.1792, 50);
+  assert.deepEqual(r.failed, []);
+  assert.deepEqual(a.asked.filter((p) => !p.endsWith("index.json")), ["airports/CN.json"]);
+  const cyvr = r.sites.filter((s) => s.name === "CYVR");
+  assert.ok(cyvr.some((s) => s.f === 237400 && s.type === "TWR"), JSON.stringify(cyvr));
+  assert.ok(r.sites.every((s) => s.m === MODE_UNKNOWN && s.f >= 216000 && s.f < 274000));
+
+  const { zip, top } = await zipOf("airports");
+  const kept = memStore();
+  const d2 = new SiteData({ base: BASE, fetch: fake({ zips: new Map([["airports.zip", zip]]) }).fetchFn, store: kept });
+  await d2.downloadAll(top);
+  assert.ok(kept.map.has(`${BASE}/airports/FN.json?build=2026-10-30`));
+  const off = new SiteData({ base: BASE, fetch: fake({ down: true }).fetchFn, store: kept });
+  const r2 = await off.near(["airports"], 45.42, -75.7, 30);
+  assert.deepEqual([...new Set(r2.sites.map((s) => s.name))], ["CYOW"]);
 });

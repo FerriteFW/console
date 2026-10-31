@@ -1,12 +1,10 @@
 // Add channels (the channel library): a fixed set into a new zone, written to the radio and read back; airports
-// near a typed place as AM, RX-only rows; licensed sites (Canada and the US) near it. The write test runs on the
-// simulator only: on a radio it would add 22 channels (FERRITE_E2E_LIBRARY_WRITE=1 lets it, at your own risk).
-// Licensed sites never use the network: data.ferritefw.dev is served from tests/e2e/fixtures/sitedata (a few tiny
-// tiles), its zips made from them here.
-import { type Page, type Route } from "@playwright/test";
-import { readFileSync, readdirSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { createZip } from "../../src/lib/zip.ts";
+// near a typed place as AM, RX-only rows; the Airband fixed set; licensed sites (Canada and the US) near it. The
+// write test runs on the simulator only: on a radio it would add 22 channels (FERRITE_E2E_LIBRARY_WRITE=1 lets it,
+// at your own risk). Airports and licensed sites never use the network: data.ferritefw.dev is served from
+// tests/e2e/fixtures/sitedata (a few tiny tiles) by ./sitedata.ts.
+import { type Page } from "@playwright/test";
+import { DATA, serveData } from "./sitedata";
 import { connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
 
 let page: Page;
@@ -29,46 +27,6 @@ async function openLibrary(tab: string) {
   await page.getByRole("button", { name: "Add from library…" }).click();
   await expect(lib()).toBeVisible();
   await lib().getByRole("tab", { name: new RegExp(`^${tab}`) }).click();
-}
-
-const DATA = "https://data.ferritefw.dev";
-const FIX = new URL("./fixtures/sitedata/", import.meta.url);
-
-/** A source's fixture tiles as its zip. */
-async function fixtureZip(src: string): Promise<Buffer> {
-  const dir = new URL(`${src}/`, FIX);
-  const entries = readdirSync(dir).map((f) => ({ name: `${src}/${f}`, data: new Uint8Array(readFileSync(new URL(f, dir))) }));
-  return Buffer.from(await (await createZip(entries)).arrayBuffer());
-}
-
-/** data.ferritefw.dev from the fixtures; the top index carries the zips' real sizes and SHA-256. Returns the paths asked. */
-async function serveData(p: Page): Promise<string[]> {
-  const zips = new Map<string, Buffer>();
-  for (const src of ["tafl", "fcc"]) zips.set(`${src}.zip`, await fixtureZip(src));
-  const asked: string[] = [];
-  await p.route(`${DATA}/**`, async (route: Route) => {
-    const path = new URL(route.request().url()).pathname.slice(1);
-    asked.push(path);
-    const zip = zips.get(path);
-    if (zip) return route.fulfill({ body: zip, contentType: "application/zip", headers: { "Access-Control-Allow-Origin": "*" } });
-    let body: string;
-    try {
-      body = readFileSync(new URL(path, FIX), "utf8");
-    } catch {
-      return route.fulfill({ status: 404, body: "Not Found", headers: { "Access-Control-Allow-Origin": "*" } });
-    }
-    if (path === "index.json") {
-      const top = JSON.parse(body);
-      for (const s of top.sources) {
-        const z = zips.get(s.bundle)!;
-        s.bundle_bytes = z.length;
-        s.bundle_sha256 = createHash("sha256").update(z).digest("hex");
-      }
-      body = JSON.stringify(top);
-    }
-    return route.fulfill({ body, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" } });
-  });
-  return asked;
 }
 
 /** Each group its own page, connected and read (the groups can run on two workers, each with its own simulator). */
@@ -141,7 +99,8 @@ test.describe.serial("write", () => {
 test.describe.serial("near a place", () => {
   hooks();
 
-  test("airports near a typed place: AM, RX-only rows", async ({}, info) => {
+  test("airports near a typed place: AM, RX-only rows, named by their uses", async ({}, info) => {
+    const asked = await serveData(page);
     const before = await state(page, (f) => f.channels.table.channels.length);
     await openLibrary("Airports");
     // From radio: the radio's GPS fix, else its fixed position; else it says so.
@@ -152,10 +111,25 @@ test.describe.serial("near a place", () => {
     await expect(lib().getByText("CN89")).toBeVisible();
     const cyvr = lib().getByRole("checkbox", { name: "CYVR", exact: true });
     await expect(cyvr).toBeVisible({ timeout: 20_000 });
+    // Level 2: 2-character fields only (Vancouver's is CN; the radio's place, asked first, may add its own).
+    const tiles = asked.filter((p) => !p.endsWith("index.json"));
+    expect(tiles).toContain("airports/CN.json");
+    for (const t of tiles) expect(t).toMatch(/^airports\/[A-R]{2}\.json$/);
+    // Boundary Bay (18 km) is listed; Victoria (63 km) is not.
+    const list = lib().getByLabel("Airports");
+    await expect(list.getByRole("checkbox", { name: "CZBB", exact: true })).toBeVisible();
+    await expect(list.getByRole("checkbox", { name: "CYYJ", exact: true })).toHaveCount(0);
+    // OurAirports' uses as the types: TWR is TOWER, CLD clearance.
+    const row = list.locator("label.ap", { hasText: "CYVR" });
+    await expect(row).toContainText("118.700 TOWER");
+    await expect(row).toContainText("121.400 CLEARANCE");
+    await expect(row).toContainText("121.700 GROUND");
+    // The data's attribution.
+    await expect(lib()).toContainText("Airport data from OurAirports");
     await cyvr.check();
     const add = lib().getByRole("button", { name: /^Add \d+ channels?$/ });
-    const n = Number((await add.textContent())!.match(/\d+/)![0]);
-    expect(n).toBeGreaterThan(2);
+    await expect(add).toHaveText("Add 7 channels");
+    const n = 7;
     await shot(page, info, "34-library-airports");
     await add.click();
     await expect(lib()).toHaveCount(0);
@@ -171,10 +145,42 @@ test.describe.serial("near a place", () => {
     }
     expect(await state(page, (f) => f.channels.table.channels.length)).toBe(before + n);
     expect(await state(page, (f) => f.channels.table.zones.at(-1).name)).toBe("CYVR");
+    expect(added.map((c: any) => [c.name, c.rx]).sort()).toEqual([
+      ["CYVR APP", "128.60000"],
+      ["CYVR ATIS", "124.60000"],
+      ["CYVR CLD", "121.40000"],
+      ["CYVR DEP", "126.12500"],
+      ["CYVR GND", "121.70000"],
+      ["CYVR RCO", "123.15000"],
+      ["CYVR TWR", "118.70000"],
+    ]);
     const first = page.locator(`tr[data-n="${added[0].number}"]`);
     await expect(first).toHaveClass(/added/);
     await first.scrollIntoViewIfNeeded();
     await shot(page, info, "35-library-airport-rows");
+  });
+
+  test("fixed set: Airband (common), AM and RX only", async ({}, info) => {
+    const before = await state(page, (f) => f.channels.table.channels.length);
+    await openLibrary("Fixed sets");
+    await lib().getByRole("option", { name: /^Airband \(common\)/ }).click();
+    await expect(lib()).toContainText("12 of 12 channels · AM, Low power, RX only");
+    await expect(lib()).toContainText("Emergency 121.5");
+    await expect(lib()).toContainText("TC AIM RAC 5.1");
+    await shot(page, info, "34a-library-airband");
+    await lib().getByRole("button", { name: "Add 12 channels" }).click();
+    await expect(lib()).toHaveCount(0);
+    expect(await state(page, (f) => f.channels.table.channels.length)).toBe(before + 12);
+    // Into a new zone named after the set.
+    expect(await state(page, (f) => f.channels.table.zones.at(-1).name)).toBe("Airband (common)");
+    const added = await state(page, (f) => f.channels.table.channels.filter((c: any) => c.zone === f.channels.table.zones.length - 1));
+    expect(added.length).toBe(12);
+    for (const c of added) {
+      expect(c.mode).toBe("AM");
+      expect(c.rx_only).toBe(true);
+    }
+    expect(added.find((c: any) => c.name === "Emergency 121.5").rx).toBe("121.50000");
+    expect(added.find((c: any) => c.name === "En route 126.7").rx).toBe("126.70000");
   });
 
   test("licensed sites: Canada and the US near the place, modes, digital hidden, positions kept", async ({}, info) => {
@@ -238,8 +244,8 @@ test.describe.serial("near a place", () => {
   });
 });
 
-// Licensed sites without a radio: the data not reachable, and a source saved for offline then read without the
-// network. Each test its own page (its own Cache Storage).
+// Licensed sites and airports without a radio: the data not reachable, and a source saved for offline then read
+// without the network. Each test its own page (its own Cache Storage).
 test.describe("licensed sites, no radio", () => {
   test("data not reachable: says so, no crash", async ({ browser }, info) => {
     const p = await browser.newPage();
@@ -272,6 +278,41 @@ test.describe("licensed sites, no radio", () => {
     await p.route(`${DATA}/**`, (r) => r.abort("internetdisconnected"));
     await d.getByLabel("Place: latitude, longitude or grid square").fill("45.42, -75.70");
     await expect(d.getByLabel("Licensed sites near the place")).toContainText("ottawa hydro");
+    await p.close();
+  });
+
+  test("airports: saved for offline, then read without the network", async ({ browser }, info) => {
+    const p = await browser.newPage();
+    await serveData(p);
+    await openConsole(p, "channels");
+    await p.getByRole("button", { name: "Add from library…" }).first().click();
+    const d = p.getByRole("dialog", { name: "Add channels" });
+    await d.getByRole("tab", { name: /^Airports/ }).click();
+    // Only the airports source in this tab's footer, not the licensed sites'.
+    await expect(d.getByRole("button", { name: /^Save Canada for offline/ })).toHaveCount(0);
+    const save = d.getByRole("button", { name: /^Save Airports for offline \(\d+ KB\)$/ });
+    await expect(save).toBeVisible();
+    await save.click();
+    await expect(d.getByText("Saved for offline")).toBeVisible();
+    await shot(p, info, "41-library-airports-saved");
+    await p.unroute(`${DATA}/**`);
+    await p.route(`${DATA}/**`, (r) => r.abort("internetdisconnected"));
+    await d.getByLabel("Place: latitude, longitude or grid square").fill("45.32, -75.67");
+    const row = d.getByLabel("Airports").locator("label.ap", { hasText: "CYOW" });
+    await expect(row).toContainText("118.800 TOWER");
+    await expect(row).toContainText("119.400 CLEARANCE");
+    await p.close();
+  });
+
+  test("airports: data not reachable: says so", async ({ browser }) => {
+    const p = await browser.newPage();
+    await p.route(`${DATA}/**`, (r) => r.abort("internetdisconnected"));
+    await openConsole(p, "channels");
+    await p.getByRole("button", { name: "Add from library…" }).first().click();
+    const d = p.getByRole("dialog", { name: "Add channels" });
+    await d.getByRole("tab", { name: /^Airports/ }).click();
+    await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
+    await expect(d.getByText("Airports aren't available right now.")).toBeVisible();
     await p.close();
   });
 });

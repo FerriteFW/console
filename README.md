@@ -8,7 +8,7 @@ The companion app for Ferrite on the [Radtel RT-950 Pro](https://www.radtels.com
 - `core/`: the Rust core. Link sessions, answers, the UI readback, keys, channel records, the write plan, CHIRP CSV, the channel library. It reuses ferrite's own code by path (`../ferrite`).
 - `wasm/`: the core for the browser, built into `src/core-wasm/` by `npm run wasm`.
 - `src/`: the Svelte 5 UI (Vite).
-- `public/data/`: the channel library's fixed sets and airports. Licensed sites come from https://data.ferritefw.dev (FerriteFW/data). See [tools/library/README.md](tools/library/README.md).
+- `public/data/`: the channel library's fixed sets. Airports and licensed sites come from https://data.ferritefw.dev (FerriteFW/data). See [tools/library/README.md](tools/library/README.md).
 - `tools/bridge.py`: the dev bridge. A local WebSocket to a serial port or the simulator (its cable or its Bluetooth side).
 - `tools/fakeboot.py`: a fake stock bootloader the bridge runs after REBOOT, for testing Firmware Update on the simulator.
 - `tests/e2e/`: Playwright end-to-end tests.
@@ -66,8 +66,8 @@ npm run e2e:run     # the same without the build
 - Every edit is checked by ferrite's own code. Changed rows amber, new rows green.
 - CHIRP CSV import and export. An import goes in as new channels in a new zone (the default when its numbers clash), by number, or replacing every channel.
 - One file kind, the `.ferrite` codeplug: Save as… holds the channels, zones, settings, APRS settings and contacts; Open… loads each part as unwritten changes. Older `-backup.json` files still open. Format: `docs/dev/codeplug-format.md` in the docs repo.
-- Add channels: fixed sets (FRS, GMRS, MURS, PMR446, marine, weather, BC resource roads, calling).
-- Add channels: airports near a place (AM, RX only), place typed or from the radio's GPS or fixed position.
+- Add channels: fixed sets (FRS, GMRS, MURS, PMR446, marine, weather, airband, BC resource roads, calling).
+- Add channels: airports near a place (AM, RX only, worldwide from OurAirports via data.ferritefw.dev; can be saved for offline), place typed or from the radio's GPS or fixed position.
 - Add channels: licensed sites in Canada (TAFL) and the US (FCC) near a place, grouped by licensee, from data.ferritefw.dev; each source can be saved for offline.
 - Radio Settings: every menu setting by its number and name; write with a backup and a diff first.
 - The model is the radio's own menu, found by running ferrite's App; a core test fails when the radio gains a setting Console doesn't show.
