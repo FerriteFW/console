@@ -110,7 +110,7 @@ function memStore(): Store & { map: Map<string, string> } {
   };
 }
 
-test("client: tiles near Vancouver from both sources; kept in the cache; a newer build is offered, not fetched", async () => {
+test("client: tiles near Vancouver from both sources; kept in the cache; a newer build is followed", async () => {
   const store = memStore();
   const a = fake();
   const d = new SiteData({ base: BASE, fetch: a.fetchFn, store });
@@ -122,21 +122,17 @@ test("client: tiles near Vancouver from both sources; kept in the cache; a newer
   assert.deepEqual(a.asked.filter((p) => !p.endsWith("index.json")).sort(), ["fcc/CN88.json", "tafl/CN89je.json", "tafl/CN89ke.json"]);
   assert.ok(store.map.has(`${BASE}/tafl/CN89je.json?build=2026-10-30`));
 
-  // A new session, the server one build on: the kept index and tiles stay in use, the update is only offered.
+  // A new session, the server one build on (the site holds only its latest build): not saved whole, so the new
+  // index is used, the old build's tiles go, and the new build's are fetched.
   const b = fake({ build: "2026-11-30" });
   const d2 = new SiteData({ base: BASE, fetch: b.fetchFn, store });
   const r2 = await d2.near(["tafl", "fcc"], 49.1947, -123.1792, 50);
   assert.equal(r2.sites.length, 11);
-  assert.deepEqual(b.asked.sort(), ["fcc/index.json", "tafl/index.json"]);
-  assert.equal(d2.newer.get("tafl"), "2026-11-30");
-  assert.equal((await d2.index("tafl")).build_date, "2026-10-30");
-
-  // Update: the old tiles go; the next look fetches the new build's.
-  await d2.update("tafl");
-  assert.ok(![...store.map.keys()].some((k) => k.includes("/tafl/CN89")));
-  await d2.near(["tafl"], 49.1947, -123.1792, 50);
-  assert.ok(store.map.has(`${BASE}/tafl/CN89je.json?build=2026-11-30`));
+  assert.deepEqual(b.asked.filter((p) => !p.endsWith("index.json")).sort(), ["fcc/CN88.json", "tafl/CN89je.json", "tafl/CN89ke.json"]);
   assert.equal(d2.newer.has("tafl"), false);
+  assert.equal((await d2.index("tafl")).build_date, "2026-11-30");
+  assert.ok(!store.map.has(`${BASE}/tafl/CN89je.json?build=2026-10-30`));
+  assert.ok(store.map.has(`${BASE}/tafl/CN89je.json?build=2026-11-30`));
 
   // Offline: what's kept still loads; what isn't fails with a clear message, per source.
   const c = fake({ down: true });
@@ -181,6 +177,11 @@ test("download all: checked, unzipped into the cache, then read offline", async 
   const off = new SiteData({ base: BASE, fetch: fake({ down: true }).fetchFn, store });
   const r = await off.near(["tafl"], 45.42, -75.7, 20);
   assert.deepEqual(r.sites.map((s) => s.name), ["ottawa hydro"]);
+
+  // Saved whole: a newer build on the server is only offered; the saved copy stays in use until Update.
+  const later = new SiteData({ base: BASE, fetch: fake({ build: "2026-11-30" }).fetchFn, store });
+  assert.equal((await later.index("tafl")).build_date, "2026-10-30");
+  assert.equal(later.newer.get("tafl"), "2026-11-30");
 
   // A damaged download is refused, and what was kept stays.
   const bad = zip.slice();

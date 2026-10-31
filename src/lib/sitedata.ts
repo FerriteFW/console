@@ -300,8 +300,10 @@ export class SiteData {
   }
 
   /**
-   * A source's index: the one kept in the cache (its build date pins the tiles), else the server's. When the
-   * server has a newer build, `newer` says so; the cached one stays in use until `update`.
+   * A source's index. A source saved whole for offline use keeps its saved index (its build date pins the tiles):
+   * when the server has a newer build, `newer` says so, and the saved one stays in use until `update`. Any other
+   * source follows the server's index (the site holds only the latest build: an older build's tiles are gone), and
+   * the tiles kept from an older build are dropped; the kept index serves only when the server can't be reached.
    */
   index(src: string): Promise<SourceIndex> {
     let p = this.indexes.get(src);
@@ -328,13 +330,29 @@ export class SiteData {
       if (kept) return kept;
       throw new Error(`${src}: format ${server.index.format} (level ${server.index.level ?? 4}) is newer than this Console reads; update Console`);
     }
-    if (kept) {
-      if (server && server.index.build_date !== kept.build_date) this.newer.set(src, server.index.build_date);
-      else this.newer.delete(src);
+    if (kept && (!server || server.index.build_date === kept.build_date)) {
+      this.newer.delete(src);
       return kept;
     }
+    if (kept && (await this.offline(src)) === kept.build_date) {
+      this.newer.set(src, server!.index.build_date);
+      return kept;
+    }
+    this.newer.delete(src);
     await store?.put(this.indexKey(src), new Response(server!.text)).catch(() => {});
+    if (kept) await this.dropTiles(src, server!.index.build_date);
     return server!.index;
+  }
+
+  /** Drop a source's tiles kept from any build but `build`. */
+  private async dropTiles(src: string, build: string) {
+    const store = await this.store;
+    if (!store) return;
+    const dir = this.url(`${src}/`);
+    const keep = `?build=${encodeURIComponent(build)}`;
+    for (const req of await store.keys()) {
+      if (req.url.startsWith(dir) && req.url.includes("?build=") && !req.url.endsWith(keep)) await store.delete(req.url);
+    }
   }
 
   /** A tile: from memory, else the cache, else the server (then kept in the cache). */
