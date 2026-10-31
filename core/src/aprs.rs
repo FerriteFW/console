@@ -157,6 +157,8 @@ pub enum Event {
     Message { count: u16, message: Message },
     MessageState { count: u16, message: Message },
     Ui,
+    /// LINK-57: an event logged (kind 5), as the Activity Log's record.
+    Log { record: crate::log::Record },
     Unknown { code: u8 },
 }
 
@@ -168,6 +170,7 @@ pub fn parse_event(payload: &[u8]) -> Option<Event> {
         ev::MSG => Event::Message { count: r.u16()?, message: message(&mut r)? },
         ev::MSG_STATE => Event::MessageState { count: r.u16()?, message: message(&mut r)? },
         ev::UI => Event::Ui,
+        ev::LOG => Event::Log { record: crate::log::record(&mut r)? },
         k => Event::Unknown { code: k },
     })
 }

@@ -65,7 +65,7 @@ fn detail(source: u8, id: u32, x: u16, y: u16) -> String {
     }
 }
 
-fn record(r: &mut Rd) -> Option<Record> {
+pub(crate) fn record(r: &mut Rd) -> Option<Record> {
     let fixed = r.bytes(LOG_FIXED)?;
     let mut f = Rd(fixed);
     let seq = f.u32()?;

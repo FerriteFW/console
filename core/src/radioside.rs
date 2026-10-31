@@ -4,7 +4,8 @@
 //! so every check and refusal is the firmware's own, never a copy.
 
 use ferrite_app::chan::{ChanWrite, Channel, ChannelStore, Name, MAX_CHANNELS, NO_ZONE};
-use ferrite_app::data::{Data, Op, Pos, RangePreset, ZoneCfg};
+use ferrite_app::data::{Data, Dtmf, Event, Op, Pos, RangePreset, Src, Waypoint, ZoneCfg, DTMF_MEMS};
+use ferrite_ui::text::Buf;
 use ferrite_app::link::Session;
 use ferrite_app::screens::alert::AlertInfo;
 use ferrite_app::settings::Settings;
@@ -24,6 +25,15 @@ pub struct MemStore {
     pub zones: RefCell<Vec<(Name, ZoneCfg)>>,
     /// Channel positions (CHAN-2, LINK-53), by number.
     pub pos: RefCell<BTreeMap<u16, Pos>>,
+    /// The owner's quick messages (TEXT-7, LINK-54): None the factory text.
+    pub quick: RefCell<[Option<Buf<67>>; ferrite_app::words::QUICK]>,
+    /// The waypoints, newest first (GPS-10, LINK-55).
+    pub waypoints: RefCell<Vec<Waypoint>>,
+    /// The DTMF memories and their names (DTMF-12, LINK-56).
+    pub dtmf: RefCell<[(Option<Dtmf>, Buf<10>); DTMF_MEMS as usize]>,
+    /// The event log, newest first, and how many were ever logged (the sequence numbers, LINK-42, LINK-57).
+    pub events: RefCell<Vec<Event>>,
+    pub logged: Cell<u32>,
     /// Range presets (MENU 0 1 4), in order; up to 16.
     pub presets: RefCell<Vec<RangePreset>>,
     version: Cell<u32>,
@@ -61,6 +71,14 @@ impl MemStore {
             Some(p) => self.pos.borrow_mut().insert(num, p),
             None => self.pos.borrow_mut().remove(&num),
         };
+    }
+
+    /// An event logged now (a DTMF sequence heard, `text`): what the event log subscription sends (LINK-57).
+    pub fn log(&self, text: &str) {
+        let e = Event { src: Src::Dtmf, ago_s: 0, freq: 14_652_000, slot: 0, unread: true, id: 0, x: 0, y: 0, pos: None, name: Buf::new(), text: Buf::from(text.as_bytes()) };
+        self.events.borrow_mut().insert(0, e);
+        self.logged.set(self.logged.get() + 1);
+        self.bump();
     }
 
     fn bump(&self) {
@@ -115,6 +133,30 @@ impl Data for MemStore {
     }
     fn zone_cfg(&self, zone: u8) -> ZoneCfg {
         self.zones.borrow().get(zone as usize).map(|z| z.1).unwrap_or_default()
+    }
+    fn quick(&self, i: usize) -> Option<Buf<67>> {
+        self.quick.borrow().get(i).copied().flatten()
+    }
+    fn waypoints(&self) -> u16 {
+        self.waypoints.borrow().len() as u16
+    }
+    fn waypoint(&self, i: u16) -> Option<Waypoint> {
+        self.waypoints.borrow().get(i as usize).copied()
+    }
+    fn dtmf(&self, i: u8) -> Option<Dtmf> {
+        self.dtmf.borrow().get(i as usize).and_then(|m| m.0)
+    }
+    fn dtmf_name(&self, i: u8) -> Buf<10> {
+        self.dtmf.borrow().get(i as usize).map_or(Buf::new(), |m| m.1)
+    }
+    fn events(&self) -> u16 {
+        self.events.borrow().len() as u16
+    }
+    fn event(&self, i: u16) -> Option<Event> {
+        self.events.borrow().get(i as usize).copied()
+    }
+    fn event_seq(&self, i: u16) -> Option<u32> {
+        (i < self.events()).then(|| self.logged.get() - 1 - i as u32)
     }
     fn presets(&self) -> u8 {
         self.presets.borrow().len() as u8
@@ -174,6 +216,27 @@ impl Data for MemStore {
                     .is_some()
             }
             Op::Zone(z, cfg) => self.zones.borrow_mut().get_mut(z as usize).map(|x| x.1 = cfg).is_some(),
+            // LINK-54 – LINK-56: as the radio's store keeps them
+            Op::Quick(i, t) => self.quick.borrow_mut().get_mut(i as usize).map(|q| *q = t).is_some(),
+            Op::PutWaypoint(i, w) => {
+                let mut ws = self.waypoints.borrow_mut();
+                let n = ws.len();
+                match ws.get_mut(i as usize) {
+                    Some(x) => *x = w,
+                    None if n < crate::lists::WAYPOINT_MAX as usize => ws.insert(0, w),
+                    None => return false,
+                }
+                true
+            }
+            Op::DeleteWaypoint(i) => {
+                let mut ws = self.waypoints.borrow_mut();
+                (i as usize) < ws.len() && {
+                    ws.remove(i as usize);
+                    true
+                }
+            }
+            Op::Dtmf(i, m) => self.dtmf.borrow_mut().get_mut(i as usize).map(|x| *x = (m, if m.is_some() { x.1 } else { Buf::new() })).is_some(),
+            Op::DtmfName(i, n) => self.dtmf.borrow_mut().get_mut(i as usize).map(|x| x.1 = n).is_some(),
             Op::RenameZone(z, name) => self.zones.borrow_mut().get_mut(z as usize).map(|x| x.0 = name).is_some(),
             // CHAN-12: its channels go to no zone; the last zone goes away (as the sample store does it).
             Op::DeleteZone(z) => {
@@ -287,6 +350,23 @@ impl RadioSide {
                 return;
             }
         }
+    }
+
+    /// Events the session pushes now (LINK-46: a subscription's), each `EVENT`'s payload (kind first).
+    pub fn events(&mut self) -> Vec<Vec<u8>> {
+        let mut out = Out(Vec::new());
+        for _ in 0..8 {
+            self.now = self.now.wrapping_add(50);
+            self.link.events(&mut self.app, &self.store, &self.dev, &LiveAll::default(), self.now, None, &mut out);
+        }
+        out.0
+            .split(|&b| b == 0)
+            .filter(|f| !f.is_empty())
+            .filter_map(|f| {
+                let mut f = f.to_vec();
+                link::parse(&mut f).ok().map(|p| p.payload.to_vec())
+            })
+            .collect()
     }
 
     /// One request in process (no wire): its status and the rest of the answer.

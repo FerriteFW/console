@@ -21,6 +21,7 @@
 //! - [`aprs`]: the heard list, messages, sending one, and the events a subscription brings (LINK-44 – LINK-46).
 //! - [`aprs_settings`]: the APRS record as MENU 0 5 shows it (LINK-43), changed and checked as the settings are.
 //! - [`log`]: the event log (`LOG_READ`, LINK-42) for the Activity Log.
+//! - [`lists`]: the quick messages, waypoints and DTMF memories over the link (LINK-54 – LINK-56).
 //! - [`liveview`]: Live View from the radio's compact UI events (LINK-47, LINK-48), for Bluetooth.
 //! - [`firmware`]: Firmware Update: the `.btf` checks and the stock bootloader's frames (tools/btf.py, flash.py).
 //! - [`install`]: the Install page: the reader backup (fdump), the SSB patch, back to stock (`STOCK_RESTORE`).
@@ -42,6 +43,7 @@ pub mod firmware;
 pub mod install;
 pub mod keys;
 pub mod library;
+pub mod lists;
 pub mod liveview;
 pub mod log;
 pub mod plan;

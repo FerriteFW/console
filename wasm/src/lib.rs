@@ -1,7 +1,7 @@
 //! The core for the browser. Structures cross as JSON strings (the UI parses them); bytes as `Uint8Array`.
 
 use ferrite_console_core::{
-    answers, aprs, aprs_settings, channels, chirp, demo, firmware, install, keys, library, liveview, log, plan,
+    answers, aprs, aprs_settings, channels, chirp, demo, firmware, install, keys, library, lists, liveview, log, plan,
     records, session, settings, signature, timing, ui, uid,
 };
 use wasm_bindgen::prelude::*;
@@ -111,9 +111,11 @@ pub fn protocol() -> String {
                  "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY,
                  "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP,
                  "MSG_DELETE": msg::MSG_DELETE, "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA },
-        "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION },
-        "caps": { "POSITION": ferrite_console_core::link::caps::POSITION },
-        "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "HEARD": event::HEARD,
+        "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION,
+                  "QUICK": what::QUICK, "WAYPOINT": what::WAYPOINT, "DTMF": what::DTMF },
+        "caps": { "POSITION": ferrite_console_core::link::caps::POSITION, "LISTS": ferrite_console_core::link::caps::LISTS },
+        "waypointAdd": lists::WAYPOINT_ADD,
+        "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "SUB_LOG": event::SUB_LOG, "LOG": event::LOG, "HEARD": event::HEARD,
                    "MSG": event::MSG, "MSG_STATE": event::MSG_STATE, "UI": event::UI, "QUIET_MS": event::QUIET_MS, "DICT": liveview::DICT },
         "knobMax": key::KNOB_MAX,
         "keys": keys::NAMES,
@@ -276,6 +278,57 @@ pub fn position_record(pos: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn position_from_record(rec: &[u8]) -> Option<String> {
     channels::position_from_record(rec).map(|(lat, lon)| json(&channels::Position { lat, lon }))
+}
+
+/// LINK-54: a `WRITE_MANY` record of `what` 8 for a quick message (`{own, text}`, JSON; `own` false puts the factory
+/// text back).
+#[wasm_bindgen]
+pub fn quick_record(q: &str) -> Result<Vec<u8>, JsError> {
+    let q: lists::QuickMessage = from_json(q, "quick message")?;
+    Ok(lists::quick_record(&q))
+}
+
+/// LINK-54: a `READ_MANY` record of `what` 8 as `{own, text}` (JSON), or undefined.
+#[wasm_bindgen]
+pub fn quick_from_record(rec: &[u8]) -> Option<String> {
+    lists::quick_from_record(rec).map(|q| json(&q))
+}
+
+/// LINK-55: a `WRITE_MANY` record of `what` 9 for a waypoint (`{name, lat, lon, source}`, JSON, the position in
+/// 1e-7 degree, the source "marked", "aprs", "link" or "grid"; `null` deletes: 0 bytes). A new one goes at index
+/// `protocol().waypointAdd`.
+#[wasm_bindgen]
+pub fn waypoint_record(w: &str) -> Result<Vec<u8>, JsError> {
+    let w: Option<lists::Waypoint> = from_json(w, "waypoint")?;
+    Ok(lists::waypoint_record(w.as_ref()))
+}
+
+/// LINK-55: a `READ_MANY` record of `what` 9 as `{name, lat, lon, source}` (JSON), or undefined.
+#[wasm_bindgen]
+pub fn waypoint_from_record(rec: &[u8]) -> Option<String> {
+    lists::waypoint_from_record(rec).map(|w| json(&w))
+}
+
+/// LINK-55: the `WRITE_MANY` records (`[[index, [bytes]], ...]`, JSON, in order) that take the radio's waypoints
+/// `old` to `new` (JSON lists, newest first).
+#[wasm_bindgen]
+pub fn waypoint_writes(old: &str, new: &str) -> Result<String, JsError> {
+    let (o, n): (Vec<lists::Waypoint>, Vec<lists::Waypoint>) = (from_json(old, "old")?, from_json(new, "new")?);
+    Ok(json(&lists::waypoint_writes(&o, &n)))
+}
+
+/// LINK-56: a `WRITE_MANY` record of `what` 10 for a DTMF memory (`{symbols, name}`, JSON; `null` clears it and its
+/// name).
+#[wasm_bindgen]
+pub fn dtmf_record(m: &str) -> Result<Vec<u8>, JsError> {
+    let m: Option<lists::DtmfMemory> = from_json(m, "DTMF memory")?;
+    Ok(lists::dtmf_record(m.as_ref()))
+}
+
+/// LINK-56: a `READ_MANY` record of `what` 10 as `{symbols, name}` (JSON), or undefined.
+#[wasm_bindgen]
+pub fn dtmf_from_record(rec: &[u8]) -> Option<String> {
+    lists::dtmf_from_record(rec).map(|m| json(&m))
 }
 
 #[wasm_bindgen]

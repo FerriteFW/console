@@ -1456,6 +1456,13 @@ mod tests {
             assert_eq!((i.kind, i.note.as_str()), (Kind::Readonly, RADIO_ONLY), "{id}");
         }
         assert_eq!(item(&v, "0 9 4").value, "United States");
+        // PWR-24.1 (decision 328): Low Power Mode and its Auto level go over the link now.
+        for id in ["0 7 7 2", "0 7 7 3"] {
+            let i = item(&v, id);
+            assert!(i.kind != Kind::Readonly, "{id}: {:?} {}", i.kind, i.note);
+        }
+        let lpm = set(&rec, "0 7 7 3", "30 %").unwrap();
+        assert_eq!(settings_of(&lpm).lpm_below, 30);
         // Typed: the pager frequency.
         assert_eq!(item(&v, "0 4 2 2").kind, Kind::Text);
         let call = item(&v, "0 8 6 1");
