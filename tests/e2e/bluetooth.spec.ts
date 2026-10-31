@@ -40,3 +40,32 @@ test("bluetooth: Live View from the radio's updates, keys, a lost update put rig
   await expectScreen(page, "Home");
   await shot(page, info, "bt-03-resynced");
 });
+
+test("bluetooth: Read from radio on Channels shows its progress part-way", async ({ page }) => {
+  const url = await bluetoothBridge();
+  test.skip(!url, "the simulator only");
+  test.setTimeout(120_000);
+  await openConsole(page, "channels", url!);
+  await connect(page);
+  const toolbar = page.getByRole("toolbar", { name: "Channels" });
+  const read = toolbar.getByRole("button", { name: "Read from radio" });
+  // the page reads on open: that one done first
+  await expect.poll(() => state(page, (f) => !!f.channels.base && !f.channels.progress), { timeout: 90_000 }).toBe(true);
+  await expect(read).toBeEnabled();
+  await read.click();
+  const drop = page.getByRole("button", { name: "Read and discard" });
+  if (await drop.isVisible()) await drop.click();
+  // a determinate bar with some of it done and some to come, seen while the read runs (Bluetooth: seconds)
+  const bar = page.getByRole("progressbar");
+  await expect
+    .poll(
+      async () => {
+        const [now, max] = await Promise.all([bar.getAttribute("aria-valuenow", { timeout: 1000 }).catch(() => null), bar.getAttribute("aria-valuemax", { timeout: 1000 }).catch(() => null)]);
+        return now !== null && max !== null && Number(now) > 0 && Number(now) < Number(max);
+      },
+      { timeout: 60_000, intervals: [50] },
+    )
+    .toBe(true);
+  await expect(bar).toHaveCount(0, { timeout: 90_000 });
+  await expect(read).toBeEnabled();
+});

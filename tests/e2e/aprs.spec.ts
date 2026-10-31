@@ -126,3 +126,29 @@ test("messages: one deleted on the radio (MSG_DELETE, LINK-52) after an in-page 
   await expect(threads.filter({ hasText: "VE3JLH" })).toHaveCount(0);
   await expect(page.getByRole("note")).toContainText("Deleted from the radio.");
 });
+
+test("Live View: APRS mode's large card shows the counts (heard, /hr) and the stations heard", async ({ page }, info) => {
+  test.skip(onRadio(), "APRS mode is switched on: the simulator only");
+  await openConsole(page, "live");
+  await connect(page);
+  const cmd = (line: string) => page.evaluate((l) => (window as any).ferrite.radio.connectedLink.cmd(l), line);
+  try {
+    await cmd("set 0 5 3 On"); // APRS mode on slot C
+    await cmd("slot C active"); // the active card is the large one
+    await expect.poll(() => state(page, (f) => f.radio.ui?.cards.find((c: any) => c.slot === "C")?.kind), { timeout: 15_000 }).toBe("aprs");
+    await expect.poll(() => state(page, (f) => f.radio.ui?.cards.find((c: any) => c.slot === "C")?.active), { timeout: 15_000 }).toBe(1);
+    const card = page.locator("[data-readback-screen] .card.active");
+    await expect(card).toContainText(/\d+ heard/);
+    await expect(card).toContainText(/\d+ \/hr/);
+    const rows = await state(page, (f) => {
+      const k = f.radio.ui?.other.find((l: any) => l.kind === "aprs_card")?.kv ?? {};
+      return ["r1", "r2", "r3"].map((r) => String(k[r] ?? "").split("|")[0]).filter(Boolean);
+    });
+    if (rows.length) await expect(card.locator(".aprsrow.st").first()).toContainText(rows[0]);
+    info.annotations.push({ type: "stations on the card", description: String(rows.length) });
+    await shot(page, info, "aprs-04-live-card");
+  } finally {
+    await cmd("set 0 5 3 Off").catch(() => {});
+    await cmd("slot A active").catch(() => {});
+  }
+});

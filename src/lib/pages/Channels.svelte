@@ -135,13 +135,17 @@
     const el = e.currentTarget as HTMLInputElement;
     const f = el.files?.[0];
     el.value = "";
-    if (f) then(await f.text(), f.name);
+    if (!f) return;
+    const text = await f.text();
+    await loadCore(); // a file picked as the page opens: the core (the importers) may still be loading
+    then(text, f.name);
   }
 
   /** Open…: a .ferrite (every part into its page) or an older backup; one notice says what was loaded. */
   async function open(e: Event) {
     const f = await picked(e);
     if (!f) return;
+    await loadCore();
     try {
       say((await openFile(f)).notice);
     } catch (err) {
@@ -290,7 +294,15 @@
 
   <div class="status">
     {#if channels.progress}
-      <div class="bar" class:busy={!channels.progress.total}>
+      <div
+        class="bar"
+        class:busy={!channels.progress.total}
+        role="progressbar"
+        aria-label={channels.progress.label}
+        aria-valuemin={0}
+        aria-valuemax={channels.progress.total || undefined}
+        aria-valuenow={channels.progress.total ? channels.progress.done : undefined}
+      >
         <div style:width={channels.progress.total ? `${(100 * channels.progress.done) / channels.progress.total}%` : undefined}></div>
       </div>
       <span>{channels.progress.label}</span>
