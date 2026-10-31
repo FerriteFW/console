@@ -21,6 +21,7 @@
   });
   const names: Record<string, string> = {
     rx: "RX",
+    tx: "TX",
     rx_tone: "RX tone",
     tx_tone: "TX tone",
     rx_only: "RX only",

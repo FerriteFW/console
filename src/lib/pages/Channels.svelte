@@ -409,7 +409,7 @@
                       onchange={(e) => tickAll(e.currentTarget.checked)}
                     />
                   </th>
-                  <th class="sticky2">#</th><th>Name</th><th>RX MHz</th><th>Duplex · offset</th><th title="TX tone, RX tone">Tones TX · RX</th>
+                  <th class="sticky2">#</th><th>Name</th><th>RX MHz</th><th>TX MHz</th><th title="Repeater shift: TX minus RX">Shift</th><th title="TX tone, RX tone">Tones TX · RX</th>
                   <th>Power</th><th>Zone</th><th title="Scan skip">Skip</th><th></th>
                 </tr>
               </thead>
@@ -898,6 +898,12 @@
   }
   .grid :global(input.tone) {
     width: 76px;
+  }
+  .grid :global(input.shift) {
+    width: 86px;
+  }
+  .grid :global(input.err) {
+    outline: 1.5px solid var(--red);
   }
   .grid :global(input.small) {
     width: 60px;

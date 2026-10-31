@@ -16,6 +16,8 @@ import {
   newPreset,
   newZone,
   normalizeChannel,
+  channelWithShift,
+  channelWithTx,
   normalizePreset,
   normalizeZone,
   positionFromRecord,
@@ -654,6 +656,20 @@ class Channels {
       /* kept as typed */
     }
     this.setChannel(number, out);
+  }
+
+  /** TX or the shift typed (Console shows RX and TX; the shift follows, or sets TX). Returns why not, the channel
+   * left as it was. */
+  editTx(number: number, how: "tx" | "shift", text: string): string | null {
+    const c = this.table.channels.find((x) => x.number === number);
+    if (!c) return null;
+    try {
+      const snap = $state.snapshot(c) as Channel;
+      this.setChannel(number, how === "tx" ? channelWithTx(snap, text) : channelWithShift(snap, text));
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
   }
 
   /** One change to several channels (the bulk bar), each through the core's normalising as a row edit is; one undo. */

@@ -163,6 +163,9 @@ pub fn zone_from_record(rec: &[u8]) -> Option<(Name, ZoneCfg)> {
 }
 
 /// A frequency in 10 Hz as MHz with five decimals: "146.52000".
+/// The largest TX - RX shown and kept as a repeater shift (10 MHz, in 10 Hz units): anything further is a split.
+pub const MAX_SHIFT: u32 = 1_000_000;
+
 pub fn mhz_text(f: u32) -> String {
     format!("{}.{:05}", f / 100_000, f % 100_000)
 }
@@ -407,6 +410,90 @@ impl ChanView {
         }
     }
 
+    /// The TX frequency (MHz text): RX for simplex, RX plus or minus the shift, or a split's own; empty when a
+    /// field doesn't parse. Console shows RX and TX; `duplex`/`offset` stay the stored form (and CHIRP's).
+    pub fn tx_text(&self) -> String {
+        let (Some(rx), off) = (parse_mhz(&self.rx), parse_mhz(&self.offset)) else { return String::new() };
+        match (self.duplex.trim(), off) {
+            ("+", Some(o)) => mhz_text(rx.saturating_add(o)),
+            ("-", Some(o)) => mhz_text(rx.saturating_sub(o)),
+            (d, Some(o)) if d.eq_ignore_ascii_case("split") => mhz_text(o),
+            ("" | "off" | "simplex", _) => mhz_text(rx),
+            _ => String::new(),
+        }
+    }
+
+    /// The repeater shift as shown ("+600 kHz", "−5 MHz"): TX minus RX when it is within [`MAX_SHIFT`], else empty
+    /// (simplex, or a TX far from RX: a split, crossband).
+    pub fn shift_text(&self) -> String {
+        let (Some(rx), Some(tx)) = (parse_mhz(&self.rx), parse_mhz(&self.tx_text())) else { return String::new() };
+        let d = tx as i64 - rx as i64;
+        if d == 0 || d.unsigned_abs() > MAX_SHIFT as u64 {
+            return String::new();
+        }
+        let sign = if d > 0 { "+" } else { "\u{2212}" };
+        let a = d.unsigned_abs();
+        let trim = |t: String| t.trim_end_matches('0').trim_end_matches('.').to_string();
+        if a < 100_000 {
+            format!("{sign}{} kHz", trim(format!("{}.{:02}", a / 100, a % 100)))
+        } else {
+            format!("{sign}{} MHz", trim(format!("{}.{:05}", a / 100_000, a % 100_000)))
+        }
+    }
+
+    /// The channel with `tx` typed as its TX frequency: simplex when it is RX, a shift when it is within
+    /// [`MAX_SHIFT`] of RX, else a split (a TX frequency of its own).
+    pub fn with_tx(&self, tx: &str) -> Result<ChanView, String> {
+        let rx = parse_mhz(&self.rx).ok_or("rx: a frequency in MHz, e.g. 146.52")?;
+        let t = parse_mhz(tx).ok_or("tx: a frequency in MHz, e.g. 146.34")?;
+        let d = t as i64 - rx as i64;
+        let (duplex, offset) = match d {
+            0 => ("", String::new()),
+            d if d.unsigned_abs() <= MAX_SHIFT as u64 => (if d > 0 { "+" } else { "-" }, mhz_text(d.unsigned_abs() as u32)),
+            _ => ("split", mhz_text(t)),
+        };
+        ChanView { duplex: duplex.into(), offset, ..self.clone() }.normal()
+    }
+
+    /// The channel with `shift` typed ("+600k", "-0.6", "+5M", "5 MHz", "600 kHz"; a plain number is MHz, no sign
+    /// keeps the current direction (else +); empty, 0 or "none" is simplex): TX moves with it.
+    pub fn with_shift(&self, shift: &str) -> Result<ChanView, String> {
+        let t = shift.trim().replace('\u{2212}', "-").to_ascii_lowercase();
+        let t = t.trim();
+        if t.is_empty() || t == "none" || t == "-" || t == "\u{2013}" {
+            return ChanView { duplex: String::new(), offset: String::new(), ..self.clone() }.normal();
+        }
+        let bad = || "shift: e.g. +600k, -0.6 or +5M".to_string();
+        let (sign, rest) = match t.as_bytes()[0] {
+            b'+' => (Some('+'), &t[1..]),
+            b'-' => (Some('-'), &t[1..]),
+            _ => (None, t),
+        };
+        let rest = rest.trim();
+        let (num, khz) = if let Some(n) = rest.strip_suffix("khz").or_else(|| rest.strip_suffix('k')) {
+            (n.trim(), true)
+        } else {
+            (rest.strip_suffix("mhz").or_else(|| rest.strip_suffix('m')).unwrap_or(rest).trim(), false)
+        };
+        let mhz = if khz {
+            let k = parse_mhz(num).ok_or_else(bad)?; // kHz read as MHz text, then / 1000
+            if k % 1000 != 0 {
+                return Err(bad());
+            }
+            k / 1000
+        } else {
+            parse_mhz(num).ok_or_else(bad)?
+        };
+        if mhz == 0 {
+            return ChanView { duplex: String::new(), offset: String::new(), ..self.clone() }.normal();
+        }
+        if mhz > MAX_SHIFT {
+            return Err(format!("shift: up to {} MHz (a TX further away: type it as TX)", MAX_SHIFT / 100_000));
+        }
+        let dir = sign.unwrap_or(if self.duplex.trim() == "-" { '-' } else { '+' });
+        ChanView { duplex: dir.to_string(), offset: mhz_text(mhz), ..self.clone() }.normal()
+    }
+
     /// The view as the radio would hold it (each field through [`ChanView::channel`] and back), its position kept.
     pub fn normal(&self) -> Result<ChanView, String> {
         Ok(ChanView { pos: self.pos, ..ChanView::of(&self.channel()?) })
@@ -573,6 +660,62 @@ pub fn choices() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rpt(rx: &str, duplex: &str, offset: &str) -> ChanView {
+        ChanView { rx: rx.into(), duplex: duplex.into(), offset: offset.into(), ..ChanView::new(5, 14_652_000) }
+    }
+
+    /// TX and the shift as shown, from the stored duplex/offset (CHIRP's form).
+    #[test]
+    fn tx_and_shift_shown() {
+        let cases = [
+            (rpt("146.94", "-", "0.6"), "146.34000", "\u{2212}600 kHz"),
+            (rpt("443.475", "+", "5"), "448.47500", "+5 MHz"),
+            (rpt("147.36", "+", "1.6"), "148.96000", "+1.6 MHz"),
+            (rpt("146.52", "", ""), "146.52000", ""),
+            (rpt("145.8", "split", "437.8"), "437.80000", ""),
+            (rpt("146.52", "split", "146.40"), "146.40000", "\u{2212}120 kHz"),
+        ];
+        for (v, tx, shift) in cases {
+            assert_eq!((v.tx_text().as_str(), v.shift_text().as_str()), (tx, shift), "{v:?}");
+        }
+    }
+
+    /// TX typed: simplex, a shift within 10 MHz, else a split; RX moving keeps a shift's TX following it.
+    #[test]
+    fn tx_typed() {
+        let v = rpt("146.94", "", "").with_tx("146.34").unwrap();
+        assert_eq!((v.duplex.as_str(), v.offset.as_str(), v.shift_text().as_str()), ("-", "0.60000", "\u{2212}600 kHz"));
+        let v = rpt("443.475", "", "").with_tx("448.475").unwrap();
+        assert_eq!((v.duplex.as_str(), v.offset.as_str()), ("+", "5.00000"));
+        let v = rpt("145.8", "", "").with_tx("437.8").unwrap();
+        assert_eq!((v.duplex.as_str(), v.offset.as_str(), v.tx_text().as_str()), ("split", "437.80000", "437.80000"));
+        let v = rpt("146.94", "-", "0.6").with_tx("146.94").unwrap();
+        assert_eq!((v.duplex.as_str(), v.offset.as_str()), ("", ""));
+        assert!(rpt("146.94", "", "").with_tx("abc").is_err());
+    }
+
+    /// A shift typed in the usual ways sets TX; no sign keeps the direction; 0 or empty is simplex.
+    #[test]
+    fn shift_typed() {
+        let base = rpt("146.94", "-", "0.6");
+        for (typed, tx) in [
+            ("+600k", "147.54000"),
+            ("-0.6", "146.34000"),
+            ("\u{2212}600 kHz", "146.34000"),
+            ("600k", "146.34000"),
+            ("+5M", "151.94000"),
+            ("1.6 MHz", "145.34000"),
+            ("0", "146.94000"),
+            ("", "146.94000"),
+        ] {
+            assert_eq!(base.with_shift(typed).unwrap().tx_text(), tx, "{typed}");
+        }
+        assert!(base.with_shift("12M").is_err());
+        assert_eq!(base.with_shift("600.5k").unwrap().offset, "0.60050");
+        assert!(base.with_shift("600.005k").is_err()); // finer than 10 Hz
+        assert!(base.with_shift("lots").is_err());
+    }
     use crate::radioside::RadioSide;
     use ferrite_core::link::{what, Status};
 

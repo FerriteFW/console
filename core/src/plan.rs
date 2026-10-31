@@ -253,7 +253,16 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
             }
             continue;
         }
-        let mut fs = was.map_or_else(Vec::new, |(oc, _)| fields(&ChanView::of(oc), &ChanView::of(c)));
+        let mut fs = was.map_or_else(Vec::new, |(oc, _)| {
+            let (a, b) = (ChanView::of(oc), ChanView::of(c));
+            let mut fs = fields(&a, &b);
+            // Shown as Console shows it: one TX field, not the stored duplex and offset.
+            if fs.iter().any(|f| f.field == "duplex" || f.field == "offset") {
+                fs.retain(|f| f.field != "duplex" && f.field != "offset");
+                fs.push(Field { field: "tx".into(), from: a.tx_text(), to: b.tx_text() });
+            }
+            fs
+        });
         fs.extend(pos);
         changes.push(Change {
             what: "channel",

@@ -241,6 +241,40 @@ test.describe.serial("unwritten", () => {
     await expect(toolbar().getByRole("button", { name: "Write to radio" })).toBeDisabled();
   });
 
+  test("RX and TX typed; the shift shown, and typed it sets TX; then undone", async () => {
+    if (!first) {
+      await readRadio();
+      first = await table();
+    }
+    const n = await state(page, (f) => f.channels.table.channels[0].number);
+    const r = page.locator(`tr[data-n="${n}"]`);
+    await r.getByLabel("RX MHz").fill("146.94");
+    await r.getByLabel("RX MHz").press("Tab");
+    // TX 600 kHz below: the shift shows it, stored as CHIRP's duplex/offset.
+    await r.getByLabel("TX MHz").fill("146.34");
+    await r.getByLabel("TX MHz").press("Tab");
+    await expect(r.getByLabel("Shift")).toHaveValue("\u2212600 kHz");
+    expect(await state(page, (f) => [f.channels.table.channels[0].duplex, f.channels.table.channels[0].offset])).toEqual(["-", "0.60000"]);
+    // The shift typed: TX follows.
+    await r.getByLabel("Shift").fill("+5M");
+    await r.getByLabel("Shift").press("Tab");
+    await expect(r.getByLabel("TX MHz")).toHaveValue("151.94000");
+    // A TX far from RX (crossband): no shift shown, kept as a TX of its own.
+    await r.getByLabel("TX MHz").fill("446.94");
+    await r.getByLabel("TX MHz").press("Tab");
+    await expect(r.getByLabel("Shift")).toHaveValue("");
+    expect(await state(page, (f) => f.channels.table.channels[0].duplex)).toBe("split");
+    // Nonsense: refused, marked, the channel as it was.
+    await r.getByLabel("Shift").fill("lots");
+    await r.getByLabel("Shift").press("Tab");
+    await expect(r.getByLabel("Shift")).toHaveClass(/err/);
+    expect(await state(page, (f) => f.channels.table.channels[0].duplex)).toBe("split");
+    // Undo back to the radio's table.
+    await page.locator("h1, .status").first().click().catch(() => {});
+    for (let i = 0; i < 6 && (await table()) !== first; i++) await page.keyboard.press("ControlOrMeta+z");
+    await expect.poll(table).toBe(first);
+  });
+
   test("restore: unwritten changes come back after a reload, then Discard", async ({}, info) => {
     if (!first) {
       await readRadio();

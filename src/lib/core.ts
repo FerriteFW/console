@@ -182,6 +182,11 @@ export const channelChoices = (): Choices => JSON.parse(wasm.channel_choices());
 export const decodeSet = (zones: Uint8Array[], channels: Uint8Array[]): { set: ChannelSet; bad: string[] } =>
   JSON.parse(wasm.decode_set(js(zones.map((z) => [...z])), js(channels.map((c) => [...c]))));
 export const normalizeChannel = (c: Channel): Channel => JSON.parse(wasm.normalize_channel(js(c)));
+/** The TX frequency and the repeater shift as shown (shift "" for simplex or a TX more than 10 MHz away). */
+export const channelTx = (c: Channel): { tx: string; shift: string } => JSON.parse(wasm.channel_tx(js(c)));
+/** The channel with its TX typed, or its shift typed; throws why not. */
+export const channelWithTx = (c: Channel, tx: string): Channel => JSON.parse(wasm.channel_with_tx(js(c), tx));
+export const channelWithShift = (c: Channel, shift: string): Channel => JSON.parse(wasm.channel_with_shift(js(c), shift));
 export const normalizeZone = (z: Zone): Zone => JSON.parse(wasm.normalize_zone(js(z)));
 export const checkChannel = (c: Channel, zones: number): string | undefined => wasm.check_channel(js(c), zones) ?? undefined;
 export const newChannel = (number: number, rxMhz: string): Channel => JSON.parse(wasm.new_channel(number, rxMhz));

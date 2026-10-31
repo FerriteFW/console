@@ -2,7 +2,7 @@
   // One channel in the table: the core columns, edited in place (every other field is in ChannelDetails, the side
   // panel). Each change goes through the core (normalised as the radio would hold it, then ferrite's own checks for
   // the problem marker); a field that doesn't parse stays as typed, marked.
-  import { checkChannel, positionView, type Channel, type Choices, type Zone } from "../core";
+  import { channelTx, checkChannel, positionView, type Channel, type Choices, type Zone } from "../core";
   import { channels } from "../channels.svelte";
 
   let {
@@ -30,6 +30,16 @@
   const where = $derived(c.pos ? positionView(c.pos) : null);
 
   const set = <K extends keyof Channel>(k: K, v: Channel[K]) => channels.edit(c.number, k, v);
+  /** RX and TX typed; the shift shown when TX is a repeater shift away (and typed, it sets TX). */
+  const tx = $derived.by(() => {
+    try {
+      return channelTx(c);
+    } catch {
+      return { tx: "", shift: "" };
+    }
+  });
+  let txErr = $state<string | null>(null);
+  const txEdit = (how: "tx" | "shift") => (e: Event) => (txErr = channels.editTx(c.number, how, (e.currentTarget as HTMLInputElement).value));
   const text = (k: keyof Channel) => (e: Event) => set(k, (e.currentTarget as HTMLInputElement).value as never);
 
   // A click on the row itself (not on a field) opens the side panel.
@@ -56,12 +66,8 @@
     {#if where}<span class="pin" role="img" title={`Position ${where.text} (${where.grid})`} aria-label={`Position ${where.text}`}>📍</span>{/if}
   </td>
   <td><input class="freq" value={c.rx} onchange={text("rx")} aria-label="RX MHz" /></td>
-  <td class="pair">
-    <select class="dup" value={c.duplex} onchange={text("duplex")} aria-label="Duplex">
-      {#each choices.duplex as d (d)}<option value={d}>{d || "none"}</option>{/each}
-    </select>
-    <input class="freq" value={c.offset} disabled={!c.duplex} onchange={text("offset")} aria-label="Offset or TX MHz" placeholder="–" />
-  </td>
+  <td><input class="freq" class:err={!!txErr} value={tx.tx} onchange={txEdit("tx")} aria-label="TX MHz" title={txErr ?? "TX MHz"} /></td>
+  <td><input class="shift" class:err={!!txErr} value={tx.shift} onchange={txEdit("shift")} aria-label="Shift" placeholder="–" title={txErr ?? "Repeater shift: +600k, -5M; sets TX"} /></td>
   <td class="pair">
     <input class="tone" list="tone-words" value={c.tx_tone} onchange={text("tx_tone")} aria-label="TX tone" title="TX tone" />
     <input class="tone" list="tone-words" value={c.rx_tone} onchange={text("rx_tone")} aria-label="RX tone" title="RX tone" />

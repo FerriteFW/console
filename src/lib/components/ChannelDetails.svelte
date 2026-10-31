@@ -1,7 +1,7 @@
 <script lang="ts">
   // The side panel: every field of one channel, edited through the same core checks as the table's row (normalised
   // as the radio would hold it; a value that doesn't parse stays as typed and the problem shows here).
-  import { checkChannel, parsePosition, positionView, type Channel, type Choices, type Zone } from "../core";
+  import { channelTx, checkChannel, parsePosition, positionView, type Channel, type Choices, type Zone } from "../core";
   import { channels } from "../channels.svelte";
 
   let {
@@ -18,6 +18,16 @@
 
   const set = <K extends keyof Channel>(k: K, v: Channel[K]) => channels.edit(c.number, k, v);
   const text = (k: keyof Channel) => (e: Event) => set(k, (e.currentTarget as HTMLInputElement).value as never);
+  /** RX and TX typed; the shift shown when TX is a repeater shift away (and typed, it sets TX). */
+  const tx = $derived.by(() => {
+    try {
+      return channelTx(c);
+    } catch {
+      return { tx: "", shift: "" };
+    }
+  });
+  let txErr = $state<string | null>(null);
+  const txEdit = (how: "tx" | "shift") => (e: Event) => (txErr = channels.editTx(c.number, how, (e.currentTarget as HTMLInputElement).value));
   const flag = (k: keyof Channel) => (e: Event) => set(k, (e.currentTarget as HTMLInputElement).checked as never);
 
   // CHAN-2, LINK-53: the position as degrees to five decimals and its grid square; typed as degrees or a grid
@@ -82,16 +92,15 @@
     </label>
     <div class="two">
       <label>
-        <span>Duplex</span>
-        <select value={c.duplex} onchange={text("duplex")} aria-label="Channel duplex">
-          {#each choices.duplex as d (d)}<option value={d}>{d || "none"}</option>{/each}
-        </select>
+        <span>TX MHz</span>
+        <input class="mono" value={tx.tx} onchange={txEdit("tx")} aria-label="Channel TX MHz" />
       </label>
       <label>
-        <span>{c.duplex === "split" ? "TX MHz" : "Offset MHz"}</span>
-        <input class="mono" value={c.offset} disabled={!c.duplex} onchange={text("offset")} aria-label="Channel offset or TX MHz" placeholder="–" />
+        <span>Shift</span>
+        <input class="mono" value={tx.shift} onchange={txEdit("shift")} aria-label="Channel shift" placeholder="–" title="Repeater shift: +600k, -5M; sets TX" />
       </label>
     </div>
+    {#if txErr}<p class="err">{txErr}</p>{/if}
     <div class="two">
       <label>
         <span>TX tone</span>

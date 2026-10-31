@@ -244,6 +244,28 @@ pub fn normalize_channel(view: &str) -> Result<String, JsError> {
     v.normal().map(|c| json(&c)).map_err(|e| JsError::new(&e))
 }
 
+/// A channel's TX frequency and its repeater shift as shown (`{tx, shift}`: the shift empty for simplex or a TX
+/// further than 10 MHz away).
+#[wasm_bindgen]
+pub fn channel_tx(view: &str) -> Result<String, JsError> {
+    let v: channels::ChanView = from_json(view, "channel")?;
+    Ok(json(&serde_json::json!({ "tx": v.tx_text(), "shift": v.shift_text() })))
+}
+
+/// The channel with its TX frequency typed (simplex, a shift, or a split as the distance from RX says), or why not.
+#[wasm_bindgen]
+pub fn channel_with_tx(view: &str, tx: &str) -> Result<String, JsError> {
+    let v: channels::ChanView = from_json(view, "channel")?;
+    v.with_tx(tx).map(|c| json(&c)).map_err(|e| JsError::new(&e))
+}
+
+/// The channel with its shift typed ("+600k", "-0.6", "+5M"): TX follows, or why not.
+#[wasm_bindgen]
+pub fn channel_with_shift(view: &str, shift: &str) -> Result<String, JsError> {
+    let v: channels::ChanView = from_json(view, "channel")?;
+    v.with_shift(shift).map(|c| json(&c)).map_err(|e| JsError::new(&e))
+}
+
 /// CHAN-2, LINK-53: a typed position ("45.4215, -75.6972", a grid square; empty or "none" for none) as JSON
 /// `{pos: [lat, lon] | null, text, grid}` (degrees; the text to five decimals), or why it isn't one.
 #[wasm_bindgen]
