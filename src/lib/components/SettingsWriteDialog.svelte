@@ -6,6 +6,12 @@
   type Store = { write: SettingsWriteStep | null; closeWrite(): void; commitWrite(): Promise<void> };
   let { store = settings as Store, what = "settings" }: { store?: Store; what?: string } = $props();
   const w = $derived(store.write);
+  /** The change list is folded under its count (most writes don't need reading row by row). */
+  let listOpen = $state(false);
+  // Every write starts folded.
+  $effect(() => {
+    if (!w) listOpen = false;
+  });
 </script>
 
 {#if w}
@@ -29,7 +35,8 @@
         {#if !w.plan.changes.length}
           <p>Nothing to write: the radio already holds these {what}.</p>
         {:else}
-          <div class="diff">
+          <details class="diff" bind:open={listOpen}>
+            <summary><b>{w.plan.changes.length} changed</b><span class="more">{listOpen ? "Hide the list" : "Show the list"}</span></summary>
             <h3 class="changed">Changed ({w.plan.changes.length})</h3>
             <ul>
               {#each w.plan.changes as c (c.id)}
@@ -41,7 +48,7 @@
                 </li>
               {/each}
             </ul>
-          </div>
+          </details>
           {#if w.plan.cmds.length}
             <p class="sub">
               {w.plan.cmds.length === 1 ? "One goes" : `${w.plan.cmds.length} go`} as the radio's own <code>set</code> command (no record
@@ -186,5 +193,19 @@
     justify-content: flex-end;
     gap: 10px;
     margin-top: 16px;
+  }
+  .diff > summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--sub);
+    padding: 4px 0;
+  }
+  .diff > summary b {
+    color: var(--text);
+  }
+  .diff > summary .more {
+    margin-left: 6px;
+    color: var(--blue);
+    text-decoration: underline;
   }
 </style>

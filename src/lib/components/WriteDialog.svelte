@@ -34,6 +34,15 @@
     high: "end",
     skipped: "skipped",
   };
+  /** The change list's one-line summary (the list itself is folded: most writes don't need reading row by row). */
+  const summary = $derived(
+    [...groups.map((g) => `${g.items.length} ${g.title.toLowerCase()}`), ...(w && w.step !== "backup" && w.home ? ["home channel"] : [])].join(" · "),
+  );
+  let listOpen = $state(false);
+  // Every write starts folded.
+  $effect(() => {
+    if (!w) listOpen = false;
+  });
   const whatName = (c: Change) => (c.what === "zone" ? "Zone" : c.what === "preset" ? "Preset" : "Ch");
   /** LINK-53: the radio can't store positions: the write leaves them out and says so once. */
   const skipped = $derived(w && w.step !== "backup" ? skippedPositions(w) : 0);
@@ -79,7 +88,8 @@
         {#if !changes.length && !w.home}
           <p>Nothing to write: the radio already holds the table.</p>
         {:else}
-          <div class="diff">
+          <details class="diff" bind:open={listOpen}>
+            <summary><b>{summary}</b><span class="more">{listOpen ? "Hide the list" : "Show the list"}</span></summary>
             {#each groups as g (g.kind)}
               <h3 class={g.kind}>{g.title} ({g.items.length})</h3>
               <ul>
@@ -107,7 +117,7 @@
                 </li>
               </ul>
             {/if}
-          </div>
+          </details>
         {/if}
         <div class="actions">
           <button class="btn" onclick={() => channels.closeWrite()}>Cancel</button>
@@ -247,5 +257,19 @@
     justify-content: flex-end;
     gap: 10px;
     margin-top: 16px;
+  }
+  .diff > summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--sub);
+    padding: 4px 0;
+  }
+  .diff > summary b {
+    color: var(--text);
+  }
+  .diff > summary .more {
+    margin-left: 6px;
+    color: var(--blue);
+    text-decoration: underline;
   }
 </style>

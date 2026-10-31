@@ -82,6 +82,8 @@ test("waypoints: one added by grid square, written, on the map, deleted again", 
   await expect(badge(page, "APRS")).toHaveText("1 unwritten");
   await shot(page, info, "lists-02-waypoint");
   await write(page, "Waypoints", "waypoints", async () => {
+    await expect(dialog(page).locator("details.diff > summary")).toContainText("1 added"); // the list folded under its summary
+    await dialog(page).locator("details.diff > summary").click();
     await expect(dialog(page).getByRole("heading", { name: "Added (1)" })).toBeVisible();
   });
   const back = await state(page, (f: any) => f.lists.waypoints.base as { name: string; source: string }[]);
@@ -107,6 +109,8 @@ test("waypoints: one added by grid square, written, on the map, deleted again", 
   await page.getByRole("option", { name: /E2E point/ }).click();
   await page.getByRole("button", { name: "Delete waypoint E2E point" }).click();
   await write(page, "Waypoints", "waypoints", async () => {
+    await expect(dialog(page).locator("details.diff > summary")).toContainText("1 deleted"); // the list folded under its summary
+    await dialog(page).locator("details.diff > summary").click();
     await expect(dialog(page).getByRole("heading", { name: "Deleted (1)" })).toBeVisible();
   });
   expect(await state(page, (f: any) => f.lists.waypoints.base.length as number)).toBe(before);

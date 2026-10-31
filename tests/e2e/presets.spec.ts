@@ -90,7 +90,9 @@ test.describe.serial("range presets", () => {
     await write(async () => {
       await expect(dialog().locator("li").filter({ hasText: "Preset 1" })).toContainText("E2E range");
       await expect(dialog().locator("li").filter({ hasText: `Preset ${n + 1}` })).toContainText("E2E new");
-      await expect(dialog().getByRole("heading", { name: "Added (1)" })).toBeVisible();
+      await expect(dialog().locator("details.diff > summary")).toContainText("1 added"); // the list folded under its summary
+    await dialog().locator("details.diff > summary").click();
+    await expect(dialog().getByRole("heading", { name: "Added (1)" })).toBeVisible();
     });
     // Read again: the radio holds both.
     await readRadio();
@@ -135,7 +137,9 @@ test.describe.serial("range presets", () => {
     await page.getByLabel("Preset name").fill(first[0].name);
     await page.getByLabel("Preset name").press("Tab");
     await write(async () => {
-      await expect(dialog().getByRole("heading", { name: "Deleted (1)" })).toBeVisible();
+      await expect(dialog().locator("details.diff > summary")).toContainText("1 deleted"); // the list folded under its summary
+    await dialog().locator("details.diff > summary").click();
+    await expect(dialog().getByRole("heading", { name: "Deleted (1)" })).toBeVisible();
     });
     expect((await presets()).map((p) => p.name)).toEqual(first.map((p) => p.name));
   });

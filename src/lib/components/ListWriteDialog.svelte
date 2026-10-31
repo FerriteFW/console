@@ -17,6 +17,13 @@
     ].filter((g) => g.items.length);
   });
   const n = $derived(plan?.changes.length ?? 0);
+  /** The change list is folded under its one-line summary. */
+  const summary = $derived(groups.map((g) => `${g.items.length} ${g.title.toLowerCase()}`).join(" · "));
+  let listOpen = $state(false);
+  // Every write starts folded.
+  $effect(() => {
+    if (!w) listOpen = false;
+  });
   const plural = (k: number, one: string) => `${k} ${one}${k === 1 ? "" : "s"}`;
 </script>
 
@@ -41,7 +48,8 @@
         {#if !n}
           <p>Nothing to write: the radio already holds these {store.noun}.</p>
         {:else}
-          <div class="diff">
+          <details class="diff" bind:open={listOpen}>
+            <summary><b>{summary}</b><span class="more">{listOpen ? "Hide the list" : "Show the list"}</span></summary>
             {#each groups as g (g.kind)}
               <h3 class={g.kind}>{g.title} ({g.items.length})</h3>
               <ul>
@@ -60,7 +68,7 @@
                 {/each}
               </ul>
             {/each}
-          </div>
+          </details>
         {/if}
         <div class="actions">
           <button class="btn" onclick={() => store.closeWrite()}>Cancel</button>
@@ -195,5 +203,19 @@
     justify-content: flex-end;
     gap: 10px;
     margin-top: 16px;
+  }
+  .diff > summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--sub);
+    padding: 4px 0;
+  }
+  .diff > summary b {
+    color: var(--text);
+  }
+  .diff > summary .more {
+    margin-left: 6px;
+    color: var(--blue);
+    text-decoration: underline;
   }
 </style>
