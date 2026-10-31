@@ -6,6 +6,7 @@ import { libraryAdd, parsePlace, type LibraryAdded, type LibraryItem, type Place
 import { channels } from "./channels.svelte";
 import { radio } from "./radio.svelte";
 import { appFetch } from "./appfetch";
+import { activeSlot, slotLine, tuneSummary, type Tune } from "./tune";
 
 export type FixedFreq = { number: number; name: string; rx: number; tx: number; notes?: string; ctcss?: number; dcs?: number };
 export type FixedSet = {
@@ -72,8 +73,53 @@ class Library {
 
   show(tab: Library["tab"] = this.tab) {
     this.error = "";
+    this.mode = "add";
     this.tab = tab;
     this.open = true;
+  }
+
+  /** "add" (Channels' Add channels) or "tune" (Live View's Tune from map: Near me's map, a click tunes the radio). */
+  mode = $state<"add" | "tune">("add");
+  /** A tune on its way to the radio. */
+  tuning = $state(false);
+  /** The last tune's confirmation ("Slot A: 146.94 FM ..."), for Live View to show a moment. */
+  tuned = $state("");
+
+  /** Live View's Tune from map: Near me's map, nothing else. */
+  showTune() {
+    this.error = "";
+    this.mode = "tune";
+    this.tab = "near";
+    this.view = "map";
+    this.open = true;
+  }
+
+  /**
+   * A map frequency onto the radio's active slot as a VFO frequency (no channel saved): one terminal `slot` line over
+   * the link (TERM-35, LINK-34), with the keypad's checks; a refusal shows its reason and the dialog stays open.
+   * No radio: refused, nothing sent.
+   */
+  async tune(t: Tune): Promise<boolean> {
+    const link = radio.connectedLink;
+    if (!link) {
+      this.error = "Connect to a radio first: tuning sets its frequency.";
+      return false;
+    }
+    if (this.tuning) return false;
+    this.tuning = true;
+    this.error = "";
+    try {
+      const slot = activeSlot(await link.cmd("slot"));
+      if (!slot) throw new Error("the radio didn't say which slot is active");
+      await link.cmd(slotLine(slot, t));
+      this.tuned = `Tuned ${tuneSummary(slot, t)}`;
+      return true;
+    } catch (e) {
+      this.error = `Not tuned: ${(e as Error).message}`;
+      return false;
+    } finally {
+      this.tuning = false;
+    }
   }
 
   /**

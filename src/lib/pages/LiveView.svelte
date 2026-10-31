@@ -2,7 +2,8 @@
   // Live View (UV Studio's "Live Viewer"): the radio's screen beside its keys. The screen comes from the UI
   // readback while connected (cable: several a second; Bluetooth: about one a second; the pixel mirror, LINK-18,
   // is shelved: decision 212). Keys from the drawn keypad or the keyboard; never PTT. Display options sit in a slim
-  // toolbar above the radio; the radio's details and the keyboard help open as pop-overs (Alex, Oct 20).
+  // toolbar above the radio; the radio's details and the keyboard help open as pop-overs (Alex, Oct 20). Tune from
+  // map opens Near me's map (the channel library's dialog): a frequency clicked tunes the active slot (Alex, Oct 31).
   import RadioFace from "../components/RadioFace.svelte";
   import ReadbackScreen from "../components/ReadbackScreen.svelte";
   import RadioInfo from "../components/RadioInfo.svelte";
@@ -13,8 +14,16 @@
   import { presser, turn } from "../press.svelte";
   import { sequencer } from "../sequence.svelte";
   import { copyPng, download, pngName, screenPng } from "../snapshot";
+  import LibraryDialog from "../components/library/LibraryDialog.svelte";
+  import { library } from "../library.svelte";
 
   let showKeypad = $state(true);
+  // Tune from map's confirmation ("Tuned Slot A: 146.94 FM ..."), shown a few seconds.
+  $effect(() => {
+    if (!library.tuned) return;
+    const t = setTimeout(() => (library.tuned = ""), 5000);
+    return () => clearTimeout(t);
+  });
   const connected = $derived(radio.phase === "connected");
   const asleep = $derived(connected && Number(radio.ui?.state?.dark) === 1);
   // LINK-13.4, decision 290: what Listen hears: a slot, the broadcast ("Broadcast · 101.1 · ROCK 101"), or HF mode.
@@ -174,6 +183,8 @@
       {/if}
       {#if listen.error}<span class="meta err">{listen.error}</span>{/if}
     </span>
+    <button class="btn quiet" disabled={!connected} onclick={() => library.showTune()} title={connected ? "Pick a repeater, a licensed site or an airport near you on the map: the radio tunes to it" : "Connect to a radio to tune it from the map"}>Tune from map</button>
+    {#if library.tuned}<span class="meta ok" aria-live="polite">{library.tuned}</span>{/if}
     <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
     {#if roomy}<label title="Slots, stations heard and the radio's state beside the radio"><input type="checkbox" bind:checked={panelOn} /> Panel</label>{/if}
     <span class="spacer"></span>
@@ -255,6 +266,7 @@
     {#if panelShown}<LivePanel {hearing} />{/if}
   </div>
 
+  <LibraryDialog />
   <div id="radio-info" popover class="pop"><RadioInfo /></div>
   <div id="shot-menu" popover class="pop menu">
     <button class="btn quiet" popovertarget="shot-menu" popovertargetaction="hide" onclick={() => savePng(2)}>Save PNG 2× (480×640)</button>
@@ -408,6 +420,9 @@
   .meta {
     color: var(--sub);
     font-size: 12px;
+  }
+  .meta.ok {
+    color: var(--green);
   }
   .opt {
     display: flex;

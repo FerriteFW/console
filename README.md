@@ -63,6 +63,7 @@ npm run e2e:run     # the same without the build
 - Radio panel: firmware, build, callsign, unique ID.
 - Live View: the radio's screen at 1x, 1.5x or 2x. The cable polls the UI readback; Bluetooth takes the radio's compact updates.
 - Remote keys: the drawn keypad, the knob, the keyboard. Never PTT.
+- Tune from map (Live View): Near me's map; a frequency clicked tunes the active slot as a VFO (a repeater's shift and tones too, airband AM). No channel saved.
 - Channels & Zones: read, edit in place, write with a backup and a diff first.
 - Every edit is checked by ferrite's own code. Changed rows amber, new rows green.
 - CHIRP CSV import and export. An import goes in as new channels in a new zone (the default when its numbers clash), by number, or replacing every channel.

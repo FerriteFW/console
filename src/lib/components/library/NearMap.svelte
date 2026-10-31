@@ -6,20 +6,23 @@
   // frequency. Your pin is
   // the place; the circle is the search: drag its edge or use the slider and the results load again (debounced).
   // Sites outside the circle fade until they do. The Picked column lists the picks (shared with the lists:
-  // nearby.svelte.ts) with the zone target and Add.
+  // nearby.svelte.ts) with the zone target and Add. With `ontune` (Live View's Tune from map) a popup's frequency is a
+  // button that tunes the radio, and there is no Picked column.
   import { untrack } from "svelte";
   import { library } from "../../library.svelte";
   import { airportSites, repeaterSites, sites, sourceName } from "../../sites.svelte";
-  import { MOBILE, mhz, modeLabel, nearby, offsetLabel, toneLabel } from "../../nearby.svelte";
+  import { MOBILE, mhz, modeLabel, nearby, offsetLabel, repeaterMode, toneLabel } from "../../nearby.svelte";
+  import { toneWord, type Tune } from "../../tune";
+  import { MODE_FM, MODE_NFM } from "../../sitedata";
   import { gridCluster } from "../../cluster";
   import { ATTRIBUTION, loadLeaflet, NO_TILES, TILES, type LatLng, type LCircle, type Leaflet, type LGroup, type LMap, type LMarker } from "../../leaflet";
   import DataCredits from "./DataCredits.svelte";
   import AddBar from "./AddBar.svelte";
 
-  let { each, onadded }: { each: string; onadded: () => void } = $props();
+  let { each = "", onadded = () => {}, ontune }: { each?: string; onadded?: () => void; ontune?: (t: Tune) => void } = $props();
 
-  /** `tone`: a repeater's tones (`label` is then its offset). */
-  type Row = { key: string; mhz: string; label: string; mobile: boolean; tone?: string };
+  /** `tone`: a repeater's tones (`label` is then its offset). `tune`: what a click tunes (Tune from map). */
+  type Row = { key: string; mhz: string; label: string; mobile: boolean; tone?: string; tune: Tune };
   type Site = { id: string; kind: "lic" | "air" | "rpt"; src: string; name: string; pos: LatLng; km: number; rows: Row[] };
 
   const on = (src: string) => nearby.layers[src] !== false;
@@ -33,7 +36,8 @@
       const id = `s|${e.name}|${e.pos[0]}|${e.pos[1]}`;
       let s = by.get(id);
       if (!s) by.set(id, (s = { id, kind: "lic", src: e.src, name: e.name, pos: e.pos, km: e.km, rows: [] }));
-      s.rows.push({ key: e.key, mhz: mhz(e.f), label: modeLabel(e.m), mobile: e.mobile });
+      const mode = e.m === MODE_NFM ? "NFM" : e.m === MODE_FM ? "FM" : nearby.mode;
+      s.rows.push({ key: e.key, mhz: mhz(e.f), label: modeLabel(e.m), mobile: e.mobile, tune: { name: e.name, hz: e.f * 500, mode } });
       s.km = Math.min(s.km, e.km);
     }
     const out = [...by.values()];
@@ -49,7 +53,7 @@
           name: a.c,
           pos: a.l,
           km: a.km,
-          rows: freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false })),
+          rows: freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false, tune: { name: `${a.c} ${q.type}`, hz: Math.round(q.khz * 1000), mode: "AM" } })),
         });
       }
     }
@@ -64,7 +68,14 @@
           name: r.c,
           pos: r.l,
           km: r.km,
-          rows: freqs.map((q) => ({ key: q.key, mhz: mhz(q.f), label: offsetLabel(q.d), mobile: false, tone: toneLabel(q.te, q.td) })),
+          rows: freqs.map((q) => ({
+            key: q.key,
+            mhz: mhz(q.f),
+            label: offsetLabel(q.d),
+            mobile: false,
+            tone: toneLabel(q.te, q.td),
+            tune: { name: r.c, hz: q.f * 500, mode: repeaterMode(q.m, r.l[1]), shiftHz: q.d * 500, txTone: q.te ? toneWord(q.te) : undefined, rxTone: q.td ? toneWord(q.td) : undefined },
+          })),
         });
       }
     }
@@ -289,7 +300,7 @@
   const rptHere = $derived(new Set(nearby.repeaters.length ? ["repeaters"] : []));
 </script>
 
-<div class="nm">
+<div class="nm" class:tuning={!!ontune}>
   <div class="mapcol">
     <div class="status" role="status">
       <label class="radius">
@@ -319,7 +330,7 @@
         {#if nearby.showLic}<span><i class="dot lic"></i>Business &amp; public</span>{/if}
         {#if nearby.showAir}<span><i class="dot air"></i>Airport</span>{/if}
         {#if nearby.showRpt}<span><i class="dot rpt"></i>Repeater</span>{/if}
-        <span><i class="dot pick"></i>Picked</span>
+        {#if !ontune}<span><i class="dot pick"></i>Picked</span>{/if}
       </div>
       {#if popSites.length && popAt}
         <div class="pop" bind:this={popEl} style:left="{popAt.left}px" style:top="{popAt.top}px" role="dialog" aria-label="Frequencies at {popSites[0].name}">
@@ -331,19 +342,28 @@
                 <b>{s.name}</b>
                 <span>
                   {s.kind === "air" ? "Airport" : s.kind === "rpt" ? "Repeater" : `Business & public · ${sourceName(s.src)}`} · {s.km < 10 ? s.km.toFixed(1) : Math.round(s.km)} km
-                  {#if s.rows.length > 1}· <button class="link" onclick={() => nearby.set(s.rows.map((q) => q.key), !all)}>{all ? "None" : "All"}</button>{/if}
+                  {#if s.rows.length > 1 && !ontune}· <button class="link" onclick={() => nearby.set(s.rows.map((q) => q.key), !all)}>{all ? "None" : "All"}</button>{/if}
                 </span>
               </header>
               <ul>
                 {#each s.rows as q (q.key)}
                   <li>
-                    <label>
-                      <input type="checkbox" checked={nearby.has(q.key)} onchange={() => nearby.toggle(q.key)} aria-label="{s.name} {q.mhz} {q.label}" />
-                      <span class="mono">{q.mhz}</span>
-                      <span class="tag">{q.label}</span>
-                      {#if q.tone}<span class="tag">{q.tone}</span>{/if}
-                      {#if q.mobile}<span class="tag mob" title={MOBILE}>mobile</span>{/if}
-                    </label>
+                    {#if ontune}
+                      <button class="tune" onclick={() => ontune(q.tune)} aria-label="Tune {s.name} {q.mhz} {q.label}" title="Tune the radio's active slot to {q.mhz} MHz (VFO; no channel saved)">
+                        <span class="mono">{q.mhz}</span>
+                        <span class="tag">{q.label}</span>
+                        {#if q.tone}<span class="tag">{q.tone}</span>{/if}
+                        {#if q.mobile}<span class="tag mob" title={MOBILE}>mobile</span>{/if}
+                      </button>
+                    {:else}
+                      <label>
+                        <input type="checkbox" checked={nearby.has(q.key)} onchange={() => nearby.toggle(q.key)} aria-label="{s.name} {q.mhz} {q.label}" />
+                        <span class="mono">{q.mhz}</span>
+                        <span class="tag">{q.label}</span>
+                        {#if q.tone}<span class="tag">{q.tone}</span>{/if}
+                        {#if q.mobile}<span class="tag mob" title={MOBILE}>mobile</span>{/if}
+                      </label>
+                    {/if}
                   </li>
                 {/each}
               </ul>
@@ -353,6 +373,7 @@
       {/if}
     </div>
   </div>
+  {#if !ontune}
   <aside class="side" aria-label="Picked">
     <h3>Picked <span class="count">{picks.length + nearby.nCommon}</span>{#if picks.length}<button class="link clear" onclick={() => nearby.clear()}>Clear</button>{/if}</h3>
     <ul class="picked">
@@ -371,6 +392,7 @@
     </ul>
     <AddBar side {each} {onadded} />
   </aside>
+  {/if}
 </div>
 <div class="feet">
   <DataCredits
@@ -536,8 +558,30 @@
     border-radius: 5px;
     cursor: pointer;
   }
-  .pop label:hover {
+  .pop label:hover,
+  .pop .tune:hover {
     background: var(--raised);
+  }
+  /* Tune from map: a frequency is one click. */
+  .pop .tune {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 4px 6px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .pop .tune .mono {
+    color: var(--blue);
+  }
+  .nm.tuning {
+    grid-template-columns: minmax(0, 1fr);
   }
   .x {
     position: absolute;

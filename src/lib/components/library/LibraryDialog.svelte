@@ -6,7 +6,8 @@
   // while it shows, its categories are switches too (Business off to start: the map's noise). The dialog is always nearly as big as the
   // window (a desktop app's feel: the map gets the room), so switching tabs never resizes it.
   // Added channels go into the table as new rows, checked by ferrite's own code; Write then shows them in the diff
-  // as usual.
+  // as usual. Live View's Tune from map (library.mode "tune") is the same dialog with Near me's map alone: a frequency
+  // clicked tunes the radio's active slot (library.tune) and the dialog closes.
   import { library } from "../../library.svelte";
   import FixedTab from "./FixedTab.svelte";
   import NearbyTab from "./NearbyTab.svelte";
@@ -14,6 +15,7 @@
   import { airportSites, repeaterSites, sites } from "../../sites.svelte";
   import { CAT_ORDER, nearby, type Kind } from "../../nearby.svelte";
   import { CATEGORIES } from "../../sitedata";
+  import type { Tune } from "../../tune";
 
   const tabs = [
     { id: "fixed", label: "Fixed sets", sub: "FRS, GMRS, MURS, PMR446, marine, weather, airband, resource roads, calling" },
@@ -55,6 +57,10 @@
 
   const room = $derived(1000 - channels.table.channels.length);
   const close = () => (library.open = false);
+  const tuneMode = $derived(library.mode === "tune");
+  async function tune(t: Tune) {
+    if (await library.tune(t)) close();
+  }
   function key(e: KeyboardEvent) {
     if (e.key === "Escape" && library.open) close();
   }
@@ -66,14 +72,19 @@
   <div class="overlay" role="presentation" onclick={(e) => e.target === e.currentTarget && close()}>
     <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="lib-title">
       <header>
-        <h2 id="lib-title">Add channels</h2>
-        <span class="sub">{channels.table.channels.length} in the table · room for {room} more · {channels.table.zones.length} zones</span>
+        {#if tuneMode}
+          <h2 id="lib-title">Tune from map</h2>
+          <span class="sub">{library.tuning ? "Tuning…" : "Click a frequency: the radio's active slot tunes to it as a VFO (no channel saved)."}</span>
+        {:else}
+          <h2 id="lib-title">Add channels</h2>
+          <span class="sub">{channels.table.channels.length} in the table · room for {room} more · {channels.table.zones.length} zones</span>
+        {/if}
         <span class="spacer"></span>
         <button class="x" onclick={close} aria-label="Close">✕</button>
       </header>
       <div class="body">
         <div class="nav" role="tablist" aria-label="Sources">
-          {#each tabs as t (t.id)}
+          {#each tuneMode ? tabs.filter((t) => t.id === "near") : tabs as t (t.id)}
             <button role="tab" aria-selected={library.tab === t.id} class:on={library.tab === t.id} onclick={() => (library.tab = t.id)}>
               <b>{t.label}</b><span>{t.sub}</span>
             </button>
@@ -97,11 +108,17 @@
               {/if}
             {/each}
           </div>
-          <p class="note">Added channels land in the table as new rows (green). Nothing goes to the radio until Write, which backs up and shows the diff first.</p>
+          {#if tuneMode}
+            <p class="note">A repeater tunes with its shift and tones; an airport in AM. To keep a frequency, add it as a channel on Channels &amp; Zones.</p>
+          {:else}
+            <p class="note">Added channels land in the table as new rows (green). Nothing goes to the radio until Write, which backs up and shows the diff first.</p>
+          {/if}
         </div>
         <div class="panel" role="tabpanel" aria-label={tabs.find((t) => t.id === library.tab)?.label}>
           {#if library.error}<div class="banner">{library.error}</div>{/if}
-          {#if library.tab === "fixed"}
+          {#if tuneMode}
+            <NearbyTab onadded={close} ontune={tune} />
+          {:else if library.tab === "fixed"}
             <FixedTab onadded={close} />
           {:else}
             <NearbyTab onadded={close} />

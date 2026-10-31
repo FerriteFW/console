@@ -16,6 +16,7 @@ import { airportSites, repeaterSites, sites, Sites, type Near } from "./sites.sv
 import { CATEGORIES, CAT_BUSINESS, CAT_PUBLIC_SAFETY, MODE_DIGITAL, MODE_FM, MODE_NFM } from "./sitedata";
 import { airportName, airportType, libraryFixedItems, near, orgGroups, type LibraryItem } from "./core";
 import { zoneName, type Target } from "./components/library/ZoneTarget.svelte";
+import { toneWord } from "./tune";
 
 /** A licensed entry: an organization's frequency, from its nearest site (`name`: that licensee); `sites`: how many share it. */
 export type SiteEntry = { key: string; src: string; name: string; f: number; m: number; mobile: boolean; km: number; group: string; k: number; sites: number; pos: [number, number] };
@@ -50,8 +51,6 @@ export function toneLabel(te: string, td: string): string {
   const parts = [te ? `T ${te}` : "", td ? `R ${td}` : ""].filter(Boolean);
   return parts.length ? parts.join(" · ") : "no tone";
 }
-/** The data's tone as Ferrite's word (TERM-35.2): DCS gets its N ("D023" is "D023N"). */
-const toneWord = (t: string) => (/^D\d{3}$/.test(t) ? `${t}N` : t);
 /** A repeater's mode: NFM where HearHam says so; else by the region's band plan, told roughly by longitude: NFM in
  * IARU Region 1 (Europe, Africa, the Middle East: 12.5 kHz channels), wide FM elsewhere (20-25 kHz). */
 export const repeaterMode = (m: number, lon: number): "NFM" | "FM" => (m === MODE_NFM || (lon >= -30 && lon < 60) ? "NFM" : "FM");

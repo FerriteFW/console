@@ -3,7 +3,7 @@
   // list. The kinds shown (Licensed, Airports, Repeaters) are switched in the dialog's sidebar (LibraryDialog, which
   // also loads them); only those show and go in Add (nearby.svelte.ts). The list with several kinds is the licensed
   // groups, then the airports, then the repeaters. When no place is given yet and a radio is connected, its GPS fix
-  // (else its fixed position) is asked for once.
+  // (else its fixed position) is asked for once. With `ontune` (Live View's Tune from map) it is the map alone.
   import { library } from "../../library.svelte";
   import { radio } from "../../radio.svelte";
   import { airportSites, repeaterSites, sites } from "../../sites.svelte";
@@ -15,8 +15,9 @@
   import NearMap from "./NearMap.svelte";
   import AddBar from "./AddBar.svelte";
   import DataCredits from "./DataCredits.svelte";
+  import type { Tune } from "../../tune";
 
-  let { onadded }: { onadded: () => void } = $props();
+  let { onadded, ontune }: { onadded: () => void; ontune?: (t: Tune) => void } = $props();
 
   sites.start();
   airportSites.start();
@@ -55,10 +56,12 @@
 
 <div class="top">
   <PlacePicker />
+  {#if !ontune}
   <div class="seg" role="group" aria-label="View">
     <button aria-pressed={library.view === "map"} class:on={library.view === "map"} onclick={() => (library.view = "map")}>Map</button>
     <button aria-pressed={library.view === "list"} class:on={library.view === "list"} onclick={() => (library.view = "list")}>List</button>
   </div>
+  {/if}
 </div>
 {#if chips.length}
   <div class="kinds" role="group" aria-label="Licensed sources">
@@ -69,7 +72,9 @@
     {/each}
   </div>
 {/if}
-{#if library.view === "map"}
+{#if ontune}
+  <NearMap {ontune} />
+{:else if library.view === "map"}
   <NearMap {each} {onadded} />
 {:else}
   <div class="lists" class:both={nearby.multi}>

@@ -68,3 +68,26 @@ export async function openData(d: Locator) {
   if ((await b.getAttribute("aria-expanded")) !== "true") await b.click();
   await expect(d.getByRole("dialog", { name: "Channel data sources" })).toBeVisible();
 }
+
+/** A site's marker on the map, or the cluster holding it (labelled with its sites' names). */
+export const marker = (d: Locator, name: string) => d.getByRole("button", { name: new RegExp(`^(${name}: \\d+ frequenc|\\d+ sites: (.*, )?${name}(,|$))`) });
+
+/** Opens a site's popup: its marker, or its cluster (zooming in, or listing sites too close to split). */
+export async function openSite(p: Page, d: Locator, name: string) {
+  const pop = d.getByRole("dialog", { name: /^Frequencies at / });
+  // Another site's popup closed first: it can sit over this one's marker.
+  if ((await pop.count()) && !(await pop.locator("header b", { hasText: new RegExp(`^${name}$`) }).count())) await pop.getByRole("button", { name: "Close" }).click({ timeout: 2000 });
+  for (let i = 0; i < 8; i++) {
+    if (await pop.locator("header b", { hasText: new RegExp(`^${name}$`) }).count()) return pop;
+    const m = marker(d, name).first();
+    // Off the map's view (zoomed in on another site): zoom out a step first.
+    const at = (await m.count()) ? await m.boundingBox() : null;
+    const view = (await d.locator(".wrap").boundingBox())!;
+    const inView = at && at.x >= view.x && at.y >= view.y && at.x + at.width <= view.x + view.width && at.y + at.height <= view.y + view.height;
+    if (at && !inView) await d.getByRole("button", { name: "Zoom out" }).click({ timeout: 2000 }).catch(() => {});
+    else if (at) await m.click({ timeout: 2000 }).catch(() => {});
+    await p.waitForTimeout(400);
+  }
+  await expect(pop.locator("header b", { hasText: new RegExp(`^${name}$`) })).toBeVisible();
+  return pop;
+}
