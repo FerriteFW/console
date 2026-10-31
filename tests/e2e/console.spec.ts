@@ -61,9 +61,9 @@ test("tabs: APRS and Firmware switch pages, and old addresses land on their tab"
   await openConsole(page, "aprs-heard");
   await expect(tabs("APRS").getByRole("tab", { name: "Heard stations" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("toolbar", { name: "Heard stations" })).toBeVisible();
-  await tabs("APRS").getByRole("tab", { name: "Messages" }).click();
+  await tabs("APRS").getByRole("tab", { name: "Messages", exact: true }).click();
   await expect(page).toHaveURL(/#\/aprs-messages$/);
-  await expect(tabs("APRS").getByRole("tab", { name: "Messages" })).toHaveAttribute("aria-selected", "true");
+  await expect(tabs("APRS").getByRole("tab", { name: "Messages", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("toolbar", { name: "Messages" })).toBeVisible();
 
   // the sidebar's Firmware opens Update; Install and Back to stock are its tabs

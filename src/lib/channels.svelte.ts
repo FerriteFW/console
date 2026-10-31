@@ -20,6 +20,8 @@ import {
   normalizeZone,
   positionFromRecord,
   positionRecord,
+  presetSkipsFromRecord,
+  presetSkipsRecord,
   presetsFile,
   presetsPlan,
   presetsRestore,
@@ -45,13 +47,15 @@ export type Home = number | null | undefined;
 /** The home channel a write sets (`home N` on the terminal after the records: the settings record isn't the table's). */
 export type HomeOp = { from: number | null; to: number | null };
 /** A read: the set, its home channel, whether the radio stores positions (LINK-53: HELLO caps 64), and its range
- *  presets (null: the radio didn't give them). */
-export type ReadResult = { set: ChannelSet; home: Home; canPos: boolean; presets: Preset[] | null };
+ *  presets (null: the radio didn't give them), with their skip lists when the radio gives those (`canSkips`,
+ *  LINK-58: caps2 1). */
+export type ReadResult = { set: ChannelSet; home: Home; canPos: boolean; presets: Preset[] | null; canSkips: boolean };
 /** The table, its home channel and the range presets, as the undo list keeps them. */
 type Snap = { set: ChannelSet; home: Home; presets: Preset[] };
 /** The write dialog's steps. */
-/** The range presets' part of a write (null when the table has none to write). */
-type Pre = { presets: PresetPlan | null };
+/** The range presets' part of a write (null when the table has none to write); `skipsKept`: the table has skip lists
+ *  the radio's firmware can't take (LINK-58), left out of the write and kept in the table. */
+type Pre = { presets: PresetPlan | null; skipsKept?: boolean };
 export type WriteStep =
   | { step: "backup" }
   | ({ step: "review"; plan: Plan; home: HomeOp | null; canPos: boolean; fresh: ChannelSet; backupName: string; drifted: boolean } & Pre)
@@ -61,7 +65,7 @@ export type WriteStep =
 /** How many changes a write makes: the plan's records, the positions (to a radio that stores them), the range
  *  presets and the home channel. */
 export const writeCount = (w: { plan: Plan; home: HomeOp | null; canPos: boolean } & Pre) =>
-  w.plan.ops.length + (w.canPos ? w.plan.positions.length : 0) + (w.presets?.ops.length ?? 0) + (w.home ? 1 : 0);
+  w.plan.ops.length + (w.canPos ? w.plan.positions.length : 0) + (w.presets?.ops.length ?? 0) + (w.presets?.skips.length ?? 0) + (w.home ? 1 : 0);
 /** Position changes a write leaves out: the radio's firmware can't store them (no caps 64). */
 export const skippedPositions = (w: { plan: Plan; canPos: boolean }) => (w.canPos ? 0 : w.plan.positions.length);
 
@@ -83,8 +87,10 @@ const canon = (v: unknown): string =>
     x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, x[k]])) : x,
   );
 const sameJson = (a: unknown, b: unknown) => canon(a) === canon(b);
-/** A preset as the diff compares it: its fields, not its place in the list or where it was read. */
-const presetFields = (p: Preset | undefined) => p && { name: p.name, low: p.low, high: p.high, step: p.step, mode: p.mode, resume: p.resume };
+/** A preset's record as the diff compares it: its fields, not its place in the list or where it was read. */
+const presetRecord = (p: Preset | undefined) => p && { name: p.name, low: p.low, high: p.high, step: p.step, mode: p.mode, resume: p.resume };
+/** A preset as the table's changes count it: its record and its skip list (SCAN-10). */
+const presetFields = (p: Preset | undefined) => p && { ...presetRecord(p), skips: p.skips ?? [] };
 
 /** A file to the user's downloads. */
 export function download(name: string, text: string, type: string) {
@@ -269,6 +275,21 @@ class Channels {
       } catch {
         presets = null; // a radio that doesn't give them: the table's stay as they are, and none are written
       }
+      // LINK-58: each preset's skipped frequencies, from a radio whose second caps byte says so (a read lists the
+      // presets that have any).
+      const canSkips = !!presets && (link.caps2 & P.caps2.PRESET_SKIPS) !== 0;
+      if (canSkips && presets?.length) {
+        this.progress = { label: "Reading skipped frequencies…", done: 0, total: 0 };
+        const smap = await link.readMany(P.what.PRESET_SKIPS, 0, presets.length);
+        for (const [i, r] of smap) {
+          if (!presets[i]) continue;
+          // A blank entry (erased flash: 0xFFFFFFFF, or 0) is no frequency: left out, and said so.
+          const all = presetSkipsFromRecord(r) ?? [];
+          presets[i].skips = all.filter((f) => f !== 0xffffffff && f !== 0);
+          const blank = all.length - presets[i].skips.length;
+          if (blank) this.notes = [...this.notes, `range preset ${i + 1}: ${blank} blank skipped ${blank === 1 ? "frequency" : "frequencies"} left out (Write with a list of its own clears them on the radio)`];
+        }
+      }
       let home: Home;
       try {
         const rec = await link.readRecord(P.what.SETTINGS, 0);
@@ -276,7 +297,7 @@ class Channels {
       } catch {
         home = undefined; // a radio without the record (the demo radio): the home channel isn't known
       }
-      return { set, home, canPos, presets };
+      return { set, home, canPos, presets, canSkips };
     } finally {
       radio.busy = "";
       this.progress = null;
@@ -310,11 +331,11 @@ class Channels {
 
   /** A fresh read saved as a backup file: the radio as it is now. */
   async backupRadio(): Promise<ReadResult & { name: string }> {
-    const { set, home, canPos, presets } = await this.readRadio();
+    const { set, home, canPos, presets, canSkips } = await this.readRadio();
     const name = `${this.fileBase()}-backup.json`;
     download(name, backupFile(set, new Date().toISOString(), this.radioMeta()), "application/json");
     if (presets?.length) download(`${this.fileBase()}-presets.json`, presetsFile(presets, new Date().toISOString(), this.radioMeta()), "application/json");
-    return { set, home, canPos, presets, name };
+    return { set, home, canPos, presets, canSkips, name };
   }
 
   /** The range presets as `.ferrite`'s presets.json, unwritten changes too. */
@@ -365,18 +386,29 @@ class Channels {
     this.error = "";
     this.write = { step: "backup" };
     try {
-      const { set: fresh, home: freshHome, canPos, presets: freshPresets, name } = await this.backupRadio();
+      const { set: fresh, home: freshHome, canPos, presets: freshPresets, canSkips, name } = await this.backupRadio();
       // A radio without positions: the diff's positions are against those Console kept (the table as read).
       if (!canPos) carryPositions(fresh, this.base ? (clone(this.base) as ChannelSet) : null);
       const plan = writePlan(fresh, this.table);
       // Range presets: only to a radio that gave them, and only when the table's differ from what it holds now.
       const want = $state.snapshot(this.presets) as Preset[];
-      const presets = freshPresets ? presetsPlan(freshPresets, this.presetsAgainst(freshPresets, want)) : null;
+      const presets = freshPresets ? presetsPlan(freshPresets, this.presetsAgainst(freshPresets, want), canSkips) : null;
+      const skipsKept = !!freshPresets && !canSkips && want.some((p) => p.skips?.length);
       const drifted = (!!this.base && !sameJson(this.base, fresh)) || (!!this.basePresets && !!freshPresets && !sameJson(this.basePresets, freshPresets));
       // The home channel goes only when the table moved it (a swap or renumber here), and only where the radio's differs.
       const to = this.home ?? null;
       const home = this.homeChanged && freshHome !== undefined && freshHome !== to ? { from: freshHome, to } : null;
-      this.write = { step: "review", plan, home, canPos, fresh, backupName: name, drifted, presets: presets && (presets.ops.length || presets.problems.length) ? presets : null };
+      this.write = {
+        step: "review",
+        plan,
+        home,
+        canPos,
+        fresh,
+        backupName: name,
+        drifted,
+        presets: presets && (presets.ops.length || presets.problems.length || presets.skips.length) ? presets : null,
+        skipsKept,
+      };
     } catch (e) {
       this.write = null;
       this.error = `Nothing written: the backup read failed (${(e as Error).message}).`;
@@ -423,6 +455,19 @@ class Channels {
           throw new Error(`range presets: ${(e as Error).message}`);
         }
       }
+      // LINK-58: the skip lists after the presets (a list stays with the preset in its place).
+      if (presets?.skips.length) {
+        const before = plan.ops.length + (canPos ? plan.positions.length : 0) + presets.ops.length;
+        try {
+          await link.writeRecords(
+            P.what.PRESET_SKIPS,
+            presets.skips.map(([index, r]) => ({ index, record: new Uint8Array(r) })),
+            (done) => (this.write = { step: "writing", plan, home, canPos, done: before + done, presets }),
+          );
+        } catch (e) {
+          throw new Error(`skipped frequencies: ${(e as Error).message}`);
+        }
+      }
       // After the records: `home N` needs channel N on the radio.
       if (home) {
         await link.cmd(`home ${home.to ?? "none"}`);
@@ -436,18 +481,20 @@ class Channels {
     }
     let verified = false;
     try {
-      const { set: back, home: backHome, canPos: backPos, presets: backPresets } = await this.readRadio();
+      const { set: back, home: backHome, canPos: backPos, presets: backPresets, canSkips: backSkips } = await this.readRadio();
       if (!backPos) carryPositions(back, $state.snapshot(this.table) as ChannelSet);
       this.base = clone(back);
       this.baseHome = backHome;
-      const presetsSame =
-        !backPresets || sameJson(backPresets.map(presetFields), (($state.snapshot(this.presets) as Preset[]).map((p) => presetFields(this.tidy(p)))));
+      // Skip lists a radio can't take (no caps2) stay in the table: compared only where it gave them.
+      const cmp = backSkips ? presetFields : presetRecord;
+      const presetsSame = !backPresets || sameJson(backPresets.map(cmp), ($state.snapshot(this.presets) as Preset[]).map((p) => cmp(this.tidy(p))));
       verified = !error && sameJson(back, this.table) && (this.home === undefined || backHome === this.home) && presetsSame;
       if (backPresets) this.basePresets = backPresets;
       if (!error) {
         this.table = clone(back);
         this.home = backHome;
-        if (backPresets) this.presets = clone(backPresets);
+        if (backPresets && backSkips) this.presets = clone(backPresets);
+        else if (backPresets) this.presets = backPresets.map((p, i) => ({ ...p, skips: this.presets[i]?.skips ?? [] }));
         this.history = [];
         this.restored = 0;
       }
@@ -455,7 +502,7 @@ class Channels {
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
     }
-    this.write = { step: "done", plan, home, canPos, verified, error, written, presets };
+    this.write = { step: "done", plan, home, canPos, verified, error, written, presets, skipsKept: w.skipsKept };
   }
 
   closeWrite() {
@@ -532,7 +579,7 @@ class Channels {
       if (!p.origin) return p;
       const was = base[p.origin - 1];
       const now = fresh[p.origin - 1];
-      return was && now && sameJson(presetFields(was), presetFields(now)) ? p : { ...p, origin: undefined };
+      return was && now && sameJson(presetRecord(was), presetRecord(now)) ? p : { ...p, origin: undefined };
     });
   }
 
@@ -560,6 +607,14 @@ class Channels {
     if (sameJson(was, next)) return;
     this.remember();
     this.presets[i] = next;
+  }
+
+  /** SCAN-10: a preset's skipped frequencies (10 Hz), in order; checked as the radio checks them when written. */
+  setPresetSkips(number: number, skips: number[]) {
+    const i = this.presets.findIndex((p) => p.number === number);
+    if (i < 0 || sameJson(this.presets[i].skips ?? [], skips)) return;
+    this.remember();
+    this.presets[i] = { ...($state.snapshot(this.presets[i]) as Preset), skips: [...skips] };
   }
 
   /** A new preset at the end (2 m's band, as the radio's own new one): its number, or null when 16 are there. */

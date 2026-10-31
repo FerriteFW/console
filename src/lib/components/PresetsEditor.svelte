@@ -1,10 +1,12 @@
 <script lang="ts">
   // The Range presets tab (MENU 0 1 4, NeonPlug's list and detail): the presets on the left, in the radio's order (a
   // new one goes at the end), the chosen one on the right: its name, range, step, mode and resume, checked as the
-  // radio checks them (the core runs ferrite's own link session), and what the radio keeps beside it (its skipped
-  // frequencies, SCAN-10). Edits are unwritten changes of the table: Write puts them on the radio with the channels.
+  // radio checks them (the core runs ferrite's own link session), and its skip list (SCAN-10, LINK-58: the
+  // frequencies its scan passes over, up to 48, within its range). Edits are unwritten changes of the table: Write
+  // puts them on the radio with the channels, the skip lists after the presets.
   import { channels } from "../channels.svelte";
-  import { presetChoices, type Preset, type PresetChoices } from "../core";
+  import { mhzText, presetChoices, presetSkipParse, P, type Preset, type PresetChoices } from "../core";
+  import { radio } from "../radio.svelte";
 
   let { onsay }: { onsay: (text: string, undo?: boolean) => void } = $props();
 
@@ -43,6 +45,37 @@
 
   function set(k: "name" | "low" | "high" | "step" | "mode" | "resume", v: string) {
     if (p) channels.editPreset(p.number, k, v);
+  }
+
+  // The skip list: a radio connected without LINK-58 (no caps2 bit) can't take it; offline it is edited for a file.
+  const link = $derived(radio.connectedLink);
+  const noSkips = $derived(!!link && (link.caps2 & P.caps2.PRESET_SKIPS) === 0);
+  const skips = $derived(p?.skips ?? []);
+  let skipText = $state("");
+  let skipNote = $state("");
+  $effect(() => {
+    void pickedN;
+    skipText = "";
+    skipNote = "";
+  });
+  /** One typed in MHz, onto the end of the list: refused here when it isn't in the range, is there already, or 48 are. */
+  function addSkip() {
+    if (!p) return;
+    const f = presetSkipParse(skipText);
+    const low = presetSkipParse(p.low);
+    const high = presetSkipParse(p.high);
+    if (f === undefined) skipNote = "A frequency in MHz, e.g. 146.52.";
+    else if (low !== undefined && high !== undefined && (f < low || f > high)) skipNote = `${mhzText(f)} is outside this range (${range(p)}).`;
+    else if (skips.includes(f)) skipNote = `${mhzText(f)} is skipped already.`;
+    else if (skips.length >= choices.skipsMax) skipNote = `${choices.skipsMax} at most: remove one first.`;
+    else {
+      channels.setPresetSkips(p.number, [...skips, f]);
+      skipText = "";
+      skipNote = "";
+    }
+  }
+  function removeSkip(f: number) {
+    if (p) channels.setPresetSkips(p.number, skips.filter((x) => x !== f));
   }
 
   const changed = (x: Preset) => !!channels.basePresets && dirty.presets.has(x.number);
@@ -118,19 +151,43 @@
       </div>
       <p class="sub small">18 to 1300 MHz, on one side of 18 and 64 MHz (the band relay's edges: a scan can't cross them). Global resume follows MENU 0 1 2.</p>
 
-      <h3>Skipped frequencies</h3>
-      <div class="skips">
-        <p>
-          The radio keeps up to 48 for each range: on a hit during this range's scan, <b>#</b> adds the frequency for good
-          (<b>*</b> skips it for this scan only, MENU 0 1 5).
-        </p>
+      <h3>Skipped frequencies <span class="sub">{skips.length}/{choices.skipsMax}</span></h3>
+      <div class="skips" role="group" aria-label="Skipped frequencies">
         <p class="sub">
-          {#if p.origin}
-            The link doesn't carry them yet, so they aren't listed here; they stay with this preset when you edit it, and go with it if you delete it.
-          {:else}
-            A new preset starts with none.
-          {/if}
+          This range's scan passes over these. On the radio, <b>#</b> on a hit adds one for good (<b>*</b> skips it for this scan only,
+          MENU 0 1 5).
         </p>
+        {#if noSkips}
+          <p class="note" data-testid="skips-old-firmware">
+            This radio's firmware doesn't share skip lists over the link: update Ferrite. The radio keeps its own with this preset; a list
+            here stays in the table and in .ferrite files.
+          </p>
+        {/if}
+        {#if skips.length}
+          <ul class="skiplist" aria-label="Skipped frequencies of this preset">
+            {#each skips as f, i (i)}
+              <li>
+                <span class="mono">{mhzText(f)}</span>
+                <button class="x" aria-label={`Stop skipping ${mhzText(f)}`} title="Remove from the skip list" onclick={() => removeSkip(f)}>✕</button>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="sub none">None skipped.</p>
+        {/if}
+        <form class="addskip" onsubmit={(e) => (e.preventDefault(), addSkip())}>
+          <input
+            class="mono"
+            bind:value={skipText}
+            inputmode="decimal"
+            placeholder="MHz, e.g. {p.low.replace(/0+$/, '').replace(/\.$/, '')}"
+            aria-label="Frequency to skip"
+            aria-invalid={!!skipNote}
+            disabled={skips.length >= choices.skipsMax}
+          />
+          <button class="btn" type="submit" disabled={!skipText.trim() || skips.length >= choices.skipsMax}>Skip it</button>
+        </form>
+        {#if skipNote}<p class="err" role="alert">{skipNote}</p>{/if}
       </div>
     {:else}
       <p class="empty pick">{list.length ? "Choose a range preset." : "A range preset is a band scan of your own: a start and end, a step, a mode."}</p>
@@ -328,6 +385,53 @@
   }
   .skips p:last-child {
     margin: 0;
+  }
+  .skips .note {
+    color: var(--amber);
+  }
+  .skips .err {
+    color: var(--red);
+    margin-top: 6px;
+  }
+  .skiplist {
+    list-style: none;
+    margin: 8px 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .skiplist li {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    font-variant-numeric: tabular-nums;
+  }
+  .skiplist .x {
+    border: none;
+    background: none;
+    color: var(--sub);
+    cursor: pointer;
+    padding: 0 4px;
+    font-size: 11px;
+  }
+  .skiplist .x:hover {
+    color: var(--red);
+  }
+  .none {
+    margin: 8px 0 !important;
+  }
+  .addskip {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .addskip input {
+    width: 180px;
   }
   .small-btn {
     padding: 3px 10px;

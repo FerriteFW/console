@@ -26,6 +26,10 @@
   import AprsMap from "./lib/pages/AprsMap.svelte";
   import AprsSettings from "./lib/pages/AprsSettings.svelte";
   import AprsContacts from "./lib/pages/AprsContacts.svelte";
+  import AprsQuick from "./lib/pages/AprsQuick.svelte";
+  import AprsWaypoints from "./lib/pages/AprsWaypoints.svelte";
+  import DtmfMemories from "./lib/pages/DtmfMemories.svelte";
+  import { lists } from "./lib/lists.svelte";
   import { loadCore } from "./lib/core";
   import { radio } from "./lib/radio.svelte";
   import { aprs } from "./lib/aprs.svelte";
@@ -35,20 +39,29 @@
   import { route } from "./lib/route.svelte";
 
   // The sidebar: the jobs first, then More. A section with `tabs` covers several pages, shown as tabs above them
-  // (APRS, Firmware); its link opens the first.
+  // (Radio Settings, APRS, Firmware); its link opens the first.
   type Page = { id: string; name: string; soon?: string };
   type Section = { id: string; name: string; tabs?: Page[] };
   const sections: Section[] = [
     { id: "live", name: "Live View" },
     { id: "channels", name: "Channels & Zones" },
-    { id: "settings", name: "Radio Settings" },
+    {
+      id: "settings",
+      name: "Radio Settings",
+      tabs: [
+        { id: "settings", name: "Settings" },
+        { id: "settings-dtmf", name: "DTMF memories" },
+      ],
+    },
     {
       id: "aprs",
       name: "APRS",
       tabs: [
         { id: "aprs-messages", name: "Messages" },
+        { id: "aprs-quick", name: "Quick messages" },
         { id: "aprs-heard", name: "Heard stations" },
         { id: "aprs-map", name: "Map" },
+        { id: "aprs-waypoints", name: "Waypoints" },
         { id: "aprs-contacts", name: "Contacts" },
         { id: "aprs-settings", name: "Settings" },
       ],
@@ -97,7 +110,10 @@
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts, lists };
+  /** The sidebar's "N unwritten": the edits each section holds that aren't on the radio yet. */
+  const unwritten = (id: string) =>
+    id === "channels" ? channels.pending : id === "settings" ? settings.dirty.size + lists.dtmf.pending : id === "aprs" ? lists.quick.pending + lists.waypoints.pending : 0;
   if (DEV_TOOLS && params.has("demo")) {
     void radio.connect("demo").then(async () => {
       for (const k of (params.get("press") ?? "").split(",").filter(Boolean)) {
@@ -142,7 +158,7 @@
       {#each sections as x (x.id)}
         <a href={hrefOf(x)} class:active={section?.id === x.id} aria-current={section?.id === x.id ? "page" : undefined} onclick={() => (navOpen = false)}>
           <span>{x.name}</span>
-          {#if x.id === "channels" && channels.pending}<span class="badge" title="Changes not written to the radio yet">{channels.pending} unwritten</span>{/if}
+          {#if unwritten(x.id)}<span class="badge" title="Changes not written to the radio yet">{unwritten(x.id)} unwritten</span>{/if}
         </a>
       {/each}
       <div class="label">More</div>
@@ -199,6 +215,12 @@
         <AprsSettings />
       {:else if page === "aprs-contacts"}
         <AprsContacts />
+      {:else if page === "aprs-quick"}
+        <AprsQuick />
+      {:else if page === "aprs-waypoints"}
+        <AprsWaypoints />
+      {:else if page === "settings-dtmf"}
+        <DtmfMemories />
       {/if}
     </main>
   </div>

@@ -8,6 +8,7 @@
   import { radio } from "../radio.svelte";
   import { backUp, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
   import { channels } from "../channels.svelte";
+  import { dtmf } from "../lists.svelte";
   import { present } from "../settingsNotes";
 
   let fileInput: HTMLInputElement;
@@ -20,7 +21,7 @@
   const groups = $derived.by(() => {
     const q = search.trim().toLowerCase();
     if (!view) return [];
-    return present(view.groups, channels.basePresets ? channels.presets.length : null)
+    return present(view.groups, channels.basePresets ? channels.presets.length : null, dtmf.base ? dtmf.items.filter(Boolean).length : null)
       .map((g) => ({
         ...g,
         items: g.items.filter(

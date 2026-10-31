@@ -1,9 +1,12 @@
 <script lang="ts">
   // APRS › Map: the heard stations with a position, and the radio's own, on OpenStreetMap (Leaflet from a pinned CDN
   // version; the tiles attributed on the map). Live with the heard list's events. `?call=` centres a station,
-  // `?at=lat,lon` a place (the Event Log's positions). Otherwise it centres on you: the radio's own position, or
-  // the browser's location when the radio has none (asked once; refused or unavailable falls back to the stations).
+  // `?at=lat,lon` a place (the Event Log's positions), `?wp=name` a waypoint. Otherwise it centres on you: the radio's
+  // own position, or the browser's location when the radio has none (asked once; refused or unavailable falls back
+  // to the stations). The radio's waypoints (GPS-10, as APRS › Waypoints holds them, unwritten edits too) are a layer
+  // of their own, switched on and off here (remembered on this computer).
   import { aprs, ago, compass, distance } from "../aprs.svelte";
+  import { degrees, SOURCE_WORDS, waypoints } from "../lists.svelte";
   import { radio } from "../radio.svelte";
   import { ATTRIBUTION, loadLeaflet, TILES, type Leaflet, type LLayer, type LMap } from "../leaflet";
   import { route } from "../route.svelte";
@@ -15,6 +18,26 @@
   let mapError = $state("");
   let now = $state(Date.now());
   const connected = $derived(radio.phase === "connected");
+  const WP_KEY = "ferrite.map.waypoints";
+  let showWp = $state((() => {
+    try {
+      return localStorage.getItem(WP_KEY) !== "off";
+    } catch {
+      return true;
+    }
+  })());
+  $effect(() => {
+    try {
+      localStorage.setItem(WP_KEY, showWp ? "on" : "off");
+    } catch {
+      /* storage blocked: on for this visit */
+    }
+  });
+  $effect(() => {
+    if (connected && waypoints.ready) waypoints.ensure();
+  });
+  const wps = $derived(showWp ? waypoints.items : []);
+  const wpFocus = $derived(route.params.get("wp"));
 
   $effect(() => aprs.use());
   $effect(() => {
@@ -104,13 +127,33 @@
     if (at) {
       layers.push(l.marker(at, { title: "From the Event Log" }).addTo(m).bindTooltip(`${at[0].toFixed(4)}, ${at[1].toFixed(4)}`));
     }
+    // The waypoints: a diamond each, named; the one asked for (`?wp=`) opened.
+    let wpAt: [number, number] | null = null;
+    for (const w of wps) {
+      const ll = degrees(w);
+      pts.push(ll);
+      const d = aprs.me ? distance(aprs.me, { lat: ll[0], lon: ll[1] }) : null;
+      const mk = l
+        .marker(ll, { icon: l.divIcon({ className: "aprs-wp", html: "<span></span>", iconSize: [14, 14] }), title: w.name, keyboard: false })
+        .addTo(m)
+        .bindTooltip(esc(w.name), { permanent: wps.length <= 25, direction: "right", className: "aprs-label wp-label" })
+        .bindPopup(
+          `<b>${esc(w.name)}</b> · waypoint<br>${ll[0].toFixed(5)}, ${ll[1].toFixed(5)}${d ? `<br>${d.km.toFixed(1)} km ${compass(d.deg)}` : ""}<br>${esc(SOURCE_WORDS[w.source] ?? w.source)}`,
+        );
+      if (wpFocus && w.name === wpFocus) {
+        mk.openPopup();
+        wpAt = ll;
+      }
+      layers.push(mk);
+    }
     // Fit once per kind of view: the focus (a station, a place) or everything.
     const you: [number, number] | null = aprs.me ? [aprs.me.lat, aprs.me.lon] : here;
-    const key = `${focus ?? ""}|${at?.join(",") ?? ""}|${you ? "you" : pts.length > 0}`;
+    const key = `${focus ?? ""}|${at?.join(",") ?? ""}|${wpAt?.join(",") ?? ""}|${you ? "you" : pts.length > 0}`;
     if (key !== fitted) {
       fitted = key;
       const f = focus ? placed.find((s) => s.call.toUpperCase() === focus) : null;
-      if (f) m.setView([f.lat!, f.lon!], 13);
+      if (wpAt) m.setView(wpAt, 13);
+      else if (f) m.setView([f.lat!, f.lon!], 13);
       else if (at) m.setView(at, 13);
       else if (you) m.setView(you, 11);
       else if (pts.length > 1) m.fitBounds(pts, { padding: [30, 30], maxZoom: 13 });
@@ -129,10 +172,16 @@
     {:else if !connected}
       <span>Connect to put the stations the radio heard on the map.</span>
     {/if}
+    {#if waypoints.items.length || waypoints.base}
+      <label class="wp-toggle" title="The radio's waypoints (APRS › Waypoints), as diamonds">
+        <input type="checkbox" bind:checked={showWp} aria-label="Show waypoints" />
+        <span class="wp-key" aria-hidden="true"></span> Waypoints ({waypoints.items.length})
+      </label>
+    {/if}
   </div>
   {#if mapError}<div class="pg-banner warn">{mapError}</div>{/if}
   {#if aprs.error}<div class="pg-banner">{aprs.error}</div>{/if}
-  <div class="map" bind:this={el} data-map={L ? "ready" : "loading"} data-markers={placed.length + (aprs.me ? 1 : 0)} aria-label="Map of heard stations"></div>
+  <div class="map" bind:this={el} data-map={L ? "ready" : "loading"} data-markers={placed.length + (aprs.me ? 1 : 0)} data-waypoints={wps.length} aria-label="Map of heard stations"></div>
 </div>
 
 <style>
@@ -147,6 +196,32 @@
   .map :global(.aprs-label) {
     font: 600 11px "JetBrains Mono", monospace;
     padding: 1px 4px;
+  }
+  .map :global(.aprs-wp span),
+  .wp-key {
+    display: block;
+    width: 10px;
+    height: 10px;
+    margin: 2px;
+    transform: rotate(45deg);
+    background: #f2b33d;
+    border: 2px solid #8a5a00;
+    box-sizing: border-box;
+  }
+  .wp-key {
+    display: inline-block;
+    margin: 0 2px 0 0;
+    vertical-align: -1px;
+  }
+  .map :global(.wp-label) {
+    color: #6b4500;
+  }
+  .wp-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    cursor: pointer;
   }
   .map :global(.leaflet-popup-content) {
     font: 12px/1.4 "JetBrains Mono", monospace;

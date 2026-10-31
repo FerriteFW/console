@@ -1,7 +1,8 @@
 <script lang="ts">
   // Event Log: what the radio's event log holds (INBOX-6: APRS, pager, SAME, DSC, AIS, DTMF, Selcall, GPS),
-  // newest first, read over the link (LOG_READ, LINK-42). Times are the PC's: the radio gives each record's age.
-  // Reading marks nothing read on the radio.
+  // newest first, read over the link (LOG_READ, LINK-42) when the page opens; then each new one as the radio logs
+  // it (LINK-57, a radio that has it). Times are the PC's: the radio gives each record's age. Reading marks nothing
+  // read on the radio.
   import { activity, type LogRow } from "../activity.svelte";
   import { ago, when } from "../aprs.svelte";
   import { radio } from "../radio.svelte";
@@ -12,9 +13,11 @@
   let now = $state(Date.now());
 
   const connected = $derived(radio.phase === "connected");
+  $effect(() => activity.use());
   $effect(() => {
     if (connected) activity.ensure();
   });
+  const live = $derived((radio.subMask & 8) !== 0);
   $effect(() => {
     const t = setInterval(() => (now = Date.now()), 15_000);
     return () => clearInterval(t);
@@ -51,7 +54,7 @@
       <span>{activity.busy}…</span>
     {:else if activity.readAt}
       <span>
-        {activity.rows.length} of {activity.held} records, read {ago(activity.readAt, now)}{rows.length !== activity.rows.length ? ` · ${rows.length} shown` : ""}.
+        {activity.rows.length} of {activity.held} records, read {ago(activity.readAt, now)}{activity.live ? ` · ${activity.live} new since` : ""}{rows.length !== activity.rows.length ? ` · ${rows.length} shown` : ""}{live ? " · live" : ""}.
         Times are this computer's, from each record's age.
       </span>
     {:else if connected}
@@ -61,6 +64,9 @@
     {/if}
   </div>
   {#if activity.error}<div class="pg-banner">{activity.error}</div>{/if}
+  {#if connected && activity.readAt && !activity.canLive && !radio.noEvents}
+    <p class="sub small" data-testid="no-live-log">New events show on Refresh: this radio's firmware doesn't send them as they happen (update Ferrite for that).</p>
+  {/if}
 
   {#if activity.readAt || activity.rows.length}
     <div class="pg-scroll">
@@ -109,5 +115,9 @@
 <style>
   a {
     color: var(--blue);
+  }
+  .small {
+    font-size: 12px;
+    margin: 0;
   }
 </style>

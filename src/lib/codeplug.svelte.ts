@@ -1,12 +1,14 @@
 // The .ferrite codeplug, Console's one file kind (docs/dev/codeplug-format.md): Save as… gathers every part the
-// pages hold (channels and zones, range presets; Radio Settings, APRS settings and contacts when read or opened this session) into
+// pages hold (channels and zones, range presets with their skip lists; Radio Settings, APRS settings, contacts, quick
+// messages, waypoints and DTMF memories when read or opened this session) into
 // one file; Open… loads each part a file holds into its page as unwritten changes (Write to radio, per page, puts
 // it on the radio). The older per-page `-backup.json` files still open, each into its own page. In the desktop app
 // the file goes through the native save dialog (the shell's `save_file`); in a browser it downloads.
-import { aprsBackup, backupFile, presetsFile, presetsRestore, settingsCodeplugPart } from "./core";
+import { aprsBackup, backupFile, loadCore, presetsFile, presetsRestore, settingsCodeplugPart } from "./core";
 import { aprsSettings } from "./aprsSettings.svelte";
 import { channels, type ChannelsFile } from "./channels.svelte";
-import { buildCodeplug, codeplugName, contactsJson, fingerprint, isZip, manifest, readCodeplug, readContacts, type Part, type Parts, type RadioMeta } from "./codeplug.ts";
+import { buildCodeplug, codeplugName, contactsJson, fingerprint, isZip, manifest, readCodeplug, readContacts, readDtmf, readQuick, readWaypoints, type Part, type Parts, type RadioMeta } from "./codeplug.ts";
+import { lists, type ListKey } from "./lists.svelte";
 import { contacts } from "./contacts.svelte";
 import { radio } from "./radio.svelte";
 import { settings } from "./settings.svelte";
@@ -51,6 +53,8 @@ export function gather(saved: string): Parts {
     for (const c of contacts.pending?.list ?? []) byCall.set(c.call, c);
     parts.contacts = contactsJson([...byCall.values()].sort((a, b) => a.call.localeCompare(b.call)), saved, r);
   }
+  // The owner's lists (LINK-54 – LINK-56): when read or opened, with their unwritten changes.
+  for (const k of ["quick", "waypoints", "dtmf"] as const) if (lists[k].any) parts[k] = lists[k].text(saved, r);
   return parts;
 }
 
@@ -88,7 +92,7 @@ export const saveCodeplug = () => saveParts(gather(new Date().toISOString()));
 
 /** Back up radio…: a fresh read of one page's part (the table and editors are left alone), as a .ferrite holding
  *  only that part. The notice's text ("" when the save dialog was cancelled). */
-export async function backUp(part: "channels" | "settings" | "aprs"): Promise<string> {
+export async function backUp(part: "channels" | "settings" | "aprs" | ListKey): Promise<string> {
   const saved = new Date().toISOString();
   const r = partRadio();
   let text: string;
@@ -100,6 +104,9 @@ export async function backUp(part: "channels" | "settings" | "aprs"): Promise<st
   } else if (part === "settings") {
     const { record, extras } = await settings.readRadio();
     text = settingsCodeplugPart(record, extras, saved, r);
+  } else if (part === "quick" || part === "waypoints" || part === "dtmf") {
+    const l = lists[part];
+    text = l.fileText(await l.readRadio(), saved, r);
   } else {
     const { record, extras } = await aprsSettings.readRadio();
     text = aprsBackup(aprsSettings.settingsRec, record, extras, saved, r);
@@ -107,7 +114,16 @@ export async function backUp(part: "channels" | "settings" | "aprs"): Promise<st
   return saveParts({ [part]: text }, "Backed up");
 }
 
-const PART_NAME: Record<Part, string> = { channels: "channels", presets: "range presets", settings: "settings", aprs: "APRS settings", contacts: "contacts" };
+const PART_NAME: Record<Part, string> = {
+  channels: "channels",
+  presets: "range presets",
+  settings: "settings",
+  aprs: "APRS settings",
+  contacts: "contacts",
+  quick: "quick messages",
+  waypoints: "waypoints",
+  dtmf: "DTMF memories",
+};
 
 function list(order: readonly Part[], parts: Parts): string {
   return order
@@ -134,6 +150,13 @@ function list(order: readonly Part[], parts: Parts): string {
           return "contacts";
         }
       }
+      try {
+        if (p === "quick") return `quick messages (${readQuick(parts.quick!).messages.filter((q) => q.own).length} your own)`;
+        if (p === "waypoints") return `waypoints (${readWaypoints(parts.waypoints!).waypoints.length})`;
+        if (p === "dtmf") return `DTMF memories (${readDtmf(parts.dtmf!).memories.length})`;
+      } catch {
+        /* the name alone */
+      }
       return PART_NAME[p];
     })
     .join(", ");
@@ -157,6 +180,10 @@ function loadPart(p: Part, text: string, from: string): string {
       } catch (e) {
         return `${from}: ${(e as Error).message}`;
       }
+    case "quick":
+    case "waypoints":
+    case "dtmf":
+      return lists[p].loadFile(text, from) ? "" : lists[p].error;
   }
 }
 
@@ -174,7 +201,13 @@ function partOf(text: string): Part | null {
             ? "contacts"
             : f === "ferrite-console-presets"
               ? "presets"
-              : null;
+              : f === "ferrite-console-quick"
+                ? "quick"
+                : f === "ferrite-console-waypoints"
+                  ? "waypoints"
+                  : f === "ferrite-console-dtmf"
+                    ? "dtmf"
+                    : null;
   } catch {
     return null;
   }
@@ -185,6 +218,7 @@ export type Opened = { notice: string; parts: Part[]; failed: string[] };
 /** Open…: a .ferrite (every part it holds) or an older single-part JSON backup, into the pages. Throws (a reason to
  *  show) when the file is none of those, damaged, or newer than this Console reads. */
 export async function openFile(file: { name: string; bytes: Uint8Array }): Promise<Opened> {
+  await loadCore(); // a file opened as the page loads: the parts' readers are the core's
   let parts: Parts;
   let order: Part[];
   if (isZip(file.bytes)) {
@@ -209,12 +243,16 @@ export async function openFile(file: { name: string; bytes: Uint8Array }): Promi
   return { notice: failed.length ? `${notice}; ${failed.join("; ")}` : notice, parts: loaded, failed };
 }
 
-/** An <input type=file>'s file, read. */
+/** An <input type=file>'s file, read, once the core has loaded (what reads it next is the core's: a file picked as
+ *  the page opens must not race its loading). */
 export async function picked(e: Event): Promise<{ name: string; bytes: Uint8Array } | null> {
   const el = e.currentTarget as HTMLInputElement;
   const f = el.files?.[0];
   el.value = "";
-  return f ? { name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) } : null;
+  if (!f) return null;
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  await loadCore();
+  return { name: f.name, bytes };
 }
 
 /** What Open… accepts (".json" first: the old backups, and the e2e tests' selectors). */

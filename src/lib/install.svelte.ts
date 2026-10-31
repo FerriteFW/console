@@ -795,6 +795,7 @@ class Install {
   /** Or proves it: the saved file picked again must be the backup. */
   async checkSaved(f: File) {
     const b = new Uint8Array(await f.arrayBuffer());
+    await loadCore();
     if (this.backup && b.length === this.backup.length && sha256Hex(b) === this.check?.sha256) {
       this.saved = true;
       this.savedWhere = f.name;

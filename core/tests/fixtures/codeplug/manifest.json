@@ -13,6 +13,9 @@
     "channels",
     "presets",
     "aprs",
-    "contacts"
+    "contacts",
+    "quick",
+    "waypoints",
+    "dtmf"
   ]
 }

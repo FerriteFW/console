@@ -1,8 +1,8 @@
 // Channels & Zones › Range presets (MENU 0 1 4, LINK-21's what 4) through the bridge: the radio's presets read with
 // the channels, one edited and one added, written (a backup and the diff first) and read back; then put back (the
-// added one deleted, the edit undone). A preset's skipped frequencies (SCAN-10) aren't on the link: the editor says
-// so, and they stay with their preset (the radio keeps them). Simulator only: a test shouldn't rewrite a radio's
-// presets.
+// added one deleted, the edit undone). A preset's skip list (SCAN-10, LINK-58): one frequency added, one outside the
+// range refused, written after the presets and read back, then removed. Simulator only: a test shouldn't rewrite a
+// radio's presets.
 import { type Page } from "@playwright/test";
 import { connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
 
@@ -11,7 +11,7 @@ const long = () => (onRadio() ? 120_000 : 30_000);
 const toolbar = () => page.getByRole("toolbar", { name: "Channels" });
 const dialog = () => page.getByRole("dialog");
 const list = () => page.getByRole("listbox", { name: "Range presets" });
-const presets = () => state(page, (f) => f.channels.presets as { number: number; name: string; low: string; high: string; mode: string }[]);
+const presets = () => state(page, (f) => f.channels.presets as { number: number; name: string; low: string; high: string; mode: string; skips: number[] }[]);
 
 async function readRadio() {
   await page.evaluate(() => ((window as any).__e2eBase = (window as any).ferrite.channels.basePresets));
@@ -72,9 +72,8 @@ test.describe.serial("range presets", () => {
     await page.getByLabel("End MHz").fill(first[0].high);
     await page.getByLabel("End MHz").press("Tab");
     await expect(page.getByRole("alert")).toHaveCount(0);
-    // The skip list: the radio's, kept with the preset; the editor says so.
+    // The skip list: the radio's, shown with the preset.
     await expect(page.getByRole("region", { name: "Range preset 1" })).toContainText("Skipped frequencies");
-    await expect(page.getByRole("region", { name: "Range preset 1" })).toContainText("stay with this preset");
     // A new one at the end: 430-440 MHz, AM.
     await page.getByRole("button", { name: "+ Add" }).click();
     await expect(page.getByRole("heading", { name: `Range preset ${n + 1}` })).toBeVisible();
@@ -99,6 +98,32 @@ test.describe.serial("range presets", () => {
     expect(back.length).toBe(n + 1);
     expect(back[0].name).toBe("E2E range");
     expect([back[n].name, back[n].low, back[n].high, back[n].mode]).toEqual(["E2E new", "430.00000", "440.00000", "AM"]);
+  });
+
+  test("a skip list: one added, one outside the range refused, written after the presets, read back, removed", async ({}, info) => {
+    await list().getByRole("option").first().click();
+    const p = (await presets())[0];
+    const had = p.skips.length;
+    const mid = ((Number(p.low) + Number(p.high)) / 2).toFixed(4);
+    const box = page.getByLabel("Frequency to skip");
+    await box.fill("1299");
+    await page.getByRole("button", { name: "Skip it" }).click();
+    await expect(page.getByRole("alert")).toContainText("outside this range");
+    await box.fill(mid);
+    await page.getByRole("button", { name: "Skip it" }).click();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    const want = Math.round(Number(mid) * 100_000);
+    await expect.poll(async () => (await presets())[0].skips).toContain(want);
+    await expect(page.getByRole("list", { name: "Skipped frequencies of this preset" }).getByRole("listitem")).toHaveCount(had + 1);
+    await shot(page, info, "presets-02-skips");
+    await write(async () => {
+      await expect(dialog().locator("li").filter({ hasText: "Preset 1" })).toContainText("skipped");
+    });
+    await readRadio();
+    expect((await presets())[0].skips).toContain(want);
+    await page.getByRole("button", { name: new RegExp(`^Stop skipping ${Number(mid).toFixed(5).replace(".", "\\.")}$`) }).click();
+    await write();
+    expect((await presets())[0].skips).not.toContain(want);
   });
 
   test("put back: the added one deleted, the first renamed", async () => {

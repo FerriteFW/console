@@ -5,7 +5,8 @@ import init, * as wasm from "../core-wasm/core.js";
 export type Answer = { ty: number; seq: number; status: number; rest: number[]; event?: boolean };
 
 export type Build = { byte: number; name: string; bench: boolean; dry: boolean };
-export type Hello = { protocol: number; max_payload: number; may_go_on: boolean; firmware: string; build: Build | null; caps: number };
+/** `caps2`: LINK-35.2's second capability byte (1 range preset skip lists); 0 from firmware before it. */
+export type Hello = { protocol: number; max_payload: number; may_go_on: boolean; firmware: string; build: Build | null; caps: number; caps2: number };
 export type Info = {
   firmware: string;
   channels: number;
@@ -66,10 +67,14 @@ export type Timing = {
 };
 export type Protocol = {
   msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA", number>;
-  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION", number>;
+  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS", number>;
   /** LINK-35.2: HELLO's caps bits the UI asks about by name (link.ts has the transport ones). */
-  caps: Record<"POSITION", number>;
-  event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
+  caps: Record<"POSITION" | "LISTS", number>;
+  /** LINK-35.2: the second caps byte's bits. */
+  caps2: Record<"PRESET_SKIPS", number>;
+  /** LINK-55: the index a new waypoint is written at (it becomes the newest). */
+  waypointAdd: number;
+  event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "SUB_LOG" | "LOG" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
   knobMax: number;
   keys: string[];
   timing: Timing;
@@ -219,9 +224,12 @@ export type Preset = {
   resume: string;
   /** The number it was read as; absent for one added here (or opened from a file). */
   origin?: number;
+  /** SCAN-10, LINK-58: its skipped frequencies (10 Hz), in the radio's order; empty when none or not read. */
+  skips: number[];
 };
-export type PresetChoices = { steps: string[]; modes: string[]; resumes: string[]; max: number; nameLen: number };
-export type PresetPlan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[] };
+export type PresetChoices = { steps: string[]; modes: string[]; resumes: string[]; max: number; nameLen: number; skipsMax: number };
+/** `skips`: LINK-58's skip list records `[index, bytes]`, written after the ops. */
+export type PresetPlan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[]; skips: [number, number[]][] };
 
 export const presetChoices = (): PresetChoices => JSON.parse(wasm.preset_choices());
 export const decodePresets = (records: Uint8Array[]): { presets: Preset[]; bad: string[] } =>
@@ -230,7 +238,45 @@ export const decodePresets = (records: Uint8Array[]): { presets: Preset[]; bad: 
 export const normalizePreset = (p: Preset): Preset => JSON.parse(wasm.normalize_preset(js(p)));
 export const checkPreset = (p: Preset): string | undefined => wasm.check_preset(js(p)) ?? undefined;
 export const newPreset = (number: number, name: string): Preset => JSON.parse(wasm.new_preset(number, name));
-export const presetsPlan = (base: Preset[], want: Preset[]): PresetPlan => JSON.parse(wasm.presets_plan(js(base), js(want)));
+/** `skips`: the radio takes skip lists (LINK-58: caps2); without it none are planned. */
+export const presetsPlan = (base: Preset[], want: Preset[], skips: boolean): PresetPlan => JSON.parse(wasm.presets_plan(js(base), js(want), skips));
+/** A skipped frequency typed in MHz, as 10 Hz; undefined if it isn't one. */
+export const presetSkipParse = (text: string): number | undefined => wasm.preset_skip_parse(text) ?? undefined;
+/** LINK-58: `WRITE_MANY` what 11's record for a skip list, and a read one back (10 Hz each). */
+export const presetSkipsRecord = (f: number[]): Uint8Array => wasm.preset_skips_record(js(f));
+export const presetSkipsFromRecord = (rec: Uint8Array): number[] | null => {
+  const t = wasm.preset_skips_from_record(rec);
+  return t ? JSON.parse(t) : null;
+};
+/** 10 Hz units as MHz text, five decimals ("146.52000"), as the radio lists them. */
+export const mhzText = (f: number) => `${Math.floor(f / 100_000)}.${String(f % 100_000).padStart(5, "0")}`;
+
+// The owner's lists (core/src/lists.rs, LINK-54 – LINK-56): quick messages, waypoints, DTMF memories. Records and
+// checks are ferrite's (the checks run its own link session).
+
+/** TEXT-7: `own` false is the factory text (`text` then the radio's). */
+export type QuickMessage = { own: boolean; text: string };
+/** GPS-10: lat and lon in 1e-7 degree; source "marked", "aprs", "link" or "grid". */
+export type Waypoint = { name: string; lat: number; lon: number; source: string };
+/** DTMF-12: symbols 0-9 A-D * #, a name of up to 10. */
+export type DtmfMemory = { symbols: string; name: string };
+
+const parsed = <T>(t: string | undefined): T | null => (t ? JSON.parse(t) : null);
+export const quickFactory = (): string[] => JSON.parse(wasm.quick_factory());
+export const quickRecord = (q: QuickMessage): Uint8Array => wasm.quick_record(js(q));
+export const quickFromRecord = (rec: Uint8Array): QuickMessage | null => parsed(wasm.quick_from_record(rec));
+export const quickCheck = (q: QuickMessage): string | undefined => wasm.quick_check(js(q)) ?? undefined;
+/** `null` deletes the waypoint at its index (an empty record). */
+export const waypointRecord = (w: Waypoint | null): Uint8Array => wasm.waypoint_record(js(w));
+export const waypointFromRecord = (rec: Uint8Array): Waypoint | null => parsed(wasm.waypoint_from_record(rec));
+export const waypointCheck = (w: Waypoint): string | undefined => wasm.waypoint_check(js(w)) ?? undefined;
+/** LINK-55: the writes (index, record), in order, that take the radio's waypoints `old` to `want` (newest first). */
+export const waypointWrites = (old: Waypoint[], want: Waypoint[]): { index: number; record: Uint8Array }[] =>
+  (JSON.parse(wasm.waypoint_writes(js(old), js(want))) as [number, number[]][]).map(([index, r]) => ({ index, record: new Uint8Array(r) }));
+/** `null` clears the memory and its name. */
+export const dtmfRecord = (m: DtmfMemory | null): Uint8Array => wasm.dtmf_record(js(m));
+export const dtmfFromRecord = (rec: Uint8Array): DtmfMemory | null => parsed(wasm.dtmf_from_record(rec));
+export const dtmfCheck = (m: DtmfMemory): string | undefined => wasm.dtmf_check(js(m)) ?? undefined;
 /** `.ferrite`'s presets.json (docs/dev/codeplug-format.md). */
 export const presetsFile = (list: Preset[], saved: string, radio: Record<string, string>): string => wasm.presets_file(js(list), saved, js(radio));
 export const presetsRestore = (text: string): { presets: Preset[]; saved: string; radio: Record<string, string> } =>
@@ -413,6 +459,8 @@ export type AprsEvent =
   | { kind: "heard"; count: number; station: Station }
   | { kind: "message" | "message_state"; count: number; message: Message }
   | { kind: "ui" }
+  /** LINK-57: an event logged on the radio (kind 5), as LOG_READ gives it. */
+  | { kind: "log"; record: LogRecord }
   | { kind: "unknown"; code: number };
 
 export const parseHeard = (rest: Uint8Array): { count: number; stations: Station[] } | null => JSON.parse(wasm.parse_heard(rest));

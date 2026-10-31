@@ -76,6 +76,8 @@ export class Link {
   private dropUnlock = false;
   /** LINK-35.2: what the radio does beyond protocol 2 (HELLO). */
   caps = 0;
+  /** LINK-35.2: the second capability byte (1 range preset skip lists, LINK-58); 0 from older firmware. */
+  caps2 = 0;
   private chain: Promise<unknown> = Promise.resolve();
   private holdUntil = 0;
   private closed = false;
@@ -227,6 +229,7 @@ export class Link {
     const h = parseHello(rest);
     if (!h) throw new Error("The radio's HELLO answer didn't parse.");
     this.caps = h.caps ?? 0;
+    this.caps2 = h.caps2 ?? 0;
     this.session.set_lz((this.caps & CAP_LZ) !== 0);
     return h;
   }
@@ -593,6 +596,16 @@ export class Link {
    * whose HELLO says caps 64.
    */
   writePositions(recs: { index: number; record: Uint8Array }[], progress?: (done: number) => void): Promise<void> {
+    return this.writeRecords(P.what.POSITION, recs, progress);
+  }
+
+  /**
+   * Records of `what` written by index (`WRITE_MANY`, LINK-41): positions (7), quick messages (8), waypoints (9),
+   * DTMF memories (10), skip lists (11). In order, as many to a frame as fit (MAX_PAYLOAD 240): each record waits
+   * for the one before it, so an index means the list as the records before it left it (LINK-55). `busy` goes again
+   * from the first not applied; a refusal throws with the radio's reason. `progress(done)` as frames are answered.
+   */
+  writeRecords(what: number, recs: { index: number; record: Uint8Array }[], progress?: (done: number) => void): Promise<void> {
     return this.exclusive(async () => {
       let i = 0;
       let end = performance.now() + P.timing.busy_retry_ms;
@@ -604,7 +617,7 @@ export class Link {
           size += 3 + recs[k].record.length;
         }
         const body = new Uint8Array(size);
-        body[0] = P.what.POSITION;
+        body[0] = what;
         let o = 1;
         for (const r of part) {
           body.set([r.index & 0xff, r.index >> 8, r.record.length], o);

@@ -1,0 +1,24 @@
+{
+  "format": "ferrite-console-waypoints",
+  "version": 1,
+  "saved": "2026-10-30T21:12:00.000Z",
+  "radio": {
+    "callsign": "VA7IF",
+    "connection": "Cable",
+    "firmware": "0.8.2"
+  },
+  "waypoints": [
+    {
+      "name": "Grouse summit",
+      "lat": 49.3802,
+      "lon": -123.0811,
+      "source": "marked"
+    },
+    {
+      "name": "Club shack",
+      "lat": 49.2827,
+      "lon": -123.1207,
+      "source": "link"
+    }
+  ]
+}

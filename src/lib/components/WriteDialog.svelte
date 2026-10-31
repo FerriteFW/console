@@ -32,6 +32,7 @@
     keep: "other flags",
     low: "start",
     high: "end",
+    skipped: "skipped",
   };
   const whatName = (c: Change) => (c.what === "zone" ? "Zone" : c.what === "preset" ? "Preset" : "Ch");
   /** LINK-53: the radio can't store positions: the write leaves them out and says so once. */
@@ -67,6 +68,12 @@
           <p class="note" data-testid="positions-skipped">
             This radio's firmware can't store positions yet: update Ferrite. {skipped === 1 ? "The position change stays" : `The ${skipped} position changes stay`}
             in the table and in .ferrite files; the rest is written.
+          </p>
+        {/if}
+        {#if w.skipsKept}
+          <p class="note" data-testid="skips-kept">
+            This radio's firmware can't take skip lists yet: update Ferrite. The range presets' skipped frequencies stay in the table and in
+            .ferrite files; the rest is written.
           </p>
         {/if}
         {#if !changes.length && !w.home}

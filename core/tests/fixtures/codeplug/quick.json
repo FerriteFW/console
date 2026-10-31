@@ -1,0 +1,48 @@
+{
+  "format": "ferrite-console-quick",
+  "version": 1,
+  "saved": "2026-10-30T21:12:00.000Z",
+  "radio": {
+    "callsign": "VA7IF",
+    "connection": "Cable",
+    "firmware": "0.8.2"
+  },
+  "messages": [
+    {
+      "own": false,
+      "text": "73"
+    },
+    {
+      "own": false,
+      "text": "QSL, thanks"
+    },
+    {
+      "own": true,
+      "text": "At the club tonight, 146.94"
+    },
+    {
+      "own": false,
+      "text": "Call me"
+    },
+    {
+      "own": false,
+      "text": "Where are you?"
+    },
+    {
+      "own": false,
+      "text": "QRT for now"
+    },
+    {
+      "own": false,
+      "text": "Yes"
+    },
+    {
+      "own": false,
+      "text": "No"
+    },
+    {
+      "own": false,
+      "text": "Are you on the repeater?"
+    }
+  ]
+}

@@ -59,7 +59,7 @@ class Radio {
   /** A transfer (channels read or written) holds the link: the Live View stops polling meanwhile. */
   busy = $state("");
 
-  /** What is subscribed now (LINK-46: 1 heard, 2 messages, 4 Live View); 0 none. */
+  /** What is subscribed now (LINK-46: 1 heard, 2 messages, 4 Live View, 8 the event log: LINK-57); 0 none. */
   subMask = $state(0);
   /** The radio answered SUBSCRIBE `unknown type`: firmware before LINK-46 (polling only, no APRS events). */
   noEvents = $state(false);
@@ -246,11 +246,13 @@ class Radio {
     let m = 0;
     for (const w of this.wants.values()) m |= w;
     if (this.live && !this.busy && this.eventsForLive) m |= 4;
+    // LINK-57: the event log's events only from a radio that has them (HELLO caps 128).
+    if (!this.link || !(this.link.caps & P.caps.LISTS)) m &= ~8;
     return this.noEvents || this.leaving ? 0 : m;
   }
 
   /**
-   * Events for `who` (`mask`: 1 heard, 2 messages): subscribed while any part wants them. The returned function
+   * Events for `who` (`mask`: 1 heard, 2 messages, 8 the event log): subscribed while any part wants them. The returned function
    * stops wanting them.
    */
   want(who: string, mask: number): () => void {

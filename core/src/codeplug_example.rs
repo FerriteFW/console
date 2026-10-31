@@ -56,10 +56,12 @@ fn set() -> Set {
     Set { zones: vec![z1, z2], channels: vec![a, b, c] }
 }
 
-/// Two range presets: 2 m in 12.5 kHz steps, the airband in AM with its own resume.
+/// Two range presets: 2 m in 12.5 kHz steps skipping the APRS frequency and the ISS's, the airband in AM with its
+/// own resume.
 fn preset_list() -> Vec<PresetView> {
     let mut a = PresetView::new(1, "2 m");
     a.origin = Some(1);
+    a.skips = vec![14_439_000, 14_580_000];
     let mut b = PresetView::new(2, "Airband");
     b.origin = Some(2);
     (b.low, b.high, b.step, b.mode, b.resume) = ("118".into(), "137".into(), "25 kHz".into(), "AM".into(), "After 3 s".into());
@@ -109,6 +111,66 @@ fn parts() -> Vec<(&'static str, String)> {
         ],
     })
     .unwrap();
+    // The owner's lists, also written in TypeScript (codeplug.ts: quickJson, waypointsJson, dtmfJson).
+    #[derive(serde::Serialize)]
+    struct ListFile<T> {
+        format: &'static str,
+        version: u32,
+        saved: &'static str,
+        radio: BTreeMap<String, String>,
+        #[serde(flatten)]
+        list: T,
+    }
+    #[derive(serde::Serialize)]
+    struct Quick {
+        messages: Vec<crate::lists::QuickMessage>,
+    }
+    #[derive(serde::Serialize)]
+    struct Wp {
+        name: &'static str,
+        lat: f64,
+        lon: f64,
+        source: &'static str,
+    }
+    #[derive(serde::Serialize)]
+    struct Wps {
+        waypoints: Vec<Wp>,
+    }
+    #[derive(serde::Serialize)]
+    struct Mem {
+        number: u8,
+        symbols: &'static str,
+        name: &'static str,
+    }
+    #[derive(serde::Serialize)]
+    struct Mems {
+        memories: Vec<Mem>,
+    }
+    let file = |format, list| serde_json::to_string_pretty(&ListFile { format, version: 1, saved: SAVED, radio: radio(), list }).unwrap();
+    let quick = file("ferrite-console-quick", Quick { messages: quick_list() });
+    let waypoints = serde_json::to_string_pretty(&ListFile {
+        format: "ferrite-console-waypoints",
+        version: 1,
+        saved: SAVED,
+        radio: radio(),
+        list: Wps {
+            waypoints: vec![
+                Wp { name: "Grouse summit", lat: 49.3802, lon: -123.0811, source: "marked" },
+                Wp { name: "Club shack", lat: 49.2827, lon: -123.1207, source: "link" },
+            ],
+        },
+    })
+    .unwrap();
+    let dtmf = serde_json::to_string_pretty(&ListFile {
+        format: "ferrite-console-dtmf",
+        version: 1,
+        saved: SAVED,
+        radio: radio(),
+        list: Mems {
+            memories: vec![Mem { number: 1, symbols: "*79#", name: "Link on" }, Mem { number: 2, symbols: "#79#", name: "Link off" }],
+        },
+    })
+    .unwrap();
     #[derive(serde::Serialize)]
     struct Radio {
         callsign: &'static str,
@@ -123,7 +185,7 @@ fn parts() -> Vec<(&'static str, String)> {
         console: &'static str,
         radio: Radio,
         radio_fingerprint: &'static str,
-        parts: [&'static str; 4],
+        parts: [&'static str; 7],
     }
     // Saved before Radio Settings was read: no settings part (a part may be missing).
     let manifest = serde_json::to_string_pretty(&Manifest {
@@ -134,7 +196,7 @@ fn parts() -> Vec<(&'static str, String)> {
         radio: Radio { callsign: "VA7IF", firmware: "0.8.2", build: "tx" },
         // SHA-256 of the UID bytes 10 32 54 76 98 ba dc fe 01 23 45 67, its first 8 hex digits.
         radio_fingerprint: "7f755785",
-        parts: ["channels", "presets", "aprs", "contacts"],
+        parts: ["channels", "presets", "aprs", "contacts", "quick", "waypoints", "dtmf"],
     })
     .unwrap();
     vec![
@@ -143,7 +205,18 @@ fn parts() -> Vec<(&'static str, String)> {
         ("presets.json", presets),
         ("aprs.json", aprs),
         ("contacts.json", contacts),
+        ("quick.json", quick),
+        ("waypoints.json", waypoints),
+        ("dtmf.json", dtmf),
     ]
+}
+
+/// The nine quick messages: the factory texts, the third the owner's own.
+fn quick_list() -> Vec<crate::lists::QuickMessage> {
+    let mut q: Vec<_> =
+        crate::lists::quick_factory().into_iter().map(|text| crate::lists::QuickMessage { own: false, text }).collect();
+    q[2] = crate::lists::QuickMessage { own: true, text: "At the club tonight, 146.94".into() };
+    q
 }
 
 #[test]
@@ -176,6 +249,28 @@ fn parts_round_trip() {
     let (list, b) = presets::restore(&pr).unwrap();
     assert_eq!(presets::backup(&list, &b.saved, b.radio).unwrap(), pr);
     assert_eq!(list.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["2 m", "Airband"]);
+
+    // The skip lists ride in presets.json, as MHz.
+    assert_eq!(list[0].skips, [14_439_000, 14_580_000]);
+    assert!(pr.contains("\"144.39000\""));
+
+    // The owner's lists (written in TypeScript): each entry is one the radio takes (ferrite's own checks).
+    let v: serde_json::Value = serde_json::from_str(&read("quick.json")).unwrap();
+    for q in v["messages"].as_array().unwrap() {
+        let q: crate::lists::QuickMessage = serde_json::from_value(q.clone()).unwrap();
+        assert_eq!(crate::lists::check_quick(&q), None, "{q:?}");
+    }
+    let v: serde_json::Value = serde_json::from_str(&read("waypoints.json")).unwrap();
+    for w in v["waypoints"].as_array().unwrap() {
+        let deg = |k: &str| (w[k].as_f64().unwrap() * 1e7).round() as i32;
+        let w = crate::lists::Waypoint { name: w["name"].as_str().unwrap().into(), lat: deg("lat"), lon: deg("lon"), source: w["source"].as_str().unwrap().into() };
+        assert_eq!(crate::lists::check_waypoint(&w), None, "{w:?}");
+    }
+    let v: serde_json::Value = serde_json::from_str(&read("dtmf.json")).unwrap();
+    for m in v["memories"].as_array().unwrap() {
+        let m = crate::lists::DtmfMemory { symbols: m["symbols"].as_str().unwrap().into(), name: m["name"].as_str().unwrap().into() };
+        assert_eq!(crate::lists::check_dtmf(&m), None, "{m:?}");
+    }
 
     let ap = read("aprs.json");
     let (rec, b) = aprs_settings::restore(&ap).unwrap();

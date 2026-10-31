@@ -46,9 +46,15 @@ test("0 1 4 and 0 1 5 link to the range presets; Dry TX says what it is", () => 
   assert.equal(p.href, "#/channels?tab=presets");
   assert.equal(p.value, "Edit 4 presets");
   assert.equal(scan.items[2].href, "#/channels?tab=presets");
-  assert.deepEqual(tx.items.map((i) => [i.path, i.kind]), [["0 8 8 4", "readonly"], ["0 8 8 5", "readonly"]]);
-  assert.match(tx.items[1].note, /only the radio turns it off/);
-  assert.match(tx.items[0].note, /for safety/);
+  assert.deepEqual(tx.items.map((i) => [i.path, i.kind]), [["", "link"], ["0 8 8 4", "readonly"], ["0 8 8 5", "readonly"]]);
+  assert.equal(tx.items[0].href, "#/settings-dtmf");
+  assert.equal(tx.items[0].value, "Edit them", "DTMF memories not read");
+  assert.equal(present(groups, 4, 2)[1].items[0].value, "Edit 2 memories");
+  // After the dialer's own settings, under their heading.
+  const dial: SettingsGroup[] = [{ path: "0 8", name: "Transmit", items: [{ ...item("0 8 5 3", "Speed", "pick"), sub: "DTMF" }, item("0 8 8 4", "Extend TX")], note: "" }];
+  assert.deepEqual(present(dial, null)[0].items.map((i) => [i.name, i.sub]), [["Speed", "DTMF"], ["DTMF memories", "DTMF"], ["Extend TX", ""]]);
+  assert.match(tx.items[2].note, /only the radio turns it off/);
+  assert.match(tx.items[1].note, /for safety/);
   assert.equal(sys.note, "Shown on the radio only: SSB patch, About, Calibration.");
   assert.match(present(groups, null)[0].items[1].value, /^Edit/);
 });

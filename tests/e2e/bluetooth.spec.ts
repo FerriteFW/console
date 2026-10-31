@@ -14,7 +14,8 @@ test("bluetooth: Live View from the radio's updates, keys, a lost update put rig
   await openConsole(page, "live", url!);
   await connect(page);
   await expect(page.getByRole("status")).toContainText("Bluetooth");
-  await expect.poll(() => state(page, (f) => f.radio.subMask as number), { timeout: 20_000 }).toBe(4);
+  // Live View's updates (4); the panel beside it also takes the event log's new events (8, LINK-57).
+  await expect.poll(() => state(page, (f) => (f.radio.subMask as number) & 4), { timeout: 20_000 }).toBe(4);
   await expectScreen(page, "Home");
   const ui = await state(page, (f) => f.radio.ui);
   expect(ui.cards.length).toBeGreaterThan(0);

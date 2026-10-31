@@ -46,14 +46,24 @@ const row = (path: string, name: string, value: string, note: string, href?: str
 });
 
 const PRESETS_HREF = "#/channels?tab=presets";
+const DTMF_HREF = "#/settings-dtmf";
 
 /** The view's groups as Radio Settings shows them: reasons on the read-only rows, and the names the group notes give
  *  as "Shown on the radio only" that Console has more to say about as rows of their own (the range presets and the
- *  skip list: links to Channels & Zones › Range presets; Dry TX: what it is). `presets` is how many the table holds,
- *  null when not read. */
-export function present(groups: SettingsGroup[], presets: number | null): Group[] {
+ *  skip list: links to Channels & Zones › Range presets; Dry TX: what it is), and the DTMF memories (DTMF-12: a link
+ *  to their tab, in Transmit beside the dialer's settings). `presets` and `dtmf` are how many the editors hold, null
+ *  when not read. */
+export function present(groups: SettingsGroup[], presets: number | null, dtmf: number | null = null): Group[] {
   return groups.map((g) => {
     const items: Row[] = g.items.map((i) => (i.kind === "readonly" ? { ...i, note: readonlyReason(i) } : i));
+    if (g.path === "0 8") {
+      // After the dialer's settings (0 8 5 x), under their heading: the memories are the dialer's, not a menu item.
+      const value = dtmf === null ? "Edit them" : `Edit ${dtmf === 1 ? "1 memory" : `${dtmf} memories`}`;
+      const at = items.findLastIndex((i) => i.path.startsWith("0 8 5 "));
+      const sub = at >= 0 ? items[at].sub : "";
+      const note = "On Radio Settings › DTMF memories: 16 sequences with their names, read and written there.";
+      items.splice(at + 1, 0, { ...row("", "DTMF memories", value, note, DTMF_HREF), id: "dtmf-memories", sub });
+    }
     const m = /^Shown on the radio only: (.*)\.$/.exec(g.note);
     if (!m) return { ...g, items };
     const rest: string[] = [];

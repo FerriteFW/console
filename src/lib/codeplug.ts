@@ -1,5 +1,5 @@
 // The .ferrite codeplug: one zip holding a manifest and the JSON Console already writes for each part (channels and
-// zones, range presets, Radio Settings, APRS settings, APRS contacts). Pure: no Svelte state, no DOM (unit-tested in Node:
+// zones, range presets, Radio Settings, APRS settings, APRS contacts, quick messages, waypoints, DTMF memories). Pure: no Svelte state, no DOM (unit-tested in Node:
 // tests/unit/codeplug.test.ts). The format is docs/dev/codeplug-format.md in the docs repo; codeplug.svelte.ts
 // gathers the parts from the pages and loads them back.
 import { createZip, readZip } from "./zip.ts";
@@ -8,7 +8,7 @@ export const FORMAT = "ferrite-codeplug";
 /** The format version this Console writes and the newest it reads. */
 export const VERSION = 1;
 /** The parts, in the order they are written; each is `<part>.json` in the zip. */
-export const PARTS = ["channels", "presets", "settings", "aprs", "contacts"] as const;
+export const PARTS = ["channels", "presets", "settings", "aprs", "contacts", "quick", "waypoints", "dtmf"] as const;
 export type Part = (typeof PARTS)[number];
 
 /** What the radio said about itself when the file was saved (each only when known). Never its unique ID: codeplugs
@@ -127,4 +127,87 @@ export async function readCodeplug(bytes: Uint8Array): Promise<{ manifest: Manif
     parts[p] = dec.decode(f);
   }
   return { manifest: m, parts };
+}
+
+// The owner's lists (LINK-54 – LINK-56): quick.json, waypoints.json, dtmf.json. Written here as contacts.json is;
+// the records and checks are the core's, so these only shape the JSON (each is checked again when written).
+
+export const QUICK_FORMAT = "ferrite-console-quick";
+export const WAYPOINTS_FORMAT = "ferrite-console-waypoints";
+export const DTMF_FORMAT = "ferrite-console-dtmf";
+/** TEXT-7: `own` false is the factory text (`text` then shows it, for reading). */
+export type QuickEntry = { own: boolean; text: string };
+/** GPS-10: lat and lon in degrees (to 1e-7), north and east positive; source "marked", "aprs", "link" or "grid". */
+export type WaypointEntry = { name: string; lat: number; lon: number; source: string };
+/** DTMF-12: a memory by its number (1-16): its symbols and name. */
+export type DtmfEntry = { number: number; symbols: string; name: string };
+type ListFile<F extends string, K extends string, T> = { format: F; version: 1; saved: string; radio: Record<string, string> } & Record<K, T[]>;
+export type QuickFile = ListFile<typeof QUICK_FORMAT, "messages", QuickEntry>;
+export type WaypointsFile = ListFile<typeof WAYPOINTS_FORMAT, "waypoints", WaypointEntry>;
+export type DtmfFile = ListFile<typeof DTMF_FORMAT, "memories", DtmfEntry>;
+
+/** The quick messages part: all nine, in order. */
+export function quickJson(list: QuickEntry[], saved: string, radio: Record<string, string>): string {
+  const f: QuickFile = { format: QUICK_FORMAT, version: 1, saved, radio, messages: list.map((q) => ({ own: q.own, text: q.text })) };
+  return JSON.stringify(f, null, 2);
+}
+
+/** The waypoints part: newest first, as the radio lists them. */
+export function waypointsJson(list: WaypointEntry[], saved: string, radio: Record<string, string>): string {
+  const f: WaypointsFile = {
+    format: WAYPOINTS_FORMAT,
+    version: 1,
+    saved,
+    radio,
+    waypoints: list.map((w) => ({ name: w.name, lat: w.lat, lon: w.lon, source: w.source })),
+  };
+  return JSON.stringify(f, null, 2);
+}
+
+/** The DTMF memories part: the ones set, by number. */
+export function dtmfJson(list: DtmfEntry[], saved: string, radio: Record<string, string>): string {
+  const f: DtmfFile = { format: DTMF_FORMAT, version: 1, saved, radio, memories: list.map((m) => ({ number: m.number, symbols: m.symbols, name: m.name })) };
+  return JSON.stringify(f, null, 2);
+}
+
+function listFile(text: string, format: string, what: string, key: string): Record<string, unknown> {
+  let f: Record<string, unknown>;
+  try {
+    f = JSON.parse(text);
+  } catch {
+    throw new Error(`not a ${what} file (not JSON)`);
+  }
+  if (f?.format !== format) throw new Error(`not a ${what} file (format ${JSON.stringify(f?.format)})`);
+  if (f.version !== 1) throw new Error(`${what} version ${f.version} is newer than this Console reads`);
+  if (!Array.isArray(f[key])) throw new Error(`its ${key} aren't a list`);
+  return f;
+}
+
+const isStr = (v: unknown) => typeof v === "string";
+const isNum = (v: unknown) => typeof v === "number" && Number.isFinite(v);
+
+/** The quick messages part back, or why not (nine of {own, text}). */
+export function readQuick(text: string): QuickFile {
+  const f = listFile(text, QUICK_FORMAT, "quick messages", "messages") as QuickFile;
+  if (!f.messages.every((q) => typeof q?.own === "boolean" && isStr(q?.text))) throw new Error("its messages aren't a list of {own, text}");
+  if (f.messages.length !== 9) throw new Error(`${f.messages.length} quick messages: the radio has 9`);
+  return f;
+}
+
+/** The waypoints part back, or why not (at most 256 of {name, lat, lon, source}). */
+export function readWaypoints(text: string): WaypointsFile {
+  const f = listFile(text, WAYPOINTS_FORMAT, "waypoints", "waypoints") as WaypointsFile;
+  if (!f.waypoints.every((w) => isStr(w?.name) && isNum(w?.lat) && isNum(w?.lon) && isStr(w?.source)))
+    throw new Error("its waypoints aren't a list of {name, lat, lon, source}");
+  if (f.waypoints.length > 256) throw new Error(`${f.waypoints.length} waypoints: the radio keeps 256`);
+  return f;
+}
+
+/** The DTMF memories part back, or why not (numbers 1-16, each once). */
+export function readDtmf(text: string): DtmfFile {
+  const f = listFile(text, DTMF_FORMAT, "DTMF memories", "memories") as DtmfFile;
+  if (!f.memories.every((m) => Number.isInteger(m?.number) && m.number >= 1 && m.number <= 16 && isStr(m?.symbols) && isStr(m?.name)))
+    throw new Error("its memories aren't a list of {number (1-16), symbols, name}");
+  if (new Set(f.memories.map((m) => m.number)).size !== f.memories.length) throw new Error("a memory number is there twice");
+  return f;
 }

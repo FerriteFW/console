@@ -78,3 +78,11 @@ app likely (system tray and the like); NeonPlug is the reference. Recommendation
   speaker) edited through the settings record with the start page's own choices (power never above Mid).
 - [x] Read-only settings say why (Oct 30, LINK-5, LINK-7): region and Extend TX for safety, the PIN never over the
   link, the cable port and KISS would cut this connection; Dry TX says what it is.
+- [x] The owner's lists (Oct 30, LINK-54 – LINK-58), each as the channels go (Read, Write with its count, a backup
+  and the diff, read back, File, Undo, restored edits, the sidebar's "N unwritten"): APRS › Quick messages (its own
+  tab: Messages is the live conversations, these are texts the radio keeps), APRS › Waypoints (beside the map, which
+  shows them as a diamond layer with a switch), Radio Settings › DTMF memories (a tab beside the settings; Transmit's
+  0 8 5 row links there), and each range preset's skip list in its detail (written after the presets). The Event
+  Log and the Live View panel take new events live (mask 8). Older firmware: the page says to update Ferrite. The
+  demo radio says the caps its records have, so `?demo` shows all of it. `quick.json`, `waypoints.json`,
+  `dtmf.json` and presets' `skips` in the `.ferrite`.

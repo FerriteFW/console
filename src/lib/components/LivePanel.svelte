@@ -1,8 +1,9 @@
 <script lang="ts">
   // Live View's side panel (Alex approved the mockup, Oct 30): beside the radio on a wide window, what the screen
   // can't fit at once. Slots (the readback's cards), Heard now (the APRS card's rows, the heard list and the event
-  // log, whichever Console has already read), Radio (the status bar and INFO), Listen. Nothing here reads the radio
-  // by itself: it shows what Console already has.
+  // log, whichever Console has already read, and the event log's new events as they happen: LINK-57), Radio (the
+  // status bar and INFO), Listen. Nothing here reads the radio by itself: it shows what Console already has, and
+  // what the radio sends.
   import type { Kv } from "../core";
   import { radio } from "../radio.svelte";
   import { listen } from "../listen.svelte";
@@ -10,6 +11,9 @@
   import { activity } from "../activity.svelte";
 
   let { hearing }: { hearing: string } = $props();
+
+  // The event log's new events while the panel is up (a radio that sends them: LINK-57).
+  $effect(() => activity.use());
 
   const s = (v: unknown) => (v === undefined || v === null ? "" : String(v));
   const n = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);

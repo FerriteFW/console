@@ -1,0 +1,22 @@
+{
+  "format": "ferrite-console-dtmf",
+  "version": 1,
+  "saved": "2026-10-30T21:12:00.000Z",
+  "radio": {
+    "callsign": "VA7IF",
+    "connection": "Cable",
+    "firmware": "0.8.2"
+  },
+  "memories": [
+    {
+      "number": 1,
+      "symbols": "*79#",
+      "name": "Link on"
+    },
+    {
+      "number": 2,
+      "symbols": "#79#",
+      "name": "Link off"
+    }
+  ]
+}
