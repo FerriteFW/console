@@ -5,6 +5,8 @@
 import { audioDecode, P, parseUi } from "./core";
 import { JITTER } from "./jitter";
 import { audioCounts, Health } from "./listenHealth";
+import { RECORD_MAX_MS, WavRecorder, wavName } from "./wavrec";
+import { saveBlob } from "./codeplug.svelte";
 import { CAP_AUDIO, type Link } from "./link";
 import { radio } from "./radio.svelte";
 
@@ -60,6 +62,12 @@ class Listen {
   error = $state("");
   /** The dot by Listen: "ok" or "warn", and its tooltip; null until the first reading. */
   health = $state<{ tone: "ok" | "warn"; text: string } | null>(null);
+  /** Recording to a WAV: how long and how big so far (null when not recording); the last save's note. */
+  rec = $state<{ ms: number; bytes: number } | null>(null);
+  recNote = $state("");
+  private recorder: WavRecorder | null = null;
+  private recTimer: ReturnType<typeof setInterval> | null = null;
+  private rate = 12_000;
   private healthy = new Health();
   private underruns = 0;
   private healthAt = 0;
@@ -89,6 +97,7 @@ class Listen {
     try {
       const rest = await link.ok(P.msg.AUDIO, new Uint8Array([1]));
       const rate = rest[0] | (rest[1] << 8);
+      this.rate = rate || 12_000;
       this.ctx = new AudioContext();
       const url = URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
       await this.ctx.audioWorklet.addModule(url);
@@ -122,6 +131,7 @@ class Listen {
   /** Stops listening: the radio told when still connected, the audio closed. */
   async stop() {
     const link = this.link;
+    if (this.recorder) void this.stopRecording(); // what was recorded is saved, not lost
     this.on = false;
     this.slot = "";
     this.health = null;
@@ -184,6 +194,38 @@ class Listen {
     }
   }
 
+  /** Record what Listen plays: the decoded 12 kHz 16-bit mono audio, gaps as silence; at most 60 minutes. */
+  startRecording() {
+    if (!this.on || this.recorder) return;
+    this.recNote = "";
+    this.recorder = new WavRecorder(this.rate, performance.now());
+    this.rec = { ms: 0, bytes: this.recorder.bytes };
+    this.recTimer = setInterval(() => {
+      const r = this.recorder;
+      if (!r) return;
+      const ms = performance.now() - r.startedAt;
+      this.rec = { ms, bytes: r.bytes };
+      if (ms >= RECORD_MAX_MS) void this.stopRecording("Stopped at 60 minutes");
+    }, 500);
+  }
+
+  /** Stop recording and save the WAV (the desktop app's save dialog, or a download). */
+  async stopRecording(why = "") {
+    const r = this.recorder;
+    if (!r) return;
+    this.recorder = null;
+    this.rec = null;
+    if (this.recTimer) clearInterval(this.recTimer);
+    this.recTimer = null;
+    const blob = r.finish(performance.now());
+    try {
+      const name = await saveBlob(wavName(), blob);
+      this.recNote = name ? [why, `Saved ${name}`].filter(Boolean).join(": ") : "";
+    } catch (e) {
+      this.recNote = `Recording not saved: ${(e as Error).message}`;
+    }
+  }
+
   private async stopped(why: string) {
     await this.stop();
     this.error = why;
@@ -205,6 +247,7 @@ class Listen {
     this.kind = p[3] & 2 ? "bcast" : p[3] & 4 ? "hf" : "slot";
     this.quietAt = performance.now();
     const s = audioDecode(p);
+    this.recorder?.push(s, performance.now());
     const f = new Float32Array(s.length);
     for (let i = 0; i < s.length; i++) f[i] = s[i] / 32768;
     this.node?.port.postMessage(f, [f.buffer]);

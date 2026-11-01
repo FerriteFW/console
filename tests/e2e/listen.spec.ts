@@ -29,3 +29,27 @@ test("listen: the health dot comes up a few seconds in, with its tooltip, and go
   await page.getByRole("button", { name: "Listening" }).click();
   await expect(dot).toHaveCount(0);
 });
+
+test("listen: Record writes a WAV of what's heard (12 kHz 16-bit mono), time and size shown, Stop saves it", async ({ page }) => {
+  await openConsole(page, "live");
+  await connect(page);
+  await expect(page.getByRole("button", { name: "Record" })).toHaveCount(0); // only while listening
+  await page.getByRole("button", { name: /^Listen/ }).click();
+  await page.getByRole("button", { name: "Record" }).click();
+  await expect(page.locator("[data-rec]")).toContainText(/0:0[1-9] · \d+ kB/, { timeout: 5_000 });
+  await page.waitForTimeout(1500);
+  const dl = page.waitForEvent("download");
+  await page.getByRole("button", { name: "■ Stop" }).click();
+  const d = await dl;
+  expect(d.suggestedFilename()).toMatch(/^listen-\d{4}-\d\d-\d\d-\d{4}\.wav$/);
+  const { readFileSync } = await import("node:fs");
+  const b = readFileSync(await d.path());
+  expect(b.subarray(0, 4).toString()).toBe("RIFF");
+  expect(b.readUInt32LE(24)).toBe(12_000);
+  expect(b.readUInt16LE(34)).toBe(16);
+  const secs = (b.length - 44) / 24_000;
+  expect(secs).toBeGreaterThan(2);
+  expect(secs).toBeLessThan(6);
+  await expect(page.getByText(/^Saved listen-/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Record" })).toBeVisible();
+});

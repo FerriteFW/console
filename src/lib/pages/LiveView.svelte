@@ -28,9 +28,15 @@
   import { copyPng, download, pngName, screenPng } from "../snapshot";
   import LibraryDialog from "../components/library/LibraryDialog.svelte";
   import { library } from "../library.svelte";
+  import { clock, size } from "../wavrec";
 
   let showKeypad = $state(true);
   // Tune from map's confirmation ("Tuned Slot A: 146.94 FM ..."), shown a few seconds.
+  $effect(() => {
+    if (!listen.recNote) return;
+    const t = setTimeout(() => (listen.recNote = ""), 6000);
+    return () => clearTimeout(t);
+  });
   $effect(() => {
     if (!library.tuned) return;
     const t = setTimeout(() => (library.tuned = ""), 5000);
@@ -210,7 +216,14 @@
         <label title="Mute this computer (the radio keeps sending)"><input type="checkbox" bind:checked={listen.muted} /> Mute</label>
         {#if listen.health}<span class="hdot {listen.health.tone}" role="img" aria-label="Listen health: {listen.health.text}" title={listen.health.text} data-listen-health={listen.health.tone}></span>{/if}
         <span class="meta">{hearing}</span>
+        {#if listen.rec}
+          <button class="btn quiet rec" onclick={() => listen.stopRecording()} title="Stop recording and save the WAV">■ Stop</button>
+          <span class="meta" aria-live="off" data-rec>{clock(listen.rec.ms)} · {size(listen.rec.bytes)}</span>
+        {:else}
+          <button class="btn quiet" onclick={() => listen.startRecording()} title="Record what you hear to a WAV file (12 kHz mono; quiet stretches kept as silence; up to 60 minutes)">Record</button>
+        {/if}
       {/if}
+      {#if listen.recNote}<span class="meta ok" aria-live="polite">{listen.recNote}</span>{/if}
       {#if listen.error}<span class="meta err">{listen.error}</span>{/if}
     </span>
     <button class="btn quiet" disabled={!connected} onclick={() => library.showTune()} title={connected ? "Pick a repeater, a licensed site or an airport near you on the map: the radio tunes to it" : "Connect to a radio to tune it from the map"}>Tune from map</button>
@@ -352,6 +365,10 @@
   .listen .on {
     color: var(--blue);
     border-color: var(--blue);
+  }
+  .rec {
+    color: var(--red);
+    border-color: var(--red);
   }
   .hdot {
     width: 8px;
