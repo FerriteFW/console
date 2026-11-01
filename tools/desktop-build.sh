@@ -22,6 +22,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 if [ "$what" = mac ]; then
   [ "$(uname)" = Darwin ] || { echo "mac: build on a Mac" >&2; exit 1; }
   cd "$here"
+  node scripts/bundle-firmware.mjs >/dev/null # the images in ../ferrite/target now, as the Docker builds take
   npx tauri build --bundles app,dmg 2>&1 | tail -n 8
   mkdir -p target/desktop
   rm -rf "target/desktop/Ferrite Console.app"
