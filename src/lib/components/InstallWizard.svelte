@@ -3,6 +3,7 @@
   // The flow and every gate are install.svelte.ts's (decision 261; BACKUP-2: nothing writes until the backup is
   // verified and saved): this only shows the step the flow is at. It can't be closed while the radio is busy.
   import { install as I } from "../install.svelte";
+  import { Eta, etaText } from "../eta";
   import { radio } from "../radio.svelte";
   import { signatureText } from "../signature";
   import { bridgeEnabled } from "../transport/bridge";
@@ -60,6 +61,9 @@
     if (f) await I.checkSaved(f);
   }
   const short = (h: string) => `${h.slice(0, 16)}…`;
+  /** Seconds left beside the percentage. */
+  const eta = new Eta();
+  const left = $derived(eta.left(I.done, I.total));
 </script>
 
 <svelte:window onkeydown={keydown} />
@@ -88,7 +92,7 @@
     <p class="msg">{I.message || "Starting…"}</p>
     {#if I.total > 0}
       <progress max={I.total} value={I.done}></progress>
-      <p class="sub">{I.pct}%</p>
+      <p class="sub">{I.pct}%{etaText(left)}</p>
     {/if}
     <p class="warn">Keep the cable in and the radio on until this says done.</p>
   </div>

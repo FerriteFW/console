@@ -3,6 +3,7 @@
   // keep the cable in) → Done. The flow itself is firmware.svelte.ts; the image is the bundled release unless a file
   // was chosen under Advanced. It can't be closed while the radio is in the middle of it.
   import { firmware } from "../firmware.svelte";
+  import { Eta, etaText } from "../eta";
   import { radio } from "../radio.svelte";
   import { signatureText } from "../signature";
 
@@ -28,6 +29,9 @@
   function keydown(e: KeyboardEvent) {
     if (e.key === "Escape") close();
   }
+  /** Seconds left beside the percentage. */
+  const eta = new Eta();
+  const left = $derived(eta.left(firmware.done, firmware.blocks));
 </script>
 
 <svelte:window onkeydown={keydown} />
@@ -79,7 +83,7 @@
       <p class="msg" aria-live="polite">{firmware.message || "Starting…"}</p>
       {#if firmware.stage === "sending"}
         <progress max={firmware.blocks} value={firmware.done} aria-label="Sent"></progress>
-        <p class="sub">{firmware.pct}%</p>
+        <p class="sub">{firmware.pct}%{etaText(left)}</p>
       {/if}
       {#if firmware.running}
         <p class="warn">Keep the cable in until this says done.</p>

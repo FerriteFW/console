@@ -3,6 +3,7 @@
   // restore (the backup into Ferrite's own ranges over the link, never calibration or the update area, then the
   // owner's stock .BTF through the bootloader); the plan and the ID checks are the core's.
   import { install as I } from "../install.svelte";
+  import { Eta, etaText } from "../eta";
   import { radio } from "../radio.svelte";
   import { bridgeEnabled } from "../transport/bridge";
 
@@ -24,6 +25,9 @@
     if (files.length) await I.pickFile(kind, files);
   }
   const kb = (n: number) => `${Math.round(n / 1024)} KB`;
+  /** Seconds left beside the percentage. */
+  const eta = new Eta();
+  const left = $derived(eta.left(I.done, I.total));
 </script>
 
 <div class="page">
@@ -89,7 +93,7 @@
     {#if I.restoreStep === "running"}
       <div class="progress-box" role="region" aria-label="Progress" aria-live="polite">
         <p>{I.message}</p>
-        {#if I.total > 0}<progress max={I.total} value={I.done}></progress><span class="pct">{I.pct}%</span>{/if}
+        {#if I.total > 0}<progress max={I.total} value={I.done}></progress><span class="pct">{I.pct}%{etaText(left)}</span>{/if}
         <p class="warn">Keep the cable in and the radio on until this says done.</p>
       </div>
     {/if}
