@@ -12,6 +12,18 @@
   import { radio } from "../radio.svelte";
   import { listen } from "../listen.svelte";
   import { presser, turn } from "../press.svelte";
+  // The wheel over the screen alone (no keypad drawn) turns the knob too, as over the drawn radio.
+  let wheelAcc = 0;
+  function wheel(e: WheelEvent) {
+    if (!connected) return;
+    e.preventDefault();
+    wheelAcc += e.deltaMode === 0 ? e.deltaY / 60 : e.deltaY;
+    const steps = Math.trunc(wheelAcc);
+    if (steps) {
+      wheelAcc -= steps;
+      turn(-steps); // wheel up = clockwise
+    }
+  }
   import { sequencer } from "../sequence.svelte";
   import { copyPng, download, pngName, screenPng } from "../snapshot";
   import LibraryDialog from "../components/library/LibraryDialog.svelte";
@@ -104,8 +116,24 @@
     const t = e.target as HTMLElement | null;
     return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
   }
+  /** A dialog or pop-over is up (Tune from map, Write, the keyboard help...): its keys are its own, Esc closes it. */
+  function covered(e: KeyboardEvent) {
+    const t = e.target as HTMLElement | null;
+    if (t?.closest?.('[role="dialog"], [popover]')) return true;
+    try {
+      return !!document.querySelector('[aria-modal="true"], [popover]:popover-open');
+    } catch {
+      return !!document.querySelector('[aria-modal="true"]');
+    }
+  }
   function onkeydown(e: KeyboardEvent) {
-    if (!connected || typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (typing(e) || covered(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "?") {
+      e.preventDefault();
+      document.getElementById("keys-help")?.showPopover?.();
+      return;
+    }
+    if (!connected) return;
     if (e.code === "BracketLeft" || e.code === "BracketRight") {
       e.preventDefault();
       turn(e.code === "BracketLeft" ? -1 : 1);
@@ -117,6 +145,7 @@
     if (!e.repeat) presser.down(name, e.shiftKey);
   }
   function onkeyup(e: KeyboardEvent) {
+    if (typing(e)) return;
     const name = keyName(e);
     if (name) presser.up(name);
   }
@@ -203,6 +232,7 @@
     {#if connected}
       <button class="btn quiet" popovertarget="radio-info" title="The radio's details">Radio</button>
     {/if}
+    <button class="btn quiet" popovertarget="keys-help" title="Keyboard: the PC's keys press the radio's (?)" aria-label="Keyboard shortcuts">?</button>
     <button class="btn quiet" popovertarget="live-more" title="More" aria-label="More Live View options">⋯</button>
   </div>
   {#if seqOpen}
@@ -258,7 +288,7 @@
         <!-- The whole radio scales as one (keys and knob with the screen), drawn at 1.5x and zoomed to fit. -->
         <div style:zoom={fit / 1.5}><RadioFace {screen} scale={1.5} disabled={!connected} {asleep} /></div>
       {:else}
-        <div class="bare" title={asleep ? "The radio's screen is dark" : undefined} class:asleep style:width={`${240 * fit}px`} style:height={`${320 * fit}px`}>
+        <div class="bare" onwheel={wheel} title={asleep ? "The radio's screen is dark" : undefined} class:asleep style:width={`${240 * fit}px`} style:height={`${320 * fit}px`}>
           <div style:transform={`scale(${fit})`} style:transform-origin="0 0">{@render screen()}</div>
         </div>
       {/if}
@@ -275,7 +305,6 @@
   <div id="keys-help" popover class="pop"><KeyboardHelp /></div>
   <div id="live-more" popover class="pop menu">
     <button class="btn quiet" popovertarget="live-more" popovertargetaction="hide" onclick={() => (seqOpen = true)} disabled={!connected}>Send a key sequence…</button>
-    <button class="btn quiet" popovertarget="keys-help">Keyboard shortcuts</button>
     <label class="opt" title="Pause reading the screen (keys still work)"><input type="checkbox" bind:checked={radio.live} /> Update the screen live</label>
     {#if connected}
       <span class="meta" title={radio.liveByEvents ? `Live View from the radio's updates (LINK-47): ${radio.liveUpdates} so far, ${radio.liveResyncs} whole-state asks` : "Each readback's time"}>{radio.liveByEvents ? `${radio.liveRate} B/s` : `${radio.uiMs} ms`}{radio.ui?.screen ? ` · ${radio.ui.screen.id}` : ""}</span>

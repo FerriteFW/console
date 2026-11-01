@@ -16,11 +16,13 @@
     <dt><kbd>Q</kbd> <kbd>W</kbd></dt>
     <dd>SIDE1 (PF1) and SIDE2 (PF2)</dd>
     <dt><kbd>[</kbd> <kbd>]</kbd> wheel</dt>
-    <dd>Channel knob</dd>
+    <dd>Channel knob (the wheel over the radio)</dd>
     <dt><kbd>Shift</kbd> + key</dt>
     <dd>Long press</dd>
+    <dt><kbd>?</kbd></dt>
+    <dd>This list</dd>
   </dl>
-  <p>Hold a key (or a drawn key) for 0.75 s for a long press, as on the radio. Remote keys never transmit: there is no PTT here.</p>
+  <p>Hold a key (or a drawn key) for 0.75 s for a long press, as on the radio. The keys go to the radio while Live View is up, except while you type in a box or a dialog is open. Remote keys never transmit: there is no PTT here.</p>
 </div>
 
 <style>

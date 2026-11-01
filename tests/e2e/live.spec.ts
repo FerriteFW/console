@@ -133,3 +133,31 @@ test("key sequence: an unknown name (or PTT) is refused before anything is sent"
   await setLive(page, true);
   await expectScreen(page, "Home");
 });
+
+test("keyboard: Enter is MENU and Esc is BACK; ? lists the keys; an open dialog keeps its keys", async ({ page }) => {
+  await openConsole(page, "live");
+  await connect(page);
+  await expectScreen(page, "Home");
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("Enter");
+  await expect.poll(() => screenId(page)).not.toBe("Home");
+  await page.keyboard.press("Escape");
+  await expectScreen(page, "Home");
+  // ? opens the keyboard help; while it's up, keys stay with it (Esc closes it, nothing reaches the radio).
+  await page.keyboard.press("Shift+Slash");
+  await expect(page.getByText("Keyboard controls")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Keyboard controls")).toBeHidden();
+  await page.waitForTimeout(800);
+  expect(await screenId(page)).toBe("Home");
+  // Tune from map's dialog: Esc closes it, not BACK on the radio; Enter isn't MENU.
+  await page.getByRole("button", { name: "Tune from map" }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg).toBeVisible();
+  await page.keyboard.press("KeyM");
+  await page.keyboard.press("Escape");
+  await expect(dlg).toBeHidden();
+  await page.waitForTimeout(800);
+  expect(await screenId(page)).toBe("Home");
+});
