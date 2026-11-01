@@ -1,41 +1,35 @@
 // Listen (LINK-13.4, LINK-13.5): the radio's receive audio over the cable, played in the browser. Off at every
 // connect and never remembered: it starts only when asked here. The radio's 12 kHz µ-law blocks (decoded by the
-// core, ferrite's own coder) go to an AudioWorklet that keeps a jitter buffer and steps them up to the device's rate;
-// a gap (nothing heard, a lost block) plays as silence.
+// core, ferrite's own coder) go to an AudioWorklet that keeps a jitter buffer (`jitter.ts`) and steps them up to the
+// device's rate; a gap (a lost block, nothing heard) plays as silence.
 import { audioDecode, P } from "./core";
+import { JITTER } from "./jitter";
 import { CAP_AUDIO, type Link } from "./link";
 import { radio } from "./radio.svelte";
 
-/** The jitter buffer: play once this much is waiting; never keep more than the cap (older audio is dropped). */
-const START_MS = 150;
-const CAP_MS = 600;
+/** The jitter buffer (decision 331): play once this much is waiting; never keep more than the cap. */
+const START_MS = 250;
+const CAP_MS = 750;
+/** An underrun this long is a real stop (the squelch closed): the buffer refills to START_MS before playing. */
+const STOP_MS = 500;
 /** The request again this often while listening: keeps the session active (a quiet one stops it, LINK-13.5). */
 const RENEW_MS = 3000;
+/** Nothing at all (not even a keep-alive) this long while on: listening was ended on the radio (LINK-13.5). */
+const SILENT_MS = 3000;
+/** How often the renewal and the silence are looked at. */
+const TICK_MS = 1000;
 
-const WORKLET = `
+const WORKLET = `${JITTER}
 class Rx extends AudioWorkletProcessor {
   constructor(o) {
     super();
-    this.rate = o.processorOptions.rate; this.start = o.processorOptions.start; this.cap = o.processorOptions.cap;
-    this.buf = new Float32Array(this.cap * 2); this.r = 0; this.n = 0; this.pos = 0; this.playing = false;
-    this.port.onmessage = (e) => {
-      const s = e.data;
-      if (this.n + s.length > this.cap) { const drop = this.n + s.length - this.cap; this.r = (this.r + drop) % this.buf.length; this.n -= drop; }
-      for (let i = 0; i < s.length; i++) this.buf[(this.r + this.n + i) % this.buf.length] = s[i];
-      this.n += s.length;
-    };
+    const p = o.processorOptions;
+    this.j = new Jitter(p.rate, sampleRate, p.start, p.cap, Math.round((sampleRate * p.stopMs) / 1000));
+    this.port.onmessage = (e) => this.j.push(e.data);
   }
   process(_in, out) {
     const o = out[0][0];
-    const step = this.rate / sampleRate;
-    if (!this.playing && this.n >= this.start) this.playing = true;
-    for (let i = 0; i < o.length; i++) {
-      if (!this.playing || this.n < 2) { o[i] = 0; this.playing = false; continue; }
-      const a = this.buf[this.r], b = this.buf[(this.r + 1) % this.buf.length];
-      o[i] = a + (b - a) * this.pos;
-      this.pos += step;
-      while (this.pos >= 1 && this.n >= 2) { this.pos -= 1; this.r = (this.r + 1) % this.buf.length; this.n--; }
-    }
+    this.j.pull(o);
     for (let c = 1; c < out[0].length; c++) out[0][c].set(o);
     return true;
   }
@@ -59,6 +53,10 @@ class Listen {
   private gain: GainNode | null = null;
   private renew: ReturnType<typeof setInterval> | null = null;
   private quietAt = 0;
+  /** When anything (a block or a keep-alive) last came, and whether `AUDIO` 1 was asked again since. */
+  private anyAt = 0;
+  private renewAt = 0;
+  private retried = false;
 
   /** Whether this connection can listen: the cable, a radio that offers `AUDIO`. */
   get available(): boolean {
@@ -80,17 +78,16 @@ class Listen {
       URL.revokeObjectURL(url);
       this.node = new AudioWorkletNode(this.ctx, "ferrite-rx", {
         outputChannelCount: [1],
-        processorOptions: { rate, start: (rate * START_MS) / 1000, cap: (rate * CAP_MS) / 1000 },
+        processorOptions: { rate, start: (rate * START_MS) / 1000, cap: (rate * CAP_MS) / 1000, stopMs: STOP_MS },
       });
       this.gain = this.ctx.createGain();
       this.node.connect(this.gain).connect(this.ctx.destination);
       this.apply();
       this.link = link;
       link.onAudio = (p) => this.block(p);
-      this.renew = setInterval(() => {
-        if (radio.connectedLink !== this.link) return void this.stop();
-        void this.link?.ask(P.msg.AUDIO, new Uint8Array([1])).catch(() => {});
-      }, RENEW_MS);
+      this.anyAt = this.renewAt = performance.now();
+      this.retried = false;
+      this.renew = setInterval(() => void this.tick(), TICK_MS);
       this.on = true;
     } catch (e) {
       this.error = (e as Error).message;
@@ -118,12 +115,42 @@ class Listen {
     if (link && radio.connectedLink === link) await link.ask(P.msg.AUDIO, new Uint8Array([0])).catch(() => {});
   }
 
+  /** Each second while on: the renewal every RENEW_MS; and when nothing at all has come for SILENT_MS, `AUDIO` 1
+   * asked again once, then Listen off with a note if still nothing (LINK-13.5, decision 331). */
+  private async tick() {
+    const link = this.link;
+    if (!link || radio.connectedLink !== link) return void this.stop();
+    const now = performance.now();
+    if (now - this.anyAt >= SILENT_MS) {
+      if (this.retried) return this.stopped("Listen stopped: the radio isn't sending audio");
+      this.retried = true;
+      this.anyAt = this.renewAt = now;
+      try {
+        await link.ok(P.msg.AUDIO, new Uint8Array([1]));
+      } catch (e) {
+        if (this.link === link) await this.stopped(`Listen stopped: ${(e as Error).message}`);
+      }
+      return;
+    }
+    if (now - this.renewAt >= RENEW_MS) {
+      this.renewAt = now;
+      void link.ask(P.msg.AUDIO, new Uint8Array([1])).catch(() => {});
+    }
+  }
+
+  private async stopped(why: string) {
+    await this.stop();
+    this.error = why;
+  }
+
   /** Volume and mute to the gain. */
   apply() {
     if (this.gain) this.gain.gain.value = this.muted ? 0 : this.volume;
   }
 
   private block(p: Uint8Array) {
+    this.anyAt = performance.now();
+    this.retried = false;
     if (p.length <= 4) {
       if (performance.now() - this.quietAt > 500) this.slot = ""; // a keep-alive: nothing heard
       return;

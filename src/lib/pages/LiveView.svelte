@@ -166,7 +166,7 @@
     listen.apply();
   });
   const listenTitle = $derived(
-    !connected ? "Connect to listen" : radio.kind !== "cable" ? "Receive audio needs the cable: Bluetooth is too slow for it" : !listen.available ? "This firmware doesn't send receive audio" : listen.on ? "Stop listening" : "Hear what the radio receives, on this computer (8 kHz: a slot while its squelch is open, else the broadcast or HF)",
+    !connected ? "Connect to listen" : radio.kind !== "cable" ? "Receive audio needs the cable: Bluetooth is too slow for it" : !listen.available ? "This firmware doesn't send receive audio" : listen.on ? "Stop listening" : "Hear what the radio receives, on this computer (12 kHz: a slot while its squelch is open, else the broadcast or HF)",
   );
 </script>
 
