@@ -7,12 +7,14 @@
 //   block plays as soon as it comes: no waiting for `start` again.
 // - Only after `stop` output samples of underrun (a real stop: the squelch closed, keep-alives only) does it wait to
 //   refill to `start` before playing again.
+// - `underruns` counts every time it ran dry while playing; `gaps` only the short ones it played through (a block
+//   late or lost: Listen's health dot), not a real stop.
 export const JITTER = `
 class Jitter {
   constructor(rate, outRate, start, cap, stop) {
     this.step = rate / outRate; this.start = start; this.cap = cap; this.stop = stop;
     this.buf = new Float32Array(cap + 1); this.r = 0; this.n = 0; this.pos = 0;
-    this.playing = false; this.dry = 0; this.last = 0; this.underruns = 0;
+    this.playing = false; this.dry = 0; this.last = 0; this.underruns = 0; this.gaps = 0;
   }
   push(s) {
     const len = this.buf.length;
@@ -32,6 +34,7 @@ class Jitter {
         o[i] = this.last = a + (b - a) * this.pos;
         this.pos += this.step;
         while (this.pos >= 1 && this.n >= 2) { this.pos -= 1; this.r = (this.r + 1) % len; this.n--; }
+        if (this.dry > 0) this.gaps++;
         this.dry = 0;
         continue;
       }

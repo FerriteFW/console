@@ -17,3 +17,15 @@ test("listen: off at connect, blocks heard while on, off again", async ({ page }
   await on.click();
   await expect(page.getByRole("button", { name: "Listen", exact: true })).toHaveAttribute("aria-pressed", "false");
 });
+
+test("listen: the health dot comes up a few seconds in, with its tooltip, and goes with Listen", async ({ page }) => {
+  await openConsole(page, "live");
+  await connect(page);
+  await page.getByRole("button", { name: /^Listen/ }).click();
+  const dot = page.locator("[data-listen-health]");
+  await expect(dot).toBeVisible({ timeout: 10_000 });
+  // The simulator reports no audio counts (its `audio` line needs real blocks dropped or made in the radio's DSP).
+  await expect(dot).toHaveAttribute("title", /audio counts|blocks dropped/);
+  await page.getByRole("button", { name: "Listening" }).click();
+  await expect(dot).toHaveCount(0);
+});

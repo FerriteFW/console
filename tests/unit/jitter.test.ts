@@ -9,6 +9,7 @@ type J = {
   n: number;
   playing: boolean;
   underruns: number;
+  gaps: number;
 };
 const Jitter = new Function(`${JITTER}; return Jitter;`)() as new (rate: number, outRate: number, start: number, cap: number, stop: number) => J;
 
@@ -42,6 +43,7 @@ test("jitter: a lost block is a short silence, and the next plays at once withou
   j.push(block(0.25));
   const next = pull(j, 64);
   assert.ok(next.slice(8).every((x) => x === 0.25), "the next block plays straight away");
+  assert.equal(j.gaps, 1, "a short gap played through: Listen's health counts it");
 });
 
 test("jitter: a real stop (500 ms dry) waits for 250 ms again", () => {
@@ -51,6 +53,9 @@ test("jitter: a real stop (500 ms dry) waits for 250 ms again", () => {
   assert.equal(j.playing, false);
   j.push(block());
   assert.ok(pull(j, 64).every((x) => Math.abs(x) < 1e-6), "refilling: silence");
+  for (let i = 0; i < 16; i++) j.push(block());
+  pull(j, 64);
+  assert.equal(j.gaps, 0, "a real stop (the squelch closed) isn't a gap");
 });
 
 test("jitter: never more than the cap; an overflow drops back to the start level", () => {

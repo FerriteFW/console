@@ -2,8 +2,9 @@
 // connect and never remembered: it starts only when asked here. The radio's 12 kHz µ-law blocks (decoded by the
 // core, ferrite's own coder) go to an AudioWorklet that keeps a jitter buffer (`jitter.ts`) and steps them up to the
 // device's rate; a gap (a lost block, nothing heard) plays as silence.
-import { audioDecode, P } from "./core";
+import { audioDecode, P, parseUi } from "./core";
 import { JITTER } from "./jitter";
+import { audioCounts, Health } from "./listenHealth";
 import { CAP_AUDIO, type Link } from "./link";
 import { radio } from "./radio.svelte";
 
@@ -18,6 +19,9 @@ const RENEW_MS = 3000;
 const SILENT_MS = 3000;
 /** How often the renewal and the silence are looked at. */
 const TICK_MS = 1000;
+/** The health dot's reading this often: the radio's audio counts (from Live View's readback when it's polling,
+ *  else one short readback of its own) and the player's underruns. */
+const HEALTH_MS = 3000;
 
 const WORKLET = `${JITTER}
 class Rx extends AudioWorkletProcessor {
@@ -26,10 +30,17 @@ class Rx extends AudioWorkletProcessor {
     const p = o.processorOptions;
     this.j = new Jitter(p.rate, sampleRate, p.start, p.cap, Math.round((sampleRate * p.stopMs) / 1000));
     this.port.onmessage = (e) => this.j.push(e.data);
+    this.told = 0;
+    this.calls = 0;
   }
   process(_in, out) {
     const o = out[0][0];
     this.j.pull(o);
+    if (++this.calls >= 200 && this.j.gaps !== this.told) {
+      this.calls = 0;
+      this.told = this.j.gaps;
+      this.port.postMessage(this.told);
+    }
     for (let c = 1; c < out[0].length; c++) out[0][c].set(o);
     return true;
   }
@@ -47,6 +58,12 @@ class Listen {
   /** What the last block was (LINK-13.4, decision 290): a slot's receiver, the broadcast on `slot`, or HF mode. */
   kind = $state<"slot" | "bcast" | "hf">("slot");
   error = $state("");
+  /** The dot by Listen: "ok" or "warn", and its tooltip; null until the first reading. */
+  health = $state<{ tone: "ok" | "warn"; text: string } | null>(null);
+  private healthy = new Health();
+  private underruns = 0;
+  private healthAt = 0;
+  private reading = false;
   private link: Link | null = null;
   private ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
@@ -81,7 +98,12 @@ class Listen {
         processorOptions: { rate, start: (rate * START_MS) / 1000, cap: (rate * CAP_MS) / 1000, stopMs: STOP_MS },
       });
       this.gain = this.ctx.createGain();
+      this.node.port.onmessage = (e) => (this.underruns = Number(e.data) || 0);
       this.node.connect(this.gain).connect(this.ctx.destination);
+      this.healthy.reset();
+      this.underruns = 0;
+      this.health = null;
+      this.healthAt = 0;
       this.apply();
       this.link = link;
       link.onAudio = (p) => this.block(p);
@@ -102,6 +124,7 @@ class Listen {
     const link = this.link;
     this.on = false;
     this.slot = "";
+    this.health = null;
     if (this.renew) clearInterval(this.renew);
     this.renew = null;
     if (link) link.onAudio = () => {};
@@ -135,6 +158,29 @@ class Listen {
     if (now - this.renewAt >= RENEW_MS) {
       this.renewAt = now;
       void link.ask(P.msg.AUDIO, new Uint8Array([1])).catch(() => {});
+    }
+    if (now - this.healthAt >= HEALTH_MS && !this.reading) {
+      this.healthAt = now;
+      void this.readHealth(link);
+    }
+  }
+
+  /** One health reading: Live View's latest readback when it's polling the screen, else a readback of the state
+   *  only (a few hundred bytes every 3 s). */
+  private async readHealth(link: Link) {
+    this.reading = true;
+    try {
+      let ui = radio.ui;
+      if (!radio.live || radio.liveByEvents || radio.busy || !ui) ui = parseUi(await link.uiText(0));
+      if (this.link !== link) return;
+      const c = audioCounts(ui.other.find((l) => l.kind === "audio")?.kv);
+      const now = performance.now();
+      this.healthy.add(now, c ? c.dropped : null, this.underruns);
+      this.health = this.healthy.state(now);
+    } catch {
+      /* the next reading */
+    } finally {
+      this.reading = false;
     }
   }
 

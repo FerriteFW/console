@@ -208,6 +208,7 @@
       {#if listen.on}
         <input type="range" min="0" max="1" step="0.05" bind:value={listen.volume} aria-label="Volume" title="Volume" />
         <label title="Mute this computer (the radio keeps sending)"><input type="checkbox" bind:checked={listen.muted} /> Mute</label>
+        {#if listen.health}<span class="hdot {listen.health.tone}" role="img" aria-label="Listen health: {listen.health.text}" title={listen.health.text} data-listen-health={listen.health.tone}></span>{/if}
         <span class="meta">{hearing}</span>
       {/if}
       {#if listen.error}<span class="meta err">{listen.error}</span>{/if}
@@ -351,6 +352,16 @@
   .listen .on {
     color: var(--blue);
     border-color: var(--blue);
+  }
+  .hdot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: none;
+    background: var(--green);
+  }
+  .hdot.warn {
+    background: var(--amber);
   }
   .listen input[type="range"] {
     width: 90px;
