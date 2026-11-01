@@ -459,7 +459,13 @@ export const ssbExtract = (btf: Uint8Array): Uint8Array | undefined => wasm.ssb_
 export const ssbDescribe = (patch: Uint8Array): SsbFound => JSON.parse(wasm.ssb_describe(patch));
 export const restoreStart = (rest: Uint8Array): RestoreStart | null => JSON.parse(wasm.restore_start(rest));
 /** The backup's file name, carrying the radio's ID (decision 263). */
-export const backupName = (uid: string, date: string): string => wasm.backup_name(uid, date);
+export const backupName = (uid: string, date: string, marker: Uint8Array | null = null): string => wasm.backup_name(uid, date, marker ?? undefined);
+/** BACKUP-12: stock's marker sector (0x080F0000) as the reader's `mdump 0x080F0000 16` answers it, or null. */
+export const parseMdump = (text: string): Uint8Array | null => wasm.parse_mdump(text) ?? null;
+/** The stock marker word (UV85 or BJ90, as read) in the 16 saved bytes, or null (erased or not stock's). */
+export const markerWord = (m: Uint8Array): string | null => wasm.marker_word(m) ?? null;
+/** The stock marker a backup's file name carries, as its 16 bytes, or null. */
+export const nameMarker = (name: string): Uint8Array | null => wasm.name_marker(name) ?? null;
 /** Whether a backup may go into the radio `radioUid` by its ID (decision 263). */
 export const restoreIdCheck = (radioUid: string | null, backupUid: string | null, typed: string): { problems: string[]; confirm_uid: string | null } =>
   JSON.parse(wasm.restore_id_check(radioUid ?? undefined, backupUid ?? undefined, typed || undefined));

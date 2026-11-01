@@ -11,8 +11,9 @@ MODE.json (read at each REBOOT; missing = defaults): {"reboot": "ok" | "busy", "
 "deaf_ms": 300 (probes ignored at first, as the radio saving before its reset)}.
 
 The Install page's tests go further. An image holding the reader's mark (zero-key packed, so its text is plain) starts
-[FakeReader], hwtest's console with `sys`, `flash`, `flashcrc`, `fdump` (fdump_proto.py's binary dump, ACK/NAK) and
-`reboot` (back to a FakeBoot). Its chip is MODE.json's "flash" (a file; 4 MB), with "corrupt_every": N spoiling
+[FakeReader], hwtest's console with `sys`, `flash`, `flashcrc`, `fdump` (fdump_proto.py's binary dump, ACK/NAK),
+`mdump` (the MCU's flash: only the marker sector's 16 bytes, MODE.json's "marker" as 32 hex digits, erased when left
+out; BACKUP-12) and `reboot` (back to a FakeBoot). Its chip is MODE.json's "flash" (a file; 4 MB), with "corrupt_every": N spoiling
 every Nth dump frame once. A link `STOCK_RESTORE` START starts [FakeRestore] (the bridge answers it, not the
 simulator): Ferrite's restore over the link (ferrite decision 261) on a chip made from "flash" with Ferrite's ranges
 scrambled; its FINISH hands the cable to a FakeBoot. Every END appends to MODE.results.json; FakeRestore writes
@@ -278,6 +279,12 @@ class FakeReader:
             return self.console("reader screen on\n")
         if w[0] == "flashcrc":
             return self.console(f"flash crc32 {zlib.crc32(self.flash):08X} over {len(self.flash) // 1024} KB, 1 s\n")
+        if w[0] == "mdump" and len(w) >= 3:
+            addr, n = int(w[1], 0), int(w[2], 0)
+            if (addr, n) != (0x080F0000, 16):
+                return self.console("mdump: the fake knows 0x080F0000 16 only\n")
+            m = bytes.fromhex(read_mode(self.mode_path).get("marker", "FF" * 16))
+            return self.console(f"80F0000:{m.hex().upper()}*{sum(m) & 0xFF:02X}\ndump: end\n")
         if w[0] == "reboot":
             self.log("fakereader: reboot into the bootloader")
             self.next = FakeBoot({"deaf_ms": 300, **read_mode(self.mode_path)}, result_path(self.mode_path), self.log)

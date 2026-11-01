@@ -2,7 +2,7 @@
   // Install as a full-screen wizard (Alex, Oct 29): Connect → Back up → SSB → Install → Done, one step on screen.
   // The flow and every gate are install.svelte.ts's (decision 261; BACKUP-2: nothing writes until the backup is
   // verified and saved): this only shows the step the flow is at. It can't be closed while the radio is busy.
-  import { install as I } from "../install.svelte";
+  import { install as I, markerText } from "../install.svelte";
   import { Eta, etaText } from "../eta";
   import { radio } from "../radio.svelte";
   import { signatureText } from "../signature";
@@ -153,6 +153,8 @@
           <dd data-k="uid">{I.uid || "not reported"}</dd>
           <dt>Flash</dt>
           <dd>{I.chip}</dd>
+          <dt>Model marker</dt>
+          <dd data-k="marker">{markerText(I.marker, I.markerRead)}</dd>
           <dt>Checked</dt>
           <dd data-k="verified">CRC {I.check.crc32} matches the radio's</dd>
           <dt>SHA-256</dt>

@@ -2,8 +2,8 @@
 //! `tools/flash.py` (see `analysis/bootloader.md`).
 //!
 //! - [`check_file`] unpacks a `.btf`, runs `check_image` and says what the image is (`describe`), plus whether it is
-//!   a Ferrite image (the "Ferrite terminal" mark). Console flashes Ferrite images only, below the stock marker
-//!   sector (`APP_MAX`).
+//!   a Ferrite image (the "Ferrite terminal" mark). Console flashes Ferrite images up to the chip's end
+//!   (`APP_MAX`, 1,012 KB: ferrite decision 338).
 //! - [`Update`] holds a checked file and gives the frames to send, in order: hello, model, count, every 1 KB block,
 //!   end. Nothing else: the bootloader only ever receives the image's own blocks, which it writes from 0x08003000
 //!   up. No frame here can reach calibration, the SPI flash's update area or the option bytes.
@@ -12,10 +12,11 @@
 use serde::Serialize;
 
 pub const APP_BASE: u32 = 0x0800_3000;
-/// Our limit: stop below the stock marker sector at 0x080F0000.
-pub const APP_MAX: usize = 948 * 1024;
-/// The bootloader's own limit (for stock files; Console doesn't flash those).
+/// The bootloader's own limit: image offsets below 0xFD000, to 0x080FFFFF.
 pub const BOOT_MAX: usize = 0xFD000;
+/// Ours: the same, to the chip's end (ferrite decision 338; 948 KB before, below stock's marker sector at
+/// 0x080F0000, which the backup now records and the way back puts back: [`crate::install::stock_restore_image`]).
+pub const APP_MAX: usize = 1012 * 1024;
 pub const MODEL_OFF: usize = 0x3E0;
 /// 12 bytes; the bootloader compares exactly these.
 pub const MODEL_TAG: &[u8; 12] = b"RT-950      ";
@@ -136,10 +137,7 @@ pub fn check_image(img: &[u8], limit: usize) -> Vec<String> {
         ));
     }
     if img.len() > limit {
-        errs.push(format!(
-            "image is {} bytes; over {limit} would reach the stock marker sector at 0x080F0000",
-            img.len()
-        ));
+        errs.push(format!("image is {} bytes; over {limit} would run past the end of MCU flash (0x08100000)", img.len()));
     }
     errs
 }
@@ -496,7 +494,8 @@ mod tests {
         let mut bad = image(5000);
         bad[MODEL_OFF_BOOT] = b'X';
         assert!(check_image(&bad, APP_MAX)[0].contains("Firmware Error"));
-        assert!(check_image(&image(APP_MAX + 1), APP_MAX)[0].contains("marker sector"));
+        assert!(check_image(&image(APP_MAX + 1), APP_MAX)[0].contains("end of MCU flash"));
+        assert!(check_image(&image(APP_MAX), APP_MAX).is_empty(), "1,012 KB is taken (decision 338)");
     }
 
     #[test]

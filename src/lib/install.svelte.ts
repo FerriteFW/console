@@ -9,7 +9,8 @@
 //   4. Install: the bundled release (SHA-256 checked) or a file, with the patch bundled; refused without a saved
 //      backup or over a pending phone update.
 //   Back to stock: the backup written into Ferrite's own ranges over the link (STOCK_RESTORE, never calibration or
-//   the update area: core/src/install.rs), then the stock .BTF through the bootloader.
+//   the update area: core/src/install.rs), then the stock .BTF through the bootloader, padded over stock's marker
+//   sector's first page with the marker the backup read put back (BACKUP-12, ferrite decision 338).
 import { ACK, askRestart, BootPort, bootRate, CMD_PROBE, sendAll } from "./bootflash";
 import {
   backupCheck,
@@ -20,7 +21,10 @@ import {
   Fdump,
   imageCheck,
   loadCore,
+  markerWord,
+  nameMarker,
   nameUid,
+  parseMdump,
   P,
   readerHasFdumpz,
   readerLine,
@@ -55,6 +59,8 @@ const BOOT_WAIT_MS = 60_000;
 /** A Ferrite first boot formats its store before it answers. */
 const FIRST_BOOT_MS = 60_000;
 export const STOCK_RESTORE = 0x60;
+/** BACKUP-12.1: the reader's (and hwtest's) read of stock's marker sector, the MCU's 0x080F0000-0x080F000F. */
+const MDUMP_MARKER = "mdump 0x080F0000 16\r";
 const OP_START = 0;
 const OP_FINISH = 4;
 
@@ -188,6 +194,39 @@ const ids = {
   },
 };
 
+/** BACKUP-12: stock's marker sector bytes each backup this browser took read (its SHA-256 -> 32 hex digits). The file
+ * name carries a stock word too; this covers a renamed file. Best effort, as `ids`. */
+const markers = {
+  key: "ferrite-console-backup-markers",
+  all(): Record<string, string> {
+    try {
+      return JSON.parse(localStorage.getItem(markers.key) ?? "{}") ?? {};
+    } catch {
+      return {};
+    }
+  },
+  get(sha: string): Uint8Array | null {
+    const h = markers.all()[sha];
+    return h && /^[0-9a-f]{32}$/.test(h) ? Uint8Array.from(h.match(/../g)!.map((x) => parseInt(x, 16))) : null;
+  },
+  put(sha: string, m: Uint8Array) {
+    try {
+      localStorage.setItem(markers.key, JSON.stringify({ ...markers.all(), [sha]: Array.from(m, (x) => x.toString(16).padStart(2, "0")).join("") }));
+    } catch {
+      /* not kept: the file name still carries a stock word */
+    }
+  },
+};
+
+/** What the marker bytes say, for the backup's facts. */
+export function markerText(m: Uint8Array | null, read: boolean): string {
+  if (!read) return "not read by this reader: assumed blank (stock shows its default model name after Back to stock)";
+  if (!m) return "not read";
+  const w = markerWord(m);
+  if (w) return `${w} (stock's model marker; put back by Back to stock)`;
+  return m.every((x) => x === 0xff) ? "blank" : "not stock's (left erased by Back to stock)";
+}
+
 type SaveHandle = { name: string; createWritable(): Promise<{ write(b: Blob): Promise<void>; close(): Promise<void> }>; getFile(): Promise<File> };
 type SavePicker = (o: { suggestedName: string; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<SaveHandle>;
 
@@ -214,6 +253,9 @@ class Install {
   total = $state(0);
   uid = $state("");
   chip = $state("");
+  /** BACKUP-12.1: stock's marker sector's first 16 bytes as the reader read them (null: not read). */
+  marker = $state<Uint8Array | null>(null);
+  markerRead = $state(false);
   check = $state<BackupCheck | null>(null);
   backupName = $state("");
   /** The owner saved the backup and said so (or the desktop app saved it and read it back). */
@@ -247,6 +289,8 @@ class Install {
   restoreBackupCheck = $state<BackupCheck | null>(null);
   /** The radio the backup is from, when Console knows it (its file name, or this browser's record). */
   restoreBackupUid = $state<string | null>(null);
+  /** BACKUP-12: the marker sector bytes the backup read (this browser's record, or the file name's word), or null. */
+  restoreMarker = $state<Uint8Array | null>(null);
   /** Console doesn't know the backup's radio: the owner types this radio's ID (this one) to go on. */
   restoreConfirmUid = $state<string | null>(null);
   restoreTyped = $state("");
@@ -367,6 +411,7 @@ class Install {
       this.restoreBackup = p;
       this.restoreBackupCheck = backupCheck(p.bytes);
       this.restoreBackupUid = ids.get(this.restoreBackupCheck.sha256) ?? nameUid(p.name);
+      this.restoreMarker = markers.get(this.restoreBackupCheck.sha256) ?? nameMarker(p.name);
       this.restoreConfirmUid = null;
       this.restoreTyped = "";
       this.restoreSummary = null;
@@ -557,6 +602,13 @@ class Install {
       const chip = fl && readerLine<{ id: string; vendor: string; size: number }>("flash", fl[0]);
       if (!chip) throw new Error("The reader didn't report the radio's SPI flash.");
       this.chip = `${chip.vendor} ${chip.id}, ${chip.size / 1024} KB`;
+      // BACKUP-12.1: stock's marker sector (0x080F0000), before any Ferrite image that reaches it is flashed. A reader
+      // without `mdump` (an older one) answers `?`: assumed blank, and said.
+      w.clear();
+      await w.write(MDUMP_MARKER);
+      const md = await w.waitFor(/80F0000:[0-9A-F]{32}\*[0-9A-F]{2}|\?  \(help\)|mdump: [^\r\n]*/, 3000, this.held);
+      this.marker = md ? parseMdump(md[0]) : null;
+      this.markerRead = !!this.marker;
       const data = await this.readChip(chip.size);
       this.message = "Checking: the radio's own CRC of the whole chip (about a minute)…";
       w.clear();
@@ -572,8 +624,9 @@ class Install {
         );
       this.backup = data;
       this.check = c;
-      this.backupName = backupName(this.uid, today());
+      this.backupName = backupName(this.uid, today(), this.marker);
       ids.put(c.sha256, this.uid);
+      if (this.marker) markers.put(c.sha256, this.marker);
       this.message = "";
       this.backupStep = c.problems.some((p) => !p.startsWith("a stock phone")) ? "failed" : "done";
       if (this.backupStep === "failed") {
@@ -968,7 +1021,7 @@ class Install {
       if (fin.status !== 0) throw new Error(`The radio refused to finish: ${statusText(fin.status)}.`);
       link.close();
       this.wire!.attach();
-      await this.flash(FirmwareUpdate.stock(this.stock!.bytes), "stock firmware", false);
+      await this.flash(FirmwareUpdate.stock(this.stock!.bytes, this.restoreMarker ?? undefined), "stock firmware", false);
       this.backOnStock();
     } catch (e) {
       link.close();
@@ -986,7 +1039,7 @@ class Install {
     this.error = "";
     this.errorAt = "";
     try {
-      await this.flash(FirmwareUpdate.stock(this.stock.bytes), "stock firmware");
+      await this.flash(FirmwareUpdate.stock(this.stock.bytes, this.restoreMarker ?? undefined), "stock firmware");
       this.backOnStock();
     } catch (e) {
       this.fail("restore", e);

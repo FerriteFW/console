@@ -719,9 +719,10 @@ impl FirmwareUpdate {
     pub fn reader(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
         install::reader_update(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
     }
-    /// A stock `.BTF` for the way back (BACKUP-8), as it is.
-    pub fn stock(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
-        install::stock_update(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
+    /// A stock `.BTF` for the way back (BACKUP-8), padded over stock's marker sector's first page with the marker
+    /// read at backup time put back when there is one (BACKUP-12).
+    pub fn stock(btf: &[u8], marker: Option<Vec<u8>>) -> Result<FirmwareUpdate, JsError> {
+        install::stock_update(btf, marker.as_deref()).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
     }
     /// A Ferrite image, with the owner's SSB patch bundled when given (INST-11).
     pub fn ferrite(btf: &[u8], patch: Option<Vec<u8>>) -> Result<FirmwareUpdate, JsError> {
@@ -845,10 +846,29 @@ pub fn reader_has_fdumpz(btf: &[u8]) -> bool {
     install::reader_has_fdumpz(btf)
 }
 
-/// The backup's file name for a radio ID and a date (decision 263).
+/// The backup's file name for a radio ID and a date (decision 263), with the stock marker word when there is one
+/// (BACKUP-12).
 #[wasm_bindgen]
-pub fn backup_name(uid: &str, date: &str) -> String {
-    install::backup_name(uid, date)
+pub fn backup_name(uid: &str, date: &str, marker: Option<Vec<u8>>) -> String {
+    install::backup_name(uid, date, marker.as_deref())
+}
+
+/// The marker sector's 16 bytes from the reader's `mdump 0x080F0000 16` answer, or nothing (BACKUP-12.1).
+#[wasm_bindgen]
+pub fn parse_mdump(text: &str) -> Option<Vec<u8>> {
+    install::parse_mdump(text)
+}
+
+/// The stock marker word in 16 saved bytes, or nothing (erased or not stock's).
+#[wasm_bindgen]
+pub fn marker_word(m: &[u8]) -> Option<String> {
+    install::marker_word(m)
+}
+
+/// The marker a backup's file name carries, as 16 bytes, or nothing.
+#[wasm_bindgen]
+pub fn name_marker(name: &str) -> Option<Vec<u8>> {
+    install::name_marker(name)
 }
 
 /// The radio ID a backup's file name carries, or nothing.

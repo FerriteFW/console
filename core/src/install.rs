@@ -13,7 +13,13 @@
 //! - Back to stock: [`restore_plan`] gives the `STOCK_RESTORE` requests that write the backup into Ferrite's own
 //!   writable ranges. Calibration (0x00F000-0x00FFFF) and the update area (0x300000 up) are left out by
 //!   construction: the ranges are cut to ferrite's `layout::WRITABLE` and every request is checked again with
-//!   [`never_written`], whatever the radio's answer says. Then [`stock_update`] flashes the stock `.BTF`.
+//!   [`never_written`], whatever the radio's answer says. Then [`stock_update`] flashes the stock `.BTF`, padded to
+//!   cover stock's marker sector's first page ([`stock_restore_image`], BACKUP-12).
+//! - Stock's marker sector (ferrite decision 338, BACKUP-12): Ferrite may use the MCU's top 64 KB, where stock firmware
+//!   alone writes one word (UV85 or BJ90, the model name on its info page). The backup reads its first 16 bytes with
+//!   the reader's `mdump` ([`parse_mdump`]); they travel in the file name when they are a stock marker
+//!   ([`backup_name`], [`name_marker`]) and in the browser's record; the way back puts them back or leaves the page
+//!   erased.
 //! - Which radio a backup is from (decision 263): the MCU's unique ID, as the reader's `sys` and Ferrite's `START`
 //!   answer give it. The backup stays a raw flash image, so the ID travels in its file name ([`backup_name`],
 //!   [`name_uid`]) and in the browser's own record; calibration alone can't tell two radios apart (it can be the
@@ -178,8 +184,69 @@ fn uid_grouped(key: &str) -> String {
 }
 
 /// The backup's file name: `rt950pro-backup-<ID>-<YYYYMMDD>.bin`, the ID's 20 digits (decision 263).
-pub fn backup_name(uid: &str, date: &str) -> String {
-    format!("rt950pro-backup-{}-{date}.bin", uid_key(uid).unwrap_or_else(|| "unknown-id".into()))
+/// With a stock marker read at backup time, its word follows (`...-20261101-UV85.bin`: the 4 bytes as read).
+pub fn backup_name(uid: &str, date: &str, marker: Option<&[u8]>) -> String {
+    let word = marker.and_then(marker_word).map(|w| format!("-{w}")).unwrap_or_default();
+    format!("rt950pro-backup-{}-{date}{word}.bin", uid_key(uid).unwrap_or_else(|| "unknown-id".into()))
+}
+
+// ---- stock's marker sector (BACKUP-12, ferrite decision 338) ----
+
+/// Stock's marker sector in MCU flash, and its image offset (0xED000).
+pub const MARKER_ADDR: u32 = 0x080F_0000;
+pub const MARKER_OFF: usize = (MARKER_ADDR - APP_BASE) as usize;
+/// The bytes the backup records.
+pub const MARKER_LEN: usize = 16;
+/// The bootloader erases the 2 KB pages it writes: the way back covers this one.
+pub const MARKER_PAGE: usize = 0x800;
+/// The reader's command for them (hwtest's `mdump`).
+pub const MDUMP_MARKER: &str = "mdump 0x080F0000 16\r";
+/// The words stock writes (0x55563835 "UV85", 0x424A3930 "BJ90"), as they may read in either byte order.
+const MARKER_WORDS: [&[u8; 4]; 4] = [b"UV85", b"58VU", b"BJ90", b"09JB"];
+
+/// The stock marker word the 16 bytes hold (the 4 bytes as text, as read), or None: erased, anything else (stock
+/// reads that as no marker), or short.
+pub fn marker_word(m: &[u8]) -> Option<String> {
+    let rest_erased = m.len() >= MARKER_LEN && m[4..MARKER_LEN].iter().all(|&b| b == 0xFF);
+    (rest_erased && MARKER_WORDS.iter().any(|w| &m[..4] == *w)).then(|| String::from_utf8_lossy(&m[..4]).into_owned())
+}
+
+/// The reader's `mdump 0x080F0000 16` answer: `80F0000:` + 32 hex digits + `*` + their byte sum. None when the text
+/// holds no such line or its sum is wrong (an older reader answers `?  (help)`).
+pub fn parse_mdump(text: &str) -> Option<Vec<u8>> {
+    let rest = &text[text.find("80F0000:")? + 8..];
+    let hexs = rest.get(..2 * MARKER_LEN)?;
+    let b: Vec<u8> =
+        (0..MARKER_LEN).map(|i| u8::from_str_radix(&hexs[2 * i..2 * i + 2], 16).ok()).collect::<Option<_>>()?;
+    let sum = u8::from_str_radix(rest.get(2 * MARKER_LEN..)?.strip_prefix('*')?.get(..2)?, 16).ok()?;
+    (b.iter().fold(0u8, |a, &x| a.wrapping_add(x)) == sum).then_some(b)
+}
+
+/// The marker a backup's file name carries ([`backup_name`]) as its 16 bytes, or None.
+pub fn name_marker(name: &str) -> Option<Vec<u8>> {
+    let stem = name.get(..name.rfind(".bin")?)?;
+    let stem = stem.split(" (").next()?; // "... (1).bin", a browser's second download
+    let w = stem.get(stem.len().checked_sub(5)?..)?.strip_prefix('-')?;
+    let mut m = vec![0xFF; MARKER_LEN];
+    m[..4].copy_from_slice(w.as_bytes());
+    marker_word(&m).map(|_| m)
+}
+
+/// The stock image for the way back (BACKUP-12): padded with 0xFF through the first 2 KB page of 0x080F0000, so the
+/// bootloader erases it (no Ferrite code is left in the word stock reads), with the saved 16 bytes put back at its
+/// start when they hold a stock marker; anything else stays erased (stock then shows its default model name). An
+/// image already that long is left as it is. ferrite's `btf.stock_restore_image`.
+pub fn stock_restore_image(img: &[u8], marker: Option<&[u8]>) -> Vec<u8> {
+    let end = MARKER_OFF + MARKER_PAGE;
+    let mut out = img.to_vec();
+    if out.len() >= end {
+        return out;
+    }
+    out.resize(end, 0xFF);
+    if let Some(m) = marker.filter(|m| img.len() <= MARKER_OFF && marker_word(m).is_some()) {
+        out[MARKER_OFF..MARKER_OFF + MARKER_LEN].copy_from_slice(&m[..MARKER_LEN]);
+    }
+    out
 }
 
 /// The radio ID a backup's file name carries ([`backup_name`]), grouped, or None (a renamed file).
@@ -534,14 +601,16 @@ pub fn reader_update(btf: &[u8]) -> Result<Update, Vec<String>> {
     }
 }
 
-/// The stock `.BTF`'s update: the file as it is, as Radtel's updater and flash.py send it (BACKUP-8).
-pub fn stock_update(btf: &[u8]) -> Result<Update, Vec<String>> {
+/// The stock `.BTF`'s update (BACKUP-8): its image padded over stock's marker sector's first page with the marker
+/// read at backup time put back ([`stock_restore_image`], BACKUP-12), packed again with the zero key (the bytes that
+/// land are the stock file's own), as flash.py sends it.
+pub fn stock_update(btf: &[u8], marker: Option<&[u8]>) -> Result<Update, Vec<String>> {
     let c = check_stock(btf);
-    if c.problems.is_empty() {
-        Ok(Update::raw(btf.to_vec()))
-    } else {
-        Err(c.problems)
+    if !c.problems.is_empty() {
+        return Err(c.problems);
     }
+    let img = unpack(btf).map_err(|e| vec![e])?.0;
+    Ok(Update::raw(pack(&stock_restore_image(&img, marker))))
 }
 
 // ---- SSB (ssbpatch.py) ----
@@ -1056,7 +1125,11 @@ mod tests {
         assert!(check_stock(&stock).problems.is_empty());
         assert!(!check_stock(&fer).problems.is_empty());
         assert!(!check_stock(&reader).problems.is_empty());
-        assert_eq!(stock_update(&stock).unwrap().data(), &stock[..], "stock goes as it is");
+        let sent = stock_update(&stock, None).unwrap();
+        let back = unpack(sent.data()).unwrap().0;
+        assert_eq!(back.len(), MARKER_OFF + MARKER_PAGE, "stock goes padded over the marker's page (BACKUP-12)");
+        let own = unpack(&stock).unwrap().0;
+        assert!(back[..own.len()] == own[..], "its own bytes first");
         assert!(ferrite_update(&stock, None).is_err());
         assert_eq!(ferrite_update(&fer, None).unwrap().0.data(), &fer[..]);
     }
@@ -1269,14 +1342,71 @@ mod tests {
     /// Decision 263: the file name carries the ID; a renamed file doesn't.
     #[test]
     fn backup_names_carry_the_id() {
-        let n = backup_name(HERE, "20261022");
+        let n = backup_name(HERE, "20261022", None);
         assert_eq!(n, "rt950pro-backup-N0EQ80R081H4T84MXM3G-20261022.bin");
         assert_eq!(name_uid(&n).as_deref(), Some(HERE));
         assert_eq!(name_uid("rt950pro-backup-N0EQ80R081H4T84MXM3G-20261022 (1).bin").as_deref(), Some(HERE));
-        assert_eq!(backup_name("", "20261022"), "rt950pro-backup-unknown-id-20261022.bin");
+        assert_eq!(backup_name("", "20261022", None), "rt950pro-backup-unknown-id-20261022.bin");
         assert_eq!(name_uid("rt950pro-backup-unknown-id-20261022.bin"), None);
         assert_eq!(name_uid("flash.bin"), None);
         assert_eq!(name_uid("rt950pro-backup-N0EQ80R081H4T84MXM3U-1.bin"), None, "U isn't a digit");
         assert_eq!(uid_key(&uid_text([0x3F2A_91C0, 0x7D44_0123, 0x89AB_CDEF])).map(|k| k.len()), Some(20));
+    }
+
+    /// BACKUP-12, BACKUP-12.1: the reader's `mdump` line read (its sum checked), the stock word in the backup's name
+    /// and back from it (either byte order; anything else isn't carried).
+    #[test]
+    fn marker_read_and_named() {
+        let mut uv = vec![0xFF; 16];
+        uv[..4].copy_from_slice(b"UV85");
+        let line = "> mdump 0x080F0000 16\r\n80F0000:55563835FFFFFFFFFFFFFFFFFFFFFFFF*0C\r\ndump: end\r\n> ";
+        assert_eq!(parse_mdump(line).as_deref(), Some(&uv[..]));
+        assert_eq!(parse_mdump(&line.replace("*0C", "*0D")), None, "a wrong sum");
+        assert_eq!(parse_mdump("?  (help)\r\n"), None, "an older reader");
+        let blank = parse_mdump("80F0000:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF*F0").unwrap();
+        assert_eq!(blank, vec![0xFF; 16]);
+        assert_eq!(marker_word(&blank), None);
+        assert_eq!(marker_word(&uv).as_deref(), Some("UV85"));
+        let mut le = vec![0xFF; 16];
+        le[..4].copy_from_slice(&0x424A_3930u32.to_le_bytes());
+        assert_eq!(marker_word(&le).as_deref(), Some("09JB"));
+        let mut junk = uv.clone();
+        junk[8] = 0;
+        assert_eq!(marker_word(&junk), None, "not erased after the word");
+        let n = backup_name(HERE, "20261101", Some(&uv));
+        assert!(n.ends_with("-20261101-UV85.bin"), "{n}");
+        assert_eq!(name_uid(&n).as_deref(), Some(HERE));
+        assert_eq!(name_marker(&n), Some(uv.clone()));
+        assert_eq!(name_marker(&n.replace(".bin", " (1).bin")), Some(uv.clone()));
+        assert_eq!(name_marker(&backup_name(HERE, "20261101", Some(&le))), Some(le));
+        assert_eq!(backup_name(HERE, "20261101", Some(&blank)), backup_name(HERE, "20261101", None));
+        assert_eq!(name_marker(&backup_name(HERE, "20261101", None)), None);
+        assert_eq!(name_marker("flash.bin"), None);
+    }
+
+    /// BACKUP-12.2: the way back covers 0x080F0000's first page (0xFF), the saved stock marker at its start; anything
+    /// else saved leaves it erased; the whole file within the bootloader's limit; a long image goes as it is.
+    #[test]
+    fn stock_restore_covers_the_marker_page() {
+        let img = image(380_000, b"V0.29");
+        let mut uv = vec![0xFF; 16];
+        uv[..4].copy_from_slice(b"BJ90");
+        let ff = vec![0xFF; 16];
+        for (m, want) in [(None, &ff), (Some(&ff), &ff), (Some(&uv), &uv), (Some(&vec![0u8; 16]), &ff)] {
+            let r = stock_restore_image(&img, m.map(|v| &v[..]));
+            assert_eq!(r.len(), MARKER_OFF + MARKER_PAGE);
+            assert_eq!(&r[..img.len()], &img[..]);
+            assert!(r[img.len()..MARKER_OFF].iter().all(|&b| b == 0xFF));
+            assert_eq!(&r[MARKER_OFF..MARKER_OFF + 16], &want[..]);
+            assert!(r[MARKER_OFF + 16..].iter().all(|&b| b == 0xFF));
+            assert!(check_image(&r, BOOT_MAX).is_empty());
+        }
+        let stock = pack(&img);
+        let u = stock_update(&stock, Some(&uv)).unwrap();
+        assert_eq!(u.blocks(), (MARKER_OFF + MARKER_PAGE + 1024) / 1024, "951 blocks, through 0x080F07FF");
+        let back = unpack(u.data()).unwrap().0;
+        assert_eq!(&back[MARKER_OFF..MARKER_OFF + 4], b"BJ90");
+        let long = vec![1u8; MARKER_OFF + MARKER_PAGE];
+        assert_eq!(stock_restore_image(&long, Some(&uv)), long);
     }
 }

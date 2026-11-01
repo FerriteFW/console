@@ -3,6 +3,7 @@
   // restore (the backup into Ferrite's own ranges over the link, never calibration or the update area, then the
   // owner's stock .BTF through the bootloader); the plan and the ID checks are the core's.
   import { install as I } from "../install.svelte";
+  import { markerWord } from "../core";
   import { Eta, etaText } from "../eta";
   import { radio } from "../radio.svelte";
   import { bridgeEnabled } from "../transport/bridge";
@@ -51,6 +52,11 @@
     {#if I.restoreBackup && I.restoreBackupCheck && !I.restoreBackupCheck.problems.filter((p) => !p.startsWith("a stock phone")).length}
       <p class="sub" data-k="restore-id">
         {I.restoreBackupUid ? `Backup of radio ID ${I.restoreBackupUid}.` : "Console doesn't know which radio this backup is from: the radio's ID is asked for first."}
+      </p>
+      <p class="sub" data-k="restore-marker">
+        {I.restoreMarker && markerWord(I.restoreMarker)
+          ? `Stock's model marker ${markerWord(I.restoreMarker)} goes back too.`
+          : "No stock model marker saved with this backup: stock shows its default model name."}
       </p>
     {/if}
 

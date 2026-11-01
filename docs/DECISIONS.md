@@ -93,7 +93,7 @@
 ## Firmware Update
 
 - Radios already on Ferrite only, over the cable. First installs need the whole-flash backup: `flash.py`.
-- Ferrite images only (the "Ferrite terminal" mark), under 948 KB (`APP_MAX`). Stock goes back with `flash.py`.
+- Ferrite images only (the "Ferrite terminal" mark), up to 1,012 KB (`APP_MAX`, ferrite decision 338: 948 KB before). Stock goes back from the Install page.
 - The checks are `btf.py`'s, ported to `core/src/firmware.rs`. The core makes every frame, only from a checked file.
 - The frames are hello, model, count, the blocks, end. Nothing else reaches the bootloader.
 - REBOOT (LINK-24), then probes at 115200. No stock `PROGRAMBT9000U` nudge: Ferrite answers REBOOT.
@@ -111,3 +111,4 @@
 - The bundled release and reader are copied in by `npm run bundle-firmware`, never committed; the page uses them only when their SHA-256 matches the manifest.
 - Oct 28, 2026: release signatures (UPD-15). Ferrite's CI signs each image with minisign (`X.btf.minisig`); the radio can't check it, so Console does, with Ferrite's public key (`core/src/signature.rs`). A signature that verifies shows "Signed by Ferrite:" and its trusted comment. One that doesn't is refused like a failed image check. No signature (someone's own `mkbtf.sh` build) is allowed and shown as "Not signed: not a Ferrite release". The bundle script puts a `.minisig` beside the image into the manifest.
 - Back to stock writes only Ferrite's writable ranges (`layout::WRITABLE`), never calibration or the update area, and reads them back by CRC.
+- Nov 1, 2026 (ferrite decision 338, BACKUP-12): Ferrite may use the MCU's top 64 KB, stock's marker sector (one word, UV85 or BJ90, the model name on stock's info page). The backup reads its first 16 bytes with the reader's `mdump 0x080F0000 16` and shows them ("Model marker"); a stock word goes in the file name (`...-UV85.bin`) and every read in this browser's record by the backup's SHA-256. Back to stock sends the stock image padded with 0xFF through 0x080F07FF (951 blocks instead of about 371: about a minute longer), the word put back when there is one; without one the page stays erased and stock shows its default model name. A reader without `mdump` leaves it unrecorded (assumed blank).

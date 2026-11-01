@@ -168,7 +168,7 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   const flash = chip();
   const flashPath = join(dir(), "flash.bin");
   writeFileSync(flashPath, flash);
-  setMode({ flash: flashPath, corrupt_every: 37, cut_every: 53 });
+  setMode({ flash: flashPath, corrupt_every: 37, cut_every: 53, marker: "55563835" + "FF".repeat(12) }); // stock's UV85 (BACKUP-12)
   await serveRelease(page);
   await open(page);
   await expect(page.locator('[data-k="release"]')).toContainText("Ferrite v9.8.7"); // the Install tab's Advanced
@@ -179,6 +179,7 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   const b = wizard(page);
   await expect(b.locator('[data-k="uid"]')).not.toHaveText("not reported");
   await expect(b.locator('[data-k="verified"]')).toContainText("matches the radio's");
+  await expect(b.locator('[data-k="marker"]')).toContainText("UV85"); // BACKUP-12.1: read with mdump
   // The Rust reader's fdumpz: every kind of chunk crossed (erased, DEFLATE inflated by the browser, raw).
   const dump = dumpResult();
   expect(dump.z).toBe(true);
@@ -191,7 +192,7 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   await shot(page, info, "71-install-backup");
 
   const [dl] = await Promise.all([page.waitForEvent("download"), b.getByRole("button", { name: "Save the backup…" }).click()]);
-  expect(dl.suggestedFilename()).toMatch(/^rt950pro-backup-[0-9A-Z]{20}-\d{8}\.bin$/);
+  expect(dl.suggestedFilename()).toMatch(/^rt950pro-backup-[0-9A-Z]{20}-\d{8}-UV85\.bin$/); // the marker travels in the name
   const saved = readFileSync(await dl.path());
   expect(saved.length).toBe(2 << 20);
   expect(sha(saved)).toBe(sha(flash));
@@ -275,10 +276,11 @@ test("back to stock: the backup into Ferrite's ranges, never calibration or the 
   await open(page, false, "restore");
   const back = card(page, "Back to stock");
   await expect(back.locator('[data-k="restore-block"]')).toHaveText("Drop in your backup.");
-  await page.getByLabel("Backup file").setInputFiles({ name: "backup.bin", mimeType: "application/octet-stream", buffer: flash });
+  await page.getByLabel("Backup file").setInputFiles({ name: "backup-BJ90.bin", mimeType: "application/octet-stream", buffer: flash });
   await page.getByLabel("Stock firmware for Back to stock").setInputFiles({ name: "stock.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
   await expect(back.locator('[data-k="restore-block"]')).toHaveCount(0);
   await expect(back.locator('[data-k="restore-id"]')).toContainText("doesn't know which radio");
+  await expect(back.locator('[data-k="restore-marker"]')).toContainText("BJ90 goes back"); // BACKUP-12: from the name
   // Decision 263: Console doesn't know this file's radio: refused before anything stops, until the ID is typed.
   await back.getByRole("button", { name: "Back to stock" }).click();
   await expect(back.getByRole("alert")).toContainText("can't tell which radio", { timeout: 20_000 });
@@ -298,8 +300,13 @@ test("back to stock: the backup into Ferrite's ranges, never calibration or the 
   expect(r.cal_untouched).toBe(true);
   expect(r.update_untouched).toBe(true);
   expect(r.erased).toBe((0x76000 - 0x2c000 + 0x20000) / 4096);
+  // BACKUP-12.2: the stock image padded with 0xFF through 0x080F07FF (image 0xED800), the saved marker at 0xED000.
+  const padded = Buffer.alloc(0xed800, 0xff);
+  readFileSync(new URL("../../core/tests/fixtures/ssb-synthetic.bin", import.meta.url)).copy(padded);
+  padded.write("BJ90", 0xed000, "latin1");
   const rs = results();
-  expect(rs[rs.length - 1].sha256).toBe(sha(stockBtf));
+  expect(rs[rs.length - 1].sha256).toBe(sha(pack(padded)));
+  expect(rs[rs.length - 1].blocks).toBe(951);
 });
 
 test("back to stock: another radio's backup is refused though its calibration is the same", async ({ page }) => {
