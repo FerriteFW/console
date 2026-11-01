@@ -38,7 +38,7 @@
       let s = by.get(id);
       if (!s) by.set(id, (s = { id, kind: "lic", src: e.src, name: e.name, pos: e.pos, km: e.km, rows: [] }));
       const mode = e.m === MODE_NFM ? "NFM" : e.m === MODE_FM ? "FM" : nearby.mode;
-      s.rows.push({ key: e.key, mhz: mhz(e.f), label: modeLabel(e.m), mobile: e.mobile, tune: { name: e.name, hz: e.f * 500, mode } });
+      s.rows.push({ key: e.key, mhz: mhz(e.f), label: modeLabel(e.m), mobile: e.mobile, tune: { name: e.name, hz: e.f * 500, mode, kind: "lic", pos: e.pos } });
       s.km = Math.min(s.km, e.km);
     }
     const out = [...by.values()];
@@ -54,7 +54,7 @@
           name: a.c,
           pos: a.l,
           km: a.km,
-          rows: freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false, tune: { name: `${a.c} ${q.type}`, hz: Math.round(q.khz * 1000), mode: "AM" } })),
+          rows: freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false, tune: { name: `${a.c} ${q.type}`, hz: Math.round(q.khz * 1000), mode: "AM", kind: "air", pos: a.l } })),
         });
       }
     }
@@ -75,7 +75,7 @@
             label: offsetLabel(q.d),
             mobile: false,
             tone: toneLabel(q.te, q.td),
-            tune: { name: r.c, hz: q.f * 500, mode: repeaterMode(q.m, r.l[1]), shiftHz: q.d * 500, txTone: q.te ? toneWord(q.te) : undefined, rxTone: q.td ? toneWord(q.td) : undefined },
+            tune: { name: r.c, hz: q.f * 500, mode: repeaterMode(q.m, r.l[1]), shiftHz: q.d * 500, txTone: q.te ? toneWord(q.te) : undefined, rxTone: q.td ? toneWord(q.td) : undefined, kind: "rpt", pos: r.l },
           })),
         });
       }

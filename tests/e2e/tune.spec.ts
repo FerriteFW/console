@@ -62,3 +62,53 @@ test("tune from map: a repeater with its shift and tones, then an airport in AM"
     if (f) await page.evaluate((cmd) => (window as any).ferrite.radio.connectedLink.cmd(cmd), `slot ${letter} vfo ${f} ${m ?? ""} txtone ${tx} rxtone ${rx} offset ${o}`);
   }
 });
+
+test("recent tunes: a map tune is remembered (after a reload too), tunes again in one click, and adds as a channel", async ({ page }) => {
+  await serveData(page);
+  await openConsole(page, "live");
+  await expect(page.getByRole("button", { name: "Recent" })).toHaveCount(0);
+  await connect(page);
+  const slots = () => state(page, (f) => f.radio.connectedLink.cmd("slot")) as Promise<string>;
+  const letter = /^([ABC])\*/m.exec(await slots())![1];
+  const line = () => slots().then((t) => t.split("\n").find((l) => l.startsWith(`${letter}*`)) ?? "");
+  const was = await line();
+  try {
+    await page.getByRole("button", { name: "Tune from map" }).click();
+    const d = page.getByRole("dialog", { name: "Tune from map" });
+    await d.getByLabel("Place: latitude, longitude or grid square").fill(PLACE);
+    const pop = await openSite(page, d, "VE7RHS");
+    await pop.getByRole("button", { name: "Tune VE7RHS 145.270 −600 kHz" }).click();
+    await expect(d).toBeHidden();
+
+    await page.reload();
+    await page.getByRole("button", { name: "Look around without a radio" }).click().catch(() => {});
+    await connect(page);
+    await page.getByRole("button", { name: "Recent" }).click();
+    const list = page.locator("#recent-tunes");
+    await expect(list.getByText("VE7RHS")).toBeVisible();
+    await expect(list.getByText("FM · −600 kHz · T 100.0 · R 100.0")).toBeVisible();
+
+    // Add as channel: into the table as Add channels does (a new row, TX on the input, the tones).
+    const before = (await state(page, (f) => f.channels.table.channels.length)) as number;
+    await list.getByRole("button", { name: "Add as channel" }).click();
+    await expect(page.getByText(/^Added VE7RHS as channel \d+/)).toBeVisible();
+    const ch = (await state(page, (f) => f.channels.table.channels.find((c: { name: string }) => c.name === "VE7RHS"))) as Record<string, string>;
+    expect(ch).toBeTruthy();
+    expect(Number(ch.rx)).toBeCloseTo(145.27, 4);
+    expect(await state(page, (f) => f.channels.table.channels.length)).toBe(before + 1);
+
+    // One click tunes it again.
+    await page.evaluate((cmd) => (window as any).ferrite.radio.connectedLink.cmd(cmd), `slot ${letter} vfo 146.52000 fm txtone off rxtone off offset off`);
+    await list.getByRole("button", { name: /^VE7RHS/ }).click();
+    await expect(page.getByText(`Tuned Slot ${letter}: 145.27 FM −600 kHz, T 100.0 · R 100.0`)).toBeVisible();
+    await expect.poll(line).toMatch(new RegExp(`^${letter}\\* vfo 145\\.27000 `));
+  } finally {
+    const f = /vfo (\d+\.\d+)/.exec(was)?.[1];
+    const m = /mode=(\w+)/.exec(was)?.[1]?.toLowerCase();
+    const o = /offset=([+-][\d.]+)/.exec(was)?.[1] ?? "off";
+    const both = /\btone=(\S+)/.exec(was)?.[1];
+    const tx = /txtone=(\S+)/.exec(was)?.[1] ?? both ?? "off";
+    const rx = /rxtone=(\S+)/.exec(was)?.[1] ?? both ?? "off";
+    if (f) await page.evaluate((cmd) => (window as any).ferrite.radio.connectedLink.cmd(cmd), `slot ${letter} vfo ${f} ${m ?? ""} txtone ${tx} rxtone ${rx} offset ${o}`);
+  }
+});

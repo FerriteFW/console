@@ -22,3 +22,33 @@ test("tune: simplex and airband clear what the slot had", () => {
   assert.equal(tuneSummary("C", air), "Slot C: 118.7 AM");
   assert.equal(slotLine("A", { name: "x", hz: 153_012_500, mode: "NFM" }), "slot A vfo 153.01250 nfm txtone off rxtone off offset off");
 });
+
+test("recent tunes: newest first, once each, ten at most; storage junk dropped", async () => {
+  const { remember, readRecent } = await import("../../src/lib/tune.ts");
+  const t = (hz: number, name = "X") => ({ name, hz, mode: "FM" as const });
+  let list = [] as ReturnType<typeof t>[];
+  for (let i = 0; i < 12; i++) list = remember(list, t(146_000_000 + i * 10_000));
+  assert.equal(list.length, 10);
+  assert.equal(list[0].hz, 146_110_000);
+  list = remember(list, t(146_050_000, "again"));
+  assert.equal(list[0].name, "again");
+  assert.equal(list.filter((x) => x.hz === 146_050_000).length, 1);
+  assert.deepEqual(readRecent('[{"name":"A","hz":146520000,"mode":"FM"},{"hz":-1},"x"]'), [{ name: "A", hz: 146_520_000, mode: "FM" }]);
+  assert.deepEqual(readRecent("not json"), []);
+  assert.deepEqual(readRecent(null), []);
+});
+
+test("recent tunes: the detail line, and Add as channel's entry (repeater, airport, simplex)", async () => {
+  const { tuneDetail, tuneItem, tuneMhz } = await import("../../src/lib/tune.ts");
+  const rpt = { name: "VE7RHS", hz: 145_270_000, mode: "FM" as const, shiftHz: -600_000, txTone: "100.0", rxTone: "100.0", kind: "rpt" as const, pos: [49.2, -123.2] as [number, number] };
+  assert.equal(tuneMhz(rpt), "145.27");
+  assert.equal(tuneDetail(rpt), "FM · −600 kHz · T 100.0 · R 100.0");
+  assert.deepEqual(tuneItem(rpt), { name: "VE7RHS", rx: 145.27, tx: 144.67, mode: "FM", power: "Low", rx_only: false, zone: "Repeaters", tone: "100.0", rx_tone: "100.0", pos: [49.2, -123.2] });
+  const air = tuneItem({ name: "CYVR TOWER", hz: 118_700_000, mode: "AM", kind: "air" });
+  assert.equal(air.rx_only, true);
+  assert.equal(air.zone, "Airband");
+  assert.equal(air.tx, null);
+  const lic = tuneItem({ name: "City Works", hz: 153_950_000, mode: "NFM", kind: "lic" });
+  assert.equal(lic.zone, "Near me");
+  assert.equal(lic.rx_tone, null);
+});

@@ -8,6 +8,7 @@
   // Added channels go into the table as new rows, checked by ferrite's own code; Write then shows them in the diff
   // as usual. Live View's Tune from map (library.mode "tune") is the same dialog with Near me's map alone: a frequency
   // clicked tunes the radio's active slot (library.tune) and the dialog closes.
+  import { recentTunes } from "../../recentTunes.svelte";
   import { library } from "../../library.svelte";
   import FixedTab from "./FixedTab.svelte";
   import NearbyTab from "./NearbyTab.svelte";
@@ -59,7 +60,7 @@
   const close = () => (library.open = false);
   const tuneMode = $derived(library.mode === "tune");
   async function tune(t: Tune) {
-    if (await library.tune(t)) close();
+    if (await recentTunes.tune(t)) close();
   }
   function key(e: KeyboardEvent) {
     if (e.key === "Escape" && library.open) close();

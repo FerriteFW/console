@@ -29,12 +29,19 @@
   import LibraryDialog from "../components/library/LibraryDialog.svelte";
   import { library } from "../library.svelte";
   import { clock, size } from "../wavrec";
+  import { recentTunes } from "../recentTunes.svelte";
+  import { tuneDetail, tuneMhz } from "../tune";
 
   let showKeypad = $state(true);
   // Tune from map's confirmation ("Tuned Slot A: 146.94 FM ..."), shown a few seconds.
   $effect(() => {
     if (!listen.recNote) return;
     const t = setTimeout(() => (listen.recNote = ""), 6000);
+    return () => clearTimeout(t);
+  });
+  $effect(() => {
+    if (!recentTunes.note) return;
+    const t = setTimeout(() => (recentTunes.note = ""), 6000);
     return () => clearTimeout(t);
   });
   $effect(() => {
@@ -227,7 +234,9 @@
       {#if listen.error}<span class="meta err">{listen.error}</span>{/if}
     </span>
     <button class="btn quiet" disabled={!connected} onclick={() => library.showTune()} title={connected ? "Pick a repeater, a licensed site or an airport near you on the map: the radio tunes to it" : "Connect to a radio to tune it from the map"}>Tune from map</button>
+    {#if recentTunes.list.length}<button class="btn quiet" popovertarget="recent-tunes" title="Frequencies tuned from the map lately: tune again, or add as a channel">Recent</button>{/if}
     {#if library.tuned}<span class="meta ok" aria-live="polite">{library.tuned}</span>{/if}
+    {#if recentTunes.note}<span class="meta ok" aria-live="polite">{recentTunes.note}</span>{/if}
     <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
     {#if roomy}<label title="Slots, stations heard and the radio's state beside the radio"><input type="checkbox" bind:checked={panelOn} /> Panel</label>{/if}
     <span class="spacer"></span>
@@ -314,6 +323,23 @@
 
   <LibraryDialog />
   <div id="radio-info" popover class="pop"><RadioInfo /></div>
+  <div id="recent-tunes" popover class="pop recent" aria-label="Recent tunes">
+    <div class="rhead">Recent tunes</div>
+    {#if library.error && library.mode === "tune" && !library.open}<p class="err">{library.error}</p>{/if}
+    <ul>
+      {#each recentTunes.list as t, i (i + t.name + t.hz)}
+        <li>
+          <button class="rt" disabled={!connected || library.tuning} title={connected ? "Tune the active slot to this again" : "Connect to tune"} onclick={async () => { if (await recentTunes.tune(t)) document.getElementById("recent-tunes")?.hidePopover?.(); }}>
+            <span class="rname">{t.name}</span>
+            <span class="rmhz">{tuneMhz(t)}</span>
+            <span class="rsub">{tuneDetail(t)}</span>
+          </button>
+          <button class="btn quiet small" title="Add to the channel table (green until you Write)" onclick={() => recentTunes.addChannel(t)}>Add as channel</button>
+          <button class="btn quiet small x" title="Forget this one" aria-label="Forget {t.name}" onclick={() => recentTunes.forget(t)}>✕</button>
+        </li>
+      {/each}
+    </ul>
+  </div>
   <div id="shot-menu" popover class="pop menu">
     <button class="btn quiet" popovertarget="shot-menu" popovertargetaction="hide" onclick={() => savePng(2)}>Save PNG 2× (480×640)</button>
     <button class="btn quiet" popovertarget="shot-menu" popovertargetaction="hide" onclick={copyShot}>Copy to clipboard</button>
@@ -482,6 +508,75 @@
   }
   .meta.ok {
     color: var(--green);
+  }
+  .recent:popover-open {
+    padding: 10px 12px;
+    min-width: 320px;
+  }
+  .rhead {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sub);
+    margin-bottom: 6px;
+  }
+  .recent ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .recent li {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    padding: 4px 0;
+  }
+  .recent li:last-child {
+    border-bottom: 0;
+  }
+  .rt {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0 10px;
+    text-align: left;
+    background: none;
+    border: 0;
+    padding: 4px 6px;
+    border-radius: 6px;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    min-width: 0;
+  }
+  .rt:hover:not(:disabled) {
+    background: var(--surface);
+  }
+  .rt:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+  .rname {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rmhz {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .rsub {
+    grid-column: 1 / -1;
+    color: var(--sub);
+    font-size: 12px;
+  }
+  .small {
+    font-size: 12px;
+    padding: 2px 6px;
   }
   .opt {
     display: flex;

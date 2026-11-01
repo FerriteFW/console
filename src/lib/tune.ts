@@ -13,6 +13,9 @@ export type Tune = {
   /** Tone sent and tone squelch ("100.0", "D023N"); absent: off. */
   txTone?: string;
   rxTone?: string;
+  /** Where it came from on the map (a licensed site, an airport, a repeater) and its position, for Add as channel. */
+  kind?: "lic" | "air" | "rpt";
+  pos?: [number, number];
 };
 
 /** The data's tone as Ferrite's word (TERM-35.2): DCS gets its N ("D023" is "D023N"). */
@@ -31,6 +34,59 @@ export function slotLine(slot: string, t: Tune): string {
   const s = t.shiftHz ? Math.round(t.shiftHz) : 0;
   const offset = s ? `${s > 0 ? "+" : "-"}${mhz5(Math.abs(s))}` : "off";
   return `slot ${slot} vfo ${mhz5(t.hz)} ${t.mode.toLowerCase()} txtone ${t.txTone || "off"} rxtone ${t.rxTone || "off"} offset ${offset}`;
+}
+
+/** Two tunes are the same when the radio would end up the same: frequency, mode, shift and tones. */
+const sameTune = (a: Tune, b: Tune) =>
+  a.hz === b.hz && a.mode === b.mode && (a.shiftHz || 0) === (b.shiftHz || 0) && (a.txTone || "") === (b.txTone || "") && (a.rxTone || "") === (b.rxTone || "");
+
+/** The recent tunes with `t` first (once), at most `max`. */
+export function remember(list: Tune[], t: Tune, max = 10): Tune[] {
+  return [t, ...list.filter((x) => !sameTune(x, t))].slice(0, max);
+}
+
+/** Recent tunes from storage: what parses and looks like a tune; anything else is dropped. */
+export function readRecent(text: string | null): Tune[] {
+  try {
+    const v = JSON.parse(text ?? "[]");
+    if (!Array.isArray(v)) return [];
+    return v.filter((t) => t && typeof t.name === "string" && Number.isFinite(t.hz) && t.hz > 0 && ["NFM", "FM", "AM"].includes(t.mode)).slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
+/** The list's second line: "FM · −600 kHz · T 100.0". */
+export function tuneDetail(t: Tune): string {
+  const s = t.shiftHz ? Math.round(t.shiftHz) : 0;
+  const shift = s ? `${s > 0 ? "+" : "−"}${Math.abs(s) >= 1e6 ? `${+(Math.abs(s) / 1e6).toFixed(4)} MHz` : `${Math.abs(s) / 1000} kHz`}` : "";
+  return [t.mode, shift, t.txTone ? `T ${t.txTone}` : "", t.rxTone ? `R ${t.rxTone}` : ""].filter(Boolean).join(" · ");
+}
+
+/** "146.94" from the Hz. */
+export const tuneMhz = (t: Tune) => mhz5(t.hz).replace(/0+$/, "").replace(/\.$/, "");
+
+/**
+ * A tune as Add channels' entry (the core's `library_add` makes the channel): a repeater with its input and tones in
+ * "Repeaters", an airport's AM receive-only in "Airband" (Ferrite never transmits there), anything else in "Near me";
+ * low power, as Add channels does.
+ */
+export function tuneItem(t: Tune) {
+  const s = t.shiftHz ? Math.round(t.shiftHz) : 0;
+  const rpt = t.kind === "rpt" || s !== 0;
+  const air = t.kind === "air" || t.mode === "AM";
+  return {
+    name: t.name,
+    rx: t.hz / 1e6,
+    tx: s ? (t.hz + s) / 1e6 : null,
+    mode: t.mode,
+    power: "Low",
+    rx_only: air,
+    zone: rpt ? "Repeaters" : air ? "Airband" : "Near me",
+    tone: t.txTone || null,
+    rx_tone: rpt ? t.rxTone || "off" : t.rxTone || null,
+    pos: t.pos ?? null,
+  };
 }
 
 /** What the confirmation says: "Slot A: 146.94 FM −600 kHz, T 100.0". */
