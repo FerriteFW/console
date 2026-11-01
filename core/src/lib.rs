@@ -30,6 +30,8 @@
 //! - [`signature`]: release images' minisign signatures, checked with Ferrite's public key.
 //! - [`demo`]: a demo radio answering from memory, for trying Console without a radio.
 //! - [`timing`]: the reference client's time-outs and pacing, in one place.
+//! - [`sats`]: satellite mode's satellites (LINK-63 – LINK-65): sats.json into records, the info record, SAT-21's rule.
+//! - [`wmm`]: the World Magnetic Model WMM2025, for the declination written with the satellites (SAT-18).
 //! - [`zonecap`]: a zone holds 256 channels at most (CHAN-35): the counts, the refusal, and splitting a long list.
 
 pub mod answers;
@@ -54,12 +56,14 @@ pub mod plan;
 pub mod presets;
 pub mod radioside;
 pub mod records;
+pub mod sats;
 pub mod session;
 pub mod settings;
 pub mod signature;
 pub mod timing;
 pub mod ui;
 pub mod uid;
+pub mod wmm;
 pub mod zonecap;
 
 /// The protocol numbers, re-exported from ferrite so callers don't need a second dependency.

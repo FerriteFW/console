@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   // The shell: the sidebar (the jobs, then More), the connection bar,
   // and the page. Pages by hash (#/live, #/about, ...) so a reload stays put.
   import ConnectionBar from "./lib/components/ConnectionBar.svelte";
@@ -31,6 +32,8 @@
   import AprsQuick from "./lib/pages/AprsQuick.svelte";
   import AprsWaypoints from "./lib/pages/AprsWaypoints.svelte";
   import DtmfMemories from "./lib/pages/DtmfMemories.svelte";
+  import Satellites from "./lib/pages/Satellites.svelte";
+  import { satellites } from "./lib/satellites.svelte";
   import { lists } from "./lib/lists.svelte";
   import { loadCore } from "./lib/core";
   import { radio } from "./lib/radio.svelte";
@@ -68,6 +71,7 @@
         { id: "aprs-settings", name: "Settings" },
       ],
     },
+    { id: "satellites", name: "Satellites" },
     {
       id: "firmware",
       name: "Firmware",
@@ -95,6 +99,16 @@
   $effect(() => {
     if (radio.phase === "connected" && !migrate.running) void migrate.lookKept();
   });
+  // SAT-21: each connection, a radio's satellites refreshed when the list is newer (Keep satellites up to date).
+  $effect(() => {
+    const link = radio.connectedLink;
+    if (link && !migrate.needed && !migrate.running) untrack(() => void satellites.connected(link));
+  });
+  $effect(() => {
+    if (!satellites.toast) return;
+    const t = setTimeout(() => (satellites.toast = ""), 12_000);
+    return () => clearTimeout(t);
+  });
   let coreError = $state("");
   const page = $derived(all.find((p) => p.id === route.id)?.id ?? "live");
   const section = $derived(sectionOf(page));
@@ -119,7 +133,7 @@
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts, lists, migrate };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts, lists, migrate, satellites };
   /** The sidebar's "N unwritten": the edits each section holds that aren't on the radio yet. */
   const unwritten = (id: string) =>
     id === "channels" ? channels.pending : id === "settings" ? settings.dirty.size + lists.dtmf.pending : id === "aprs" ? lists.quick.pending + lists.waypoints.pending : 0;
@@ -238,16 +252,52 @@
         <AprsWaypoints />
       {:else if page === "settings-dtmf"}
         <DtmfMemories />
+      {:else if page === "satellites"}
+        <Satellites />
       {/if}
     </main>
   </div>
 </div>
 {/if}
 
+{#if satellites.toast}
+  <div class="toast" aria-live="polite" data-sat-toast>
+    <span>{satellites.toast}</span>
+    <a href="#/satellites" onclick={() => (satellites.toast = "")}>Show</a>
+    <button class="x" aria-label="Dismiss" onclick={() => (satellites.toast = "")}>✕</button>
+  </div>
+{/if}
+
 <!-- The desktop app's port and radio picker, last so it sits over every wizard; inside the welcome while that's open. -->
 {#if isTauri() && (focus || !welcome)}<NativePicker />{/if}
 
 <style>
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: max-content;
+    max-width: calc(100vw - 32px);
+    padding: 8px 10px 8px 14px;
+    border: 1px solid var(--blue);
+    border-radius: 10px;
+    background: var(--toast);
+    box-shadow: var(--shadow);
+    font-size: 13px;
+  }
+  .x {
+    background: none;
+    border: none;
+    color: var(--sub);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 6px;
+  }
   .focus-shell {
     min-height: 100vh;
     padding: 20px 16px;

@@ -2,7 +2,7 @@
 
 use ferrite_console_core::{
     answers, aprs, aprs_settings, channels, chirp, demo, firmware, install, keys, library, lists, liveview, log, plan,
-    migrate, records, session, settings, signature, timing, ui, uid, zonecap,
+    migrate, records, sats, session, settings, signature, timing, ui, uid, wmm, zonecap,
 };
 use wasm_bindgen::prelude::*;
 
@@ -111,16 +111,19 @@ pub fn protocol() -> String {
                  "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY,
                  "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP,
                  "MSG_DELETE": msg::MSG_DELETE, "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA,
-                 "DATA_READ": msg::DATA_READ, "DATA_WRITE": msg::DATA_WRITE },
+                 "DATA_READ": msg::DATA_READ, "DATA_WRITE": msg::DATA_WRITE, "CLOCK": msg::CLOCK },
         "data": { "READ": ferrite_console_core::link::data::READ, "CRC": ferrite_console_core::link::data::CRC,
                   "READ_MAX": ferrite_console_core::link::data::READ_MAX, "SECTOR": ferrite_console_core::link::data::SECTOR },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION,
-                  "QUICK": what::QUICK, "WAYPOINT": what::WAYPOINT, "DTMF": what::DTMF, "PRESET_SKIPS": what::PRESET_SKIPS },
-        "caps2": { "PRESET_SKIPS": ferrite_console_core::link::caps2::PRESET_SKIPS, "DATA": ferrite_console_core::link::caps2::DATA },
+                  "QUICK": what::QUICK, "WAYPOINT": what::WAYPOINT, "DTMF": what::DTMF, "PRESET_SKIPS": what::PRESET_SKIPS,
+                  "SAT": what::SAT, "SAT_INFO": what::SAT_INFO },
+        "caps2": { "PRESET_SKIPS": ferrite_console_core::link::caps2::PRESET_SKIPS, "DATA": ferrite_console_core::link::caps2::DATA,
+                   "SATS": ferrite_console_core::link::caps2::SATS },
         "limits": { "channels": channels::MAX_CHANNELS, "zones": ferrite_console_core::radioside::MAX_ZONES, "zoneCap": channels::ZONE_CAP,
-                    "contacts": lists::CONTACT_MAX, "waypoints": lists::WAYPOINT_MAX },
+                    "contacts": lists::CONTACT_MAX, "waypoints": lists::WAYPOINT_MAX, "sats": sats::MAX },
         "caps": { "POSITION": ferrite_console_core::link::caps::POSITION, "LISTS": ferrite_console_core::link::caps::LISTS },
         "waypointAdd": lists::WAYPOINT_ADD,
+        "satAll": ferrite_console_core::link::ADD,
         "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "SUB_LOG": event::SUB_LOG, "LOG": event::LOG, "HEARD": event::HEARD,
                    "MSG": event::MSG, "MSG_STATE": event::MSG_STATE, "UI": event::UI, "QUIET_MS": event::QUIET_MS, "DICT": liveview::DICT },
         "knobMax": key::KNOB_MAX,
@@ -1263,4 +1266,57 @@ pub fn presets_file(list: &str, saved: &str, radio: &str) -> Result<String, JsEr
 pub fn presets_restore(text: &str) -> Result<String, JsError> {
     let (presets, b) = ferrite_console_core::presets::restore(text).map_err(|e| JsError::new(&e))?;
     Ok(serde_json::json!({ "presets": presets, "saved": b.saved, "radio": b.radio }).to_string())
+}
+
+// Satellite mode (LINK-63 – LINK-65): core/src/sats.rs and wmm.rs.
+
+/// `sats.json` as the workable satellites with their records (JSON: `sats::Parsed`), or why it didn't read.
+#[wasm_bindgen]
+pub fn sats_parse(json: &str) -> Result<String, JsError> {
+    sats::parse(json).map(|p| self::json(&p)).map_err(|e| JsError::new(&e))
+}
+
+/// A satellite record the radio gave back as a row (JSON), or undefined.
+#[wasm_bindgen]
+pub fn sat_held(rec: &[u8]) -> Option<String> {
+    sats::held(rec).map(|r| json(&r))
+}
+
+/// SAT-21's rewrite: the radio's records (152 bytes each, back to back) again from the file; the same layout back.
+#[wasm_bindgen]
+pub fn sats_refresh(file: &str, held: &[u8]) -> Result<Vec<u8>, JsError> {
+    let recs: Vec<Vec<u8>> = held.chunks(sats::RECORD_LEN).map(<[u8]>::to_vec).collect();
+    sats::refresh(file, &recs).map(|v| v.concat()).map_err(|e| JsError::new(&e))
+}
+
+/// The info record (LINK-64); `decl` in 0.1 degree east positive, 0x7FFF none.
+#[wasm_bindgen]
+pub fn sat_info_record(decl: i32, stamp: u32, written: u32) -> Vec<u8> {
+    let d = (decl != 0x7FFF).then_some(decl.clamp(-1800, 1800) as i16);
+    sats::info_record(d, stamp, written)
+}
+
+/// The info record read back (JSON `{decl, stamp, written}`), or undefined.
+#[wasm_bindgen]
+pub fn sat_info_of(rec: &[u8]) -> Option<String> {
+    sats::info_of(rec).map(|i| json(&i))
+}
+
+/// SAT-21: whether a connect rewrites the satellites; `info` the info record's JSON or "null".
+#[wasm_bindgen]
+pub fn sats_sync_due(built: u32, held: u32, info: &str, now: u32) -> bool {
+    let info: Option<sats::InfoRow> = serde_json::from_str(info).unwrap_or(None);
+    sats::sync_due(built, held as usize, info, now)
+}
+
+/// LINK-65: `CLOCK`'s answer after the status (JSON `{now, source}`), or undefined.
+#[wasm_bindgen]
+pub fn clock_of(rest: &[u8]) -> Option<String> {
+    sats::clock_of(rest).map(|c| json(&c))
+}
+
+/// SAT-18: the declination (WMM2025) on the ground at a place, at UTC seconds since 1970, in 0.1 degree east positive.
+#[wasm_bindgen]
+pub fn wmm_declination(lat: f64, lon: f64, unix: f64) -> i32 {
+    wmm::declination_tenths(lat, lon, wmm::decimal_year(unix)) as i32
 }

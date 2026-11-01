@@ -72,19 +72,21 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK", number>;
   /** LINK-59: `DATA_READ`'s ops and its most bytes, and the erase unit. */
   data: { READ: number; CRC: number; READ_MAX: number; SECTOR: number };
-  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS", number>;
+  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS" | "SAT" | "SAT_INFO", number>;
   /** LINK-35.2: HELLO's caps bits the UI asks about by name (link.ts has the transport ones). */
   caps: Record<"POSITION" | "LISTS", number>;
   /** LINK-35.2: the second caps byte's bits. */
-  caps2: Record<"PRESET_SKIPS" | "DATA", number>;
+  caps2: Record<"PRESET_SKIPS" | "DATA" | "SATS", number>;
   /** What the radio holds (layout 3, decision 333): 4,000 channels, 512 zones, 256 channels a zone, 1,016 contacts,
    *  2,032 waypoints. */
-  limits: { channels: number; zones: number; zoneCap: number; contacts: number; waypoints: number };
+  limits: { channels: number; zones: number; zoneCap: number; contacts: number; waypoints: number; sats: number };
   /** LINK-55: the index a new waypoint is written at (it becomes the newest). */
   waypointAdd: number;
+  /** LINK-63: WRITE_MANY of `what::SAT` with length 0 at this index clears every satellite. */
+  satAll: number;
   event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "SUB_LOG" | "LOG" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
   knobMax: number;
   keys: string[];
@@ -297,6 +299,42 @@ export const waypointWrites = (old: Waypoint[], want: Waypoint[]): { index: numb
 export const dtmfRecord = (m: DtmfMemory | null): Uint8Array => wasm.dtmf_record(js(m));
 export const dtmfFromRecord = (rec: Uint8Array): DtmfMemory | null => parsed(wasm.dtmf_from_record(rec));
 export const dtmfCheck = (m: DtmfMemory): string | undefined => wasm.dtmf_check(js(m)) ?? undefined;
+// Satellite mode (LINK-63 – LINK-65, SAT-2, SAT-18, SAT-21): core/src/sats.rs and wmm.rs.
+
+/** A transponder as the lists show it: Hz; tones as text ("" none); kind Voice, APRS or Beacon. */
+export type SatTp = { desc: string; kind: string; up: number; down: number; tone: string; arm: string };
+/** A satellite (the file's, or one the radio holds): `short` is its name on the radio; `epoch` UTC seconds; `record`
+ *  the radio's 152 bytes; `dropped` the file's transmitters the radio can't use. */
+export type SatRow = { id: number; name: string; short: string; status: string; epoch: number; tps: SatTp[]; dropped: number; record: number[] };
+/** sats.json read: `built` UTC seconds of its build date. */
+export type SatsFile = { built: number; built_text: string; licence: string; attribution: string; sats: SatRow[]; skipped: string[] };
+/** LINK-64: the declination (0.1°, east positive; null none), the data's build time and when Console wrote. */
+export type SatInfo = { decl: number | null; stamp: number; written: number };
+/** LINK-65: the radio's UTC (0 none) and its source. */
+export type RadioClock = { now: number; source: "none" | "GPS" | "set" };
+
+export const satsParse = (json: string): SatsFile => JSON.parse(wasm.sats_parse(json));
+export const satHeld = (rec: Uint8Array): SatRow | null => parsed(wasm.sat_held(rec));
+/** SAT-21: the radio's records again from the file (by NORAD number, in the radio's order). */
+export const satsRefresh = (file: string, held: Uint8Array[]): Uint8Array[] => {
+  const flat = new Uint8Array(held.reduce((n, r) => n + r.length, 0));
+  let o = 0;
+  for (const r of held) {
+    flat.set(r, o);
+    o += r.length;
+  }
+  const out = wasm.sats_refresh(file, flat);
+  const recs: Uint8Array[] = [];
+  for (let i = 0; i + 152 <= out.length; i += 152) recs.push(out.slice(i, i + 152));
+  return recs;
+};
+export const satInfoRecord = (decl: number | null, stamp: number, written: number): Uint8Array => wasm.sat_info_record(decl ?? 0x7fff, stamp, written);
+export const satInfoOf = (rec: Uint8Array): SatInfo | null => parsed(wasm.sat_info_of(rec));
+export const satsSyncDue = (built: number, held: number, info: SatInfo | null, now: number): boolean => wasm.sats_sync_due(built, held, js(info), now);
+export const clockOf = (rest: Uint8Array): RadioClock | null => parsed(wasm.clock_of(rest));
+/** SAT-18: the WMM2025 declination at a place and time (UTC seconds), 0.1° east positive. */
+export const wmmDeclination = (lat: number, lon: number, unix: number): number => wasm.wmm_declination(lat, lon, unix);
+
 /** `.ferrite`'s presets.json (docs/dev/codeplug-format.md). */
 export const presetsFile = (list: Preset[], saved: string, radio: Record<string, string>): string => wasm.presets_file(js(list), saved, js(radio));
 export const presetsRestore = (text: string): { presets: Preset[]; saved: string; radio: Record<string, string> } =>

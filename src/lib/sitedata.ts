@@ -345,6 +345,25 @@ export class SiteData {
   }
 
   /**
+   * Satellite mode's file (`satellites/sats.json`, format `satellites-1`, SAT-15): the server's, kept in the cache
+   * each time (the offline copy: the desktop app and a browser without the network use it), else the last one kept.
+   * `kept`: it came from the cache.
+   */
+  async sats(): Promise<{ text: string; kept: boolean }> {
+    const store = await this.store;
+    const key = this.url("satellites/sats.json");
+    try {
+      const text = await (await this.get("satellites/sats.json")).text();
+      await store?.put(key, new Response(text)).catch(() => {});
+      return { text, kept: false };
+    } catch (e) {
+      const hit = await store?.match(key);
+      if (hit) return { text: await hit.text(), kept: true };
+      throw e;
+    }
+  }
+
+  /**
    * A source's index. A source saved whole for offline use keeps its saved index (its build date pins the tiles):
    * when the server has a newer build, `newer` says so, and the saved one stays in use until `update`. Any other
    * source follows the server's index (the site holds only the latest build: an older build's tiles are gone), and
