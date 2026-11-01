@@ -10,7 +10,7 @@
   library.loadFixed();
   let setName = $state("");
   let picked = $state<Set<number>>(new Set());
-  let target = $state<Target>({ kind: "new", name: "", existing: 0 });
+  let target = $state<Target>({ kind: "new", name: "", existing: 0, split: true });
 
   const sets = $derived(library.fixed ?? []);
   const set = $derived<FixedSet | undefined>(sets.find((s) => s.name === setName));
@@ -36,7 +36,7 @@
     if (!set) return;
     const zone = zoneName(target, set.name, channels.table.zones);
     const items = libraryFixedItems($state.snapshot(set), [...picked].sort((a, b) => a - b), zone);
-    library.add(items, set.displayName ?? set.name);
+    library.add(items, set.displayName ?? set.name, target.split !== false);
     onadded();
   }
 </script>

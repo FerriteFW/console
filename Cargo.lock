@@ -1018,6 +1018,7 @@ version = "0.1.0"
 dependencies = [
  "ferrite-app",
  "ferrite-core",
+ "ferrite-store",
  "ferrite-ui",
  "minisign-verify",
  "serde",
@@ -1042,6 +1043,15 @@ dependencies = [
  "udsc",
  "udsp",
  "upocsag",
+]
+
+[[package]]
+name = "ferrite-store"
+version = "0.1.0"
+dependencies = [
+ "ferrite-app",
+ "ferrite-core",
+ "ferrite-ui",
 ]
 
 [[package]]

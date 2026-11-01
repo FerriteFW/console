@@ -3,11 +3,13 @@
   // new zone (the default when the file's numbers clash with the table's: a RepeaterBook or CHIRP export numbers from
   // 0 or 1), merged by number, or replacing every channel.
   import { channels } from "../channels.svelte";
-  import { chirpNewZone, chirpZoneName } from "../core";
+  import { chirpNewZone, chirpZoneName, P, zoneOverCap } from "../core";
 
   type How = "zone" | "merge" | "replace";
   let how = $state<How>("merge");
   let zoneName = $state("");
+  /** CHAN-35: zones the merge takes past 256 are split over new zones (" 2", " 3"); unticked, the import waits. */
+  let split = $state(true);
   const imp = $derived(channels.imported);
   const clashes = $derived(imp ? imp.channels.filter((c) => channels.table.channels.some((t) => t.number === c.number)).length : 0);
   const nz = $derived(imp ? chirpNewZone($state.snapshot(imp.channels), $state.snapshot(channels.table), zoneName) : null);
@@ -24,12 +26,15 @@
     how = clashes && room ? "zone" : "merge";
   });
 
+  // Merge or replace: the zones (named in the file's Comments) it would take past 256.
+  const over = $derived(imp && how !== "zone" ? zoneOverCap(channels.importPreview(how === "replace")) : []);
+
   function apply() {
     if (how === "zone") {
       if (nz) channels.applyImportNewZone(nz);
-    } else channels.applyImport(how === "replace");
+    } else channels.applyImport(how === "replace", split);
   }
-  const blocked = $derived(!imp?.channels.length || (how === "zone" && (!nz || !!nz.room || !!nz.name_error)));
+  const blocked = $derived(!imp?.channels.length || (how === "zone" && (!nz || !!nz.room || !!nz.name_error)) || (how !== "zone" && over.length > 0 && !split));
 </script>
 
 {#if imp}
@@ -52,6 +57,11 @@
           <label class="zn">New zone name <input bind:value={zoneName} maxlength="16" aria-label="New zone name" disabled={how !== "zone"} /></label>
           {#if nz.name_error}
             <p class="why">{nz.name_error[0].toUpperCase() + nz.name_error.slice(1)}.</p>
+          {:else if nz.zones.length > 1}
+            <p class="plan">
+              Add {plural(nz.channels.length, "channel")} as {nz.numbers} in {nz.zones.length} new zones, '{nz.zones[0].name}' to '{nz.zones[nz.zones.length - 1].name}' (a zone
+              holds {P.limits.zoneCap}).
+            </p>
           {:else}
             <p class="plan">Add {plural(nz.channels.length, "channel")} as {nz.numbers} in a new zone '{zoneName.trim()}'.</p>
           {/if}
@@ -63,6 +73,14 @@
       </div>
       <label class="opt"><input type="radio" name="how" value="merge" checked={how === "merge"} onchange={() => (how = "merge")} /> Merge by number: {clashes} of the table's channels replaced, the rest kept</label>
       <label class="opt"><input type="radio" name="how" value="replace" checked={how === "replace"} onchange={() => (how = "replace")} /> Replace every channel in the table</label>
+      {#if over.length}
+        <div class="more" role="alert">
+          {#each over as o (o.number)}
+            <p class="why">Zone {o.number} {o.name} would hold {o.count} channels: a zone holds {P.limits.zoneCap} at most.</p>
+          {/each}
+          <label class="opt"><input type="checkbox" bind:checked={split} aria-label="Split long zones" /> Split {over.length === 1 ? "it" : "them"} over new zones ({over[0].name} 2, {over[0].name} 3 …)</label>
+        </div>
+      {/if}
       <p class="sub">Only the table changes. Write to the radio shows the diff before anything is sent.</p>
       <div class="actions">
         <button class="btn" onclick={() => (channels.imported = null)}>Cancel</button>

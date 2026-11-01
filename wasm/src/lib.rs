@@ -2,7 +2,7 @@
 
 use ferrite_console_core::{
     answers, aprs, aprs_settings, channels, chirp, demo, firmware, install, keys, library, lists, liveview, log, plan,
-    records, session, settings, signature, timing, ui, uid,
+    migrate, records, session, settings, signature, timing, ui, uid, zonecap,
 };
 use wasm_bindgen::prelude::*;
 
@@ -110,10 +110,15 @@ pub fn protocol() -> String {
                  "DELETE": msg::DELETE, "BEGIN": msg::BEGIN, "END": msg::END, "SLOT": msg::SLOT, "BAUD": msg::BAUD,
                  "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY,
                  "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP,
-                 "MSG_DELETE": msg::MSG_DELETE, "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA },
+                 "MSG_DELETE": msg::MSG_DELETE, "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA,
+                 "DATA_READ": msg::DATA_READ, "DATA_WRITE": msg::DATA_WRITE },
+        "data": { "READ": ferrite_console_core::link::data::READ, "CRC": ferrite_console_core::link::data::CRC,
+                  "READ_MAX": ferrite_console_core::link::data::READ_MAX, "SECTOR": ferrite_console_core::link::data::SECTOR },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION,
                   "QUICK": what::QUICK, "WAYPOINT": what::WAYPOINT, "DTMF": what::DTMF, "PRESET_SKIPS": what::PRESET_SKIPS },
-        "caps2": { "PRESET_SKIPS": ferrite_console_core::link::caps2::PRESET_SKIPS },
+        "caps2": { "PRESET_SKIPS": ferrite_console_core::link::caps2::PRESET_SKIPS, "DATA": ferrite_console_core::link::caps2::DATA },
+        "limits": { "channels": channels::MAX_CHANNELS, "zones": ferrite_console_core::radioside::MAX_ZONES, "zoneCap": channels::ZONE_CAP,
+                    "contacts": lists::CONTACT_MAX, "waypoints": lists::WAYPOINT_MAX },
         "caps": { "POSITION": ferrite_console_core::link::caps::POSITION, "LISTS": ferrite_console_core::link::caps::LISTS },
         "waypointAdd": lists::WAYPOINT_ADD,
         "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "SUB_LOG": event::SUB_LOG, "LOG": event::LOG, "HEARD": event::HEARD,
@@ -151,9 +156,10 @@ pub fn parse_hello(rest: &[u8]) -> String {
     json(&answers::Hello::parse(rest))
 }
 
+/// `INFO`'s answer as JSON, or null; `protocol` is `HELLO`'s (3: 2-byte zone count and the layouts).
 #[wasm_bindgen]
-pub fn parse_info(rest: &[u8]) -> String {
-    json(&answers::Info::parse(rest))
+pub fn parse_info(rest: &[u8], protocol: u8) -> String {
+    json(&answers::Info::parse(rest, protocol))
 }
 
 #[wasm_bindgen]
@@ -403,7 +409,7 @@ pub fn normalize_zone(view: &str) -> Result<String, JsError> {
 
 /// A channel's problem as the radio would see it (ferrite's own checks, with `zones` zones), or undefined.
 #[wasm_bindgen]
-pub fn check_channel(view: &str, zones: u8) -> Result<Option<String>, JsError> {
+pub fn check_channel(view: &str, zones: u16) -> Result<Option<String>, JsError> {
     let v: channels::ChanView = from_json(view, "channel")?;
     Ok(plan::check_channel(&v, zones))
 }
@@ -414,7 +420,7 @@ pub fn new_channel(number: u16, rx_mhz: &str) -> String {
 }
 
 #[wasm_bindgen]
-pub fn new_zone(number: u8, name: &str) -> String {
+pub fn new_zone(number: u16, name: &str) -> String {
     json(&channels::ZoneView::new(number, name))
 }
 
@@ -501,11 +507,36 @@ impl RecordReader {
 
 /// Library entries (JSON `[Item]`) as channels and zones for the table (JSON `Set`): `{channels, zones, notes,
 /// skipped, made_rx_only}`.
+/// `split`: a zone's 257th channel goes on in a new zone (" 2", " 3"; CHAN-35), else is skipped.
 #[wasm_bindgen]
-pub fn library_add(items: &str, table: &str) -> Result<String, JsError> {
+pub fn library_add(items: &str, table: &str, split: bool) -> Result<String, JsError> {
     let i: Vec<library::Item> = from_json(items, "items")?;
     let t: plan::Set = from_json(table, "table")?;
-    Ok(json(&library::add(&i, &t)))
+    Ok(json(&library::add(&i, &t, split)))
+}
+
+/// CHAN-35: the table's zones over 256 channels (`[{number, name, count}]`).
+#[wasm_bindgen]
+pub fn zone_over_cap(table: &str) -> Result<String, JsError> {
+    let t: plan::Set = from_json(table, "table")?;
+    Ok(json(&zonecap::over_cap(&t)))
+}
+
+/// CHAN-35: the table with every zone over 256 split over new zones (`{set, notes, made, unzoned}`).
+#[wasm_bindgen]
+pub fn zone_split(table: &str) -> Result<String, JsError> {
+    let t: plan::Set = from_json(table, "table")?;
+    Ok(json(&zonecap::split_full_zones(&t)))
+}
+
+/// CHAN-35: whether channels `numbers` (JSON, as the radio shows them) may go into zone `zone` (its index; -1 for no
+/// zone): "" when they may, else the refusal.
+#[wasm_bindgen]
+pub fn zone_room(table: &str, numbers: &str, zone: i32) -> Result<String, JsError> {
+    let t: plan::Set = from_json(table, "table")?;
+    let n: Vec<u16> = from_json(numbers, "numbers")?;
+    let z = u16::try_from(zone).ok();
+    Ok(zonecap::room(&t, &n, z).err().unwrap_or_default())
 }
 
 /// A fixed set's picked channels (indices, JSON) as library entries (JSON), into the zone named `zone`.
@@ -890,6 +921,116 @@ impl RestorePlan {
     /// A `crc` op's expected answer; -1 for the others.
     pub fn expect(&self, i: usize) -> f64 {
         self.0.ops[i].expect.map_or(-1.0, |c| c as f64)
+    }
+}
+
+// ---- Finish the update: one layout's data to another (LINK-59 – LINK-62, UPD-16; `ferrite_console_core::migrate`) ----
+
+/// The regions (`[[start, len]]`) to back up from a chip on layout `chip_layout` before moving it; null when Console
+/// doesn't know that layout.
+#[wasm_bindgen]
+pub fn migrate_regions(chip_layout: u8) -> String {
+    json(&migrate::backup_regions(chip_layout))
+}
+
+/// The CRC-32 an erased range of `len` bytes reads as (a blank sector needn't be read).
+#[wasm_bindgen]
+pub fn migrate_erased_crc(len: u32) -> u32 {
+    migrate::erased_crc(len as usize)
+}
+
+/// CRC-32/ISO-HDLC of `b` (`DATA_READ`'s CRC).
+#[wasm_bindgen]
+pub fn data_crc32(b: &[u8]) -> u32 {
+    migrate::crc32(b)
+}
+
+/// The PC's copy of the old layout's regions (the backup kept before anything is written).
+#[wasm_bindgen]
+pub struct MigrateCopy(migrate::Copy);
+
+#[wasm_bindgen]
+impl MigrateCopy {
+    /// An empty copy of a chip on `layout`; `uid` the radio's 12 ID bytes when known.
+    #[wasm_bindgen(constructor)]
+    pub fn new(layout: u8, uid: Option<Vec<u8>>) -> MigrateCopy {
+        let uid = uid.and_then(|u| <[u8; 12]>::try_from(u.as_slice()).ok());
+        MigrateCopy(migrate::Copy { layout, uid, regions: Vec::new() })
+    }
+    /// The copy from its file (`to_file`'s bytes), or why not.
+    pub fn from_file(f: &[u8]) -> Result<MigrateCopy, JsError> {
+        migrate::Copy::from_file(f).map(MigrateCopy).map_err(|e| JsError::new(&e))
+    }
+    /// A region as read.
+    pub fn add(&mut self, start: u32, bytes: &[u8]) {
+        self.0.regions.push((start, bytes.to_vec()));
+    }
+    pub fn layout(&self) -> u8 {
+        self.0.layout
+    }
+    /// The radio's ID bytes, when the copy has them.
+    pub fn uid(&self) -> Option<Vec<u8>> {
+        self.0.uid.map(|u| u.to_vec())
+    }
+    /// The file Console keeps (and offers to save): the regions with a CRC each.
+    pub fn to_file(&self) -> Vec<u8> {
+        self.0.to_file()
+    }
+}
+
+/// The translation and its writes, in LINK-62's order: each region erased, programmed and read back by CRC, the
+/// sector that held the old header last, then the stamp.
+#[wasm_bindgen]
+pub struct MigratePlan {
+    t: migrate::Translated,
+    steps: Vec<migrate::Step>,
+}
+
+#[wasm_bindgen]
+impl MigratePlan {
+    #[wasm_bindgen(constructor)]
+    pub fn new(copy: &MigrateCopy) -> Result<MigratePlan, JsError> {
+        let t = migrate::translate(&copy.0).map_err(|e| JsError::new(&e))?;
+        let steps = migrate::write_plan(&t);
+        Ok(MigratePlan { t, steps })
+    }
+    /// `{notes, summary, regions: [{name, start, len}], steps}`.
+    pub fn summary(&self) -> String {
+        let regions: Vec<_> = self
+            .t
+            .regions
+            .iter()
+            .map(|r| serde_json::json!({ "name": r.name, "start": r.start, "len": r.data.len() }))
+            .collect();
+        json(&serde_json::json!({ "notes": self.t.notes, "summary": self.t.summary, "regions": regions, "steps": self.steps.len() }))
+    }
+    pub fn len(&self) -> usize {
+        self.steps.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
+    }
+    /// "erase", "program", "crc" or "stamp".
+    pub fn kind(&self, i: usize) -> String {
+        self.steps[i].kind.into()
+    }
+    /// The message type: `DATA_WRITE`, or `DATA_READ` for a CRC.
+    pub fn msg(&self, i: usize) -> u8 {
+        self.steps[i].msg
+    }
+    pub fn payload(&self, i: usize) -> Vec<u8> {
+        self.steps[i].payload.clone()
+    }
+    /// A CRC step's expected answer; -1 for the others.
+    pub fn expect(&self, i: usize) -> f64 {
+        self.steps[i].expect.map_or(-1.0, |c| c as f64)
+    }
+    pub fn region(&self, i: usize) -> String {
+        self.steps[i].region.clone()
+    }
+    /// Bytes a step moves (a program's), for the time left.
+    pub fn bytes(&self, i: usize) -> u32 {
+        if self.steps[i].kind == "program" { self.steps[i].len } else { 0 }
     }
 }
 

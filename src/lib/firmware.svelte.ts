@@ -21,6 +21,7 @@ import { radio } from "./radio.svelte";
 import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
+import { migrate } from "./migrate.svelte";
 
 const CMD_PROBE = 0x42;
 const ACK = 0x06;
@@ -36,7 +37,8 @@ const PROBE_GAP_MS = 15;
 /** After END: the bootloader resets, starts the new image; Console asks for HELLO until this runs out. */
 const RESTART_WAIT_MS = 40_000;
 
-export type Stage = "pick" | "ready" | "rebooting" | "probing" | "sending" | "restarting" | "done" | "failed";
+/** "migrating": the new firmware stores another layout than the chip's data: Finish the update runs as part of it. */
+export type Stage = "pick" | "ready" | "rebooting" | "probing" | "sending" | "restarting" | "migrating" | "done" | "failed";
 
 export const STAY_IN_BOOTLOADER = "The radio stays in the bootloader: start again (Resume).";
 
@@ -68,7 +70,7 @@ class Firmware {
 
   /** Steps running now: the bar's Disconnect waits. */
   get running() {
-    return ["rebooting", "probing", "sending", "restarting"].includes(this.stage);
+    return ["rebooting", "probing", "sending", "restarting", "migrating"].includes(this.stage);
   }
 
   get pct() {
@@ -330,7 +332,8 @@ class Firmware {
     return null;
   }
 
-  /** HELLO until the new firmware answers, then the usual connection; what it says it is. */
+  /** HELLO until the new firmware answers, then the usual connection; what it says it is. A firmware that stores
+   *  another layout than the chip's data (LINK-62) gets the data moved first, as part of the update (UPD-16). */
   private async reconnect(t: Transport) {
     await sleep(1500);
     const end = performance.now() + RESTART_WAIT_MS;
@@ -353,6 +356,19 @@ class Firmware {
     }
     await radio.handBack(t);
     if (radio.phase !== "connected") throw new Error(radio.error || "Connecting again failed.");
+    const l = radio.hello?.layouts;
+    if (l && l.firmware !== l.chip) {
+      // UPD-16, LINK-62: the new firmware stores another layout: the data moves now, as part of the update.
+      this.stage = "migrating";
+      this.message = `The new firmware keeps its data in layout ${l.firmware}: moving yours from layout ${l.chip}…`;
+      await migrate.start();
+      if (migrate.stage !== "done") {
+        throw new Error(
+          `Finishing the update: ${migrate.error} The firmware is updated and your data waits safely (the radio shows "Finish the update"): press Finish the update to try again.`,
+        );
+      }
+      this.message = "";
+    }
     this.after = { firmware: radio.info?.firmware ?? radio.hello?.firmware ?? "?", build: radio.info?.build?.name ?? "" };
     this.t = null;
     this.stage = "done";

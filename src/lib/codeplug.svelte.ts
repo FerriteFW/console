@@ -239,8 +239,11 @@ export async function openFile(file: { name: string; bytes: Uint8Array }): Promi
     if (why) failed.push(`couldn't load ${PART_NAME[p]}: ${why}`);
     else loaded.push(p);
   }
-  const notice = loaded.length ? `Loaded ${list(loaded, parts)} from ${file.name}` : `Nothing loaded from ${file.name}`;
-  return { notice: failed.length ? `${notice}; ${failed.join("; ")}` : notice, parts: loaded, failed };
+  let notice = loaded.length ? `Loaded ${list(loaded, parts)} from ${file.name}` : `Nothing loaded from ${file.name}`;
+  if (failed.length) notice = `${notice}; ${failed.join("; ")}`;
+  // CHAN-35: zones over 256 channels (a file from before layout 3) were split as they loaded: said here.
+  if (loaded.includes("channels") && channels.notes.length) notice = `${notice}. ${channels.notes.join(". ")}.`;
+  return { notice, parts: loaded, failed };
 }
 
 /** An <input type=file>'s file, read, once the core has loaded (what reads it next is the core's: a file picked as

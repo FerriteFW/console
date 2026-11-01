@@ -140,12 +140,14 @@ impl DemoRadio {
                 let mut r = Vec::new();
                 push_text(&mut r, "demo");
                 r.extend(self.side.store.count().to_le_bytes());
-                r.extend([self.side.store.zones(), self.side.store.presets.borrow().len() as u8]);
+                r.extend(self.side.store.zones().to_le_bytes()); // protocol 3: 2 bytes
+                r.push(self.side.store.presets.borrow().len() as u8);
                 r.extend(400u16.to_le_bytes());
                 r.push(0);
                 push_text(&mut r, "N0CALL");
                 r.push(link::build::of(true, true, false));
                 r.extend(ferrite_core::uid::bytes([0x3F2A_91C0, 0x7D44_0123, 0x89AB_CDEF]));
+                r.extend([3, 3]); // LINK-62: the layouts (this firmware's, the chip's)
                 (Status::Ok, r)
             }
             msg::UI => {
@@ -310,9 +312,9 @@ fn demo_lists(side: &mut RadioSide) {
 }
 
 pub fn demo_set() -> Set {
-    let zone = |n: u8, name: &str, scan: bool| ZoneView { scan_all: scan, ..ZoneView::new(n, name) };
+    let zone = |n: u16, name: &str, scan: bool| ZoneView { scan_all: scan, ..ZoneView::new(n, name) };
     #[allow(clippy::type_complexity)]
-    let rows: [(u16, &str, &str, &str, &str, &str, &str, &str, Option<u8>); 22] = [
+    let rows: [(u16, &str, &str, &str, &str, &str, &str, &str, Option<u16>); 22] = [
         // number, name, rx MHz, duplex, offset, mode, tx tone, power, zone
         (1, "Calling 2 m", "146.52", "", "", "FM", "off", "Mid", Some(0)),
         (2, "Calling 70 cm", "446.0", "", "", "FM", "off", "Mid", Some(0)),
@@ -396,7 +398,7 @@ mod tests {
         assert!(h.may_go_on && h.build.unwrap().dry);
         assert_eq!((h.caps, h.caps2), (DEMO_CAPS, DEMO_CAPS2), "the demo says what its records do");
         let (_, i) = ask(&mut r, &mut s, msg::INFO, &[]);
-        assert_eq!(Info::parse(&i).unwrap().uid_text.unwrap().len(), 23);
+        assert_eq!(Info::parse(&i, 3).unwrap().uid_text.unwrap().len(), 23);
         let ui_text = |r: &mut DemoRadio, s: &mut Session| {
             let (_, mut rest) = ask(r, s, msg::UI, &[0]);
             let mut t = String::new();
@@ -459,12 +461,12 @@ mod tests {
         let set = demo_set();
         assert!(set.parts().is_ok());
         assert!(crate::plan::plan(&set, &set).problems.is_empty());
-        let i = Info::parse(&ask(&mut r, &mut s, msg::INFO, &[]).1).unwrap();
+        let i = Info::parse(&ask(&mut r, &mut s, msg::INFO, &[]).1, 3).unwrap();
         assert_eq!((i.channels as usize, i.zones as usize), (set.channels.len(), set.zones.len()));
         let mut zones = Vec::new();
         for z in 0..i.zones {
             let mut p = vec![link::what::ZONE];
-            p.extend((z as u16).to_le_bytes());
+            p.extend(z.to_le_bytes());
             p.extend(1u16.to_le_bytes());
             let (st, rest) = ask(&mut r, &mut s, msg::READ_MANY, &p);
             assert_eq!(st, 0);

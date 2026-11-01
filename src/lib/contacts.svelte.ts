@@ -1,10 +1,11 @@
-// APRS contacts (APRS-37, APRS-42): the radio's address book as record 6, in callsign order. Read whole (128 at
+// APRS contacts (APRS-37, APRS-42): the radio's address book as record 6, in callsign order. Read whole (1,016 at
 // most); each change is written at once by callsign, then read back.
 import { radio } from "./radio.svelte";
 
 export type Contact = { call: string; name: string };
 
-export const MAX = 128;
+/** APRS-37: the most contacts the radio keeps (1,016 since layout 3, decision 333). */
+export const MAX = 1016;
 const NAME_SYMBOLS = "-./_#+&()'!";
 /** A callsign as compose takes it: capitals, digits and "-", 3 to 9. */
 export const callOk = (c: string) => /^[A-Z0-9-]{3,9}$/.test(c);

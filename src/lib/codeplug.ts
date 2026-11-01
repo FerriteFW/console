@@ -6,7 +6,9 @@ import { createZip, readZip } from "./zip.ts";
 
 export const FORMAT = "ferrite-codeplug";
 /** The format version this Console writes and the newest it reads. */
-export const VERSION = 1;
+export const VERSION = 2;
+/** The most waypoints the radio keeps (GPS-10; 2,032 since layout 3, decision 333). */
+export const WAYPOINTS_MAX = 2032;
 /** The parts, in the order they are written; each is `<part>.json` in the zip. */
 export const PARTS = ["channels", "presets", "settings", "aprs", "contacts", "quick", "waypoints", "dtmf"] as const;
 export type Part = (typeof PARTS)[number];
@@ -194,12 +196,12 @@ export function readQuick(text: string): QuickFile {
   return f;
 }
 
-/** The waypoints part back, or why not (at most 256 of {name, lat, lon, source}). */
+/** The waypoints part back, or why not (at most 2,032 of {name, lat, lon, source}: layout 3's, decision 333). */
 export function readWaypoints(text: string): WaypointsFile {
   const f = listFile(text, WAYPOINTS_FORMAT, "waypoints", "waypoints") as WaypointsFile;
   if (!f.waypoints.every((w) => isStr(w?.name) && isNum(w?.lat) && isNum(w?.lon) && isStr(w?.source)))
     throw new Error("its waypoints aren't a list of {name, lat, lon, source}");
-  if (f.waypoints.length > 256) throw new Error(`${f.waypoints.length} waypoints: the radio keeps 256`);
+  if (f.waypoints.length > WAYPOINTS_MAX) throw new Error(`${f.waypoints.length} waypoints: the radio keeps ${WAYPOINTS_MAX}`);
   return f;
 }
 

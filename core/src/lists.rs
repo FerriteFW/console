@@ -19,8 +19,10 @@ pub type Records = Vec<(u16, Vec<u8>)>;
 pub const QUICK_COUNT: u16 = ferrite_app::words::QUICK as u16;
 /// The DTMF memories (DTMF-12).
 pub const DTMF_COUNT: u16 = ferrite_app::data::DTMF_MEMS as u16;
-/// GPS-10: the most waypoints the radio keeps.
-pub const WAYPOINT_MAX: u16 = 256;
+/// GPS-10: the most waypoints the radio keeps (2,032 since layout 3, decision 333; the firmware's own number).
+pub const WAYPOINT_MAX: u16 = ferrite_app::link::lists::WAYPOINTS_MAX;
+/// APRS-37: the most contacts the radio keeps (1,016 since layout 3).
+pub const CONTACT_MAX: u16 = ferrite_app::screens::contacts::CONTACT_MAX;
 /// A waypoint's sources, in their record order (GPS-10).
 pub const SOURCES: [&str; 4] = ["marked", "aprs", "link", "grid"];
 
@@ -200,7 +202,7 @@ mod tests {
         loop {
             let mut p = vec![w];
             p.extend(first.to_le_bytes());
-            p.extend(1000u16.to_le_bytes());
+            p.extend(4000u16.to_le_bytes());
             let (s, rest) = r.ask(msg::READ_MANY, &p);
             assert_eq!(s, 0);
             let (next, recs) = parse_many(&rest).unwrap();

@@ -1,0 +1,21 @@
+{
+  "format": "ferrite-codeplug",
+  "version": 1,
+  "created": "2026-10-30T21:12:00.000Z",
+  "console": "0.1.0",
+  "radio": {
+    "callsign": "VA7IF",
+    "firmware": "0.8.2",
+    "build": "tx"
+  },
+  "radio_fingerprint": "7f755785",
+  "parts": [
+    "channels",
+    "presets",
+    "aprs",
+    "contacts",
+    "quick",
+    "waypoints",
+    "dtmf"
+  ]
+}

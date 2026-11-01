@@ -147,7 +147,9 @@
         aria-label="Channel zone"
       >
         <option value="">none</option>
-        {#each zones as z (z.number)}<option value={String(z.number - 1)}>{z.number} {z.name}</option>{/each}
+        {#each zones as z (z.number)}<option value={String(z.number - 1)} disabled={c.zone !== z.number - 1 && channels.fullZones.has(z.number - 1)}
+            >{z.number} {z.name}{channels.fullZones.has(z.number - 1) ? " (full)" : ""}</option
+          >{/each}
         {#if c.zone !== null && c.zone >= zones.length}<option value={String(c.zone)}>{c.zone + 1} (missing)</option>{/if}
       </select>
     </label>

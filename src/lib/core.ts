@@ -5,8 +5,12 @@ import init, * as wasm from "../core-wasm/core.js";
 export type Answer = { ty: number; seq: number; status: number; rest: number[]; event?: boolean };
 
 export type Build = { byte: number; name: string; bench: boolean; dry: boolean };
-/** `caps2`: LINK-35.2's second capability byte (1 range preset skip lists); 0 from firmware before it. */
-export type Hello = { protocol: number; max_payload: number; may_go_on: boolean; firmware: string; build: Build | null; caps: number; caps2: number };
+/** LINK-62: the layout this firmware stores and the one the chip's data is in (they differ while it waits for
+ *  Console to move the data: the radio shows D25 "Finish the update", UPD-16). */
+export type Layouts = { firmware: number; chip: number };
+/** `caps2`: LINK-35.2's second capability byte (1 range preset skip lists, 2 protocol 3's raw data and layouts); 0 from
+ *  firmware before it. */
+export type Hello = { protocol: number; max_payload: number; may_go_on: boolean; firmware: string; build: Build | null; caps: number; caps2: number; layouts: Layouts | null };
 export type Info = {
   firmware: string;
   channels: number;
@@ -18,6 +22,8 @@ export type Info = {
   build: Build | null;
   uid: number[] | null;
   uid_text: string | null;
+  /** LINK-62, protocol 3. */
+  layouts: Layouts | null;
 };
 export type TextChunk = { more: boolean; text: string; working: boolean };
 export type Value = string | number;
@@ -66,12 +72,17 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE", number>;
+  /** LINK-59: `DATA_READ`'s ops and its most bytes, and the erase unit. */
+  data: { READ: number; CRC: number; READ_MAX: number; SECTOR: number };
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS", number>;
   /** LINK-35.2: HELLO's caps bits the UI asks about by name (link.ts has the transport ones). */
   caps: Record<"POSITION" | "LISTS", number>;
   /** LINK-35.2: the second caps byte's bits. */
-  caps2: Record<"PRESET_SKIPS", number>;
+  caps2: Record<"PRESET_SKIPS" | "DATA", number>;
+  /** What the radio holds (layout 3, decision 333): 4,000 channels, 512 zones, 256 channels a zone, 1,016 contacts,
+   *  2,032 waypoints. */
+  limits: { channels: number; zones: number; zoneCap: number; contacts: number; waypoints: number };
   /** LINK-55: the index a new waypoint is written at (it becomes the newest). */
   waypointAdd: number;
   event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "SUB_LOG" | "LOG" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
@@ -103,7 +114,8 @@ export const helloPayload = (name: string) => wasm.hello_payload(name);
 export const authPayload = (pin: string) => wasm.auth_payload(pin);
 export const baudPayload = (rate: number) => wasm.baud_payload(rate);
 export const parseHello = (rest: Uint8Array): Hello | null => JSON.parse(wasm.parse_hello(rest));
-export const parseInfo = (rest: Uint8Array): Info | null => JSON.parse(wasm.parse_info(rest));
+/** `protocol`: HELLO's (3: the zone count is 2 bytes, and the layouts end it). */
+export const parseInfo = (rest: Uint8Array, protocol: number): Info | null => JSON.parse(wasm.parse_info(rest, protocol));
 export const parseTextChunk = (rest: Uint8Array): TextChunk | null => JSON.parse(wasm.parse_text_chunk(rest));
 export const parseUi = (text: string): Ui => JSON.parse(wasm.parse_ui(text));
 export const keyPayload = (name: string, action: "short" | "long" | "down" | "up") => wasm.key_payload(name, action);
@@ -168,6 +180,8 @@ export type Choices = {
   dcs: string[];
   maxChannels: number;
   maxZones: number;
+  /** CHAN-35: the most channels a zone holds (256). */
+  zoneCap: number;
 };
 export type Field = { field: string; from: string; to: string };
 export type Change = { what: "zone" | "channel" | "preset"; number: number; kind: "added" | "changed" | "deleted"; name: string; fields: Field[] };
@@ -209,7 +223,8 @@ export const restoreFile = (text: string): { set: ChannelSet; saved: string; rad
 export const chirpExport = (set: ChannelSet) => wasm.chirp_export(js(set));
 export const chirpImport = (text: string, zones: Zone[]): ChirpImport => JSON.parse(wasm.chirp_import(text, js(zones)));
 /** Imported channels into a new zone at free numbers: `room` says why it can't (numbers, zones), `name_error` the name. */
-export type ChirpNewZone = { channels: Channel[]; zone: Zone | null; numbers: string; room: string; name_error: string };
+/** `zones`: one new zone, or (more than 256 channels, CHAN-35) one per 256: "Repeaters 1", "Repeaters 2", ... */
+export type ChirpNewZone = { channels: Channel[]; zones: Zone[]; numbers: string; room: string; name_error: string };
 export const chirpNewZone = (channels: Channel[], table: ChannelSet, name: string): ChirpNewZone =>
   JSON.parse(wasm.chirp_new_zone(js(channels), js(table), name));
 export const chirpZoneName = (file: string, zones: Zone[]): string => wasm.chirp_zone_name(file, js(zones));
@@ -307,7 +322,18 @@ export type LibraryItem = {
 export type LibraryAdded = { channels: Channel[]; zones: Zone[]; notes: string[]; skipped: number; made_rx_only: number };
 export type Place = { lat: number; lon: number; grid: string };
 
-export const libraryAdd = (items: LibraryItem[], table: ChannelSet): LibraryAdded => JSON.parse(wasm.library_add(js(items), js(table)));
+/** `split`: past a zone's 256 channels (CHAN-35) the rest go on in new zones (" 2", " 3"), else they're skipped. */
+export const libraryAdd = (items: LibraryItem[], table: ChannelSet, split = true): LibraryAdded => JSON.parse(wasm.library_add(js(items), js(table), split));
+
+// CHAN-35: a zone holds 256 channels at most (core/src/zonecap.rs).
+export type ZoneOver = { number: number; name: string; count: number };
+export type ZoneSplit = { set: ChannelSet; notes: string[]; made: number; unzoned: number };
+/** The table's zones over 256 channels. */
+export const zoneOverCap = (t: ChannelSet): ZoneOver[] => JSON.parse(wasm.zone_over_cap(js(t)));
+/** The table with each zone over 256 split over new zones (" 2", " 3"), as the radio's own update splits one. */
+export const zoneSplit = (t: ChannelSet): ZoneSplit => JSON.parse(wasm.zone_split(js(t)));
+/** Why channels `numbers` can't all go into zone `zone` (its index; null no zone), or "" when they can. */
+export const zoneRoom = (t: ChannelSet, numbers: number[], zone: number | null): string => wasm.zone_room(js(t), js(numbers), zone ?? -1);
 export const libraryFixedItems = (set: unknown, picks: number[], zone: string): LibraryItem[] =>
   JSON.parse(wasm.library_fixed_items(js(set), js(picks), zone));
 export const parsePlace = (text: string): Place | null => {
@@ -523,3 +549,33 @@ export const aprsRecordLen = () => wasm.aprs_record_len();
 export const aprsBackup = (settings: Uint8Array, record: Uint8Array, extras: Extras, saved: string, radio: Record<string, string>) =>
   wasm.aprs_backup(settings, record, js(extras), saved, js(radio));
 export const aprsRestore = (text: string): Restored => JSON.parse(wasm.aprs_restore(text));
+
+// Finish the update (LINK-59 – LINK-62, UPD-16): one layout's data to another; the translation, its writes and the
+// PC's copy are the core's (core/src/migrate.rs).
+export const MigrateCopy = wasm.MigrateCopy;
+export type MigrateCopy = wasm.MigrateCopy;
+export const MigratePlan = wasm.MigratePlan;
+export type MigratePlan = wasm.MigratePlan;
+export type MigrateSummary = {
+  notes: string[];
+  summary: {
+    channels: number;
+    zones: number;
+    zones_split: [string, number][];
+    channels_unzoned_by_split: number;
+    heard: number;
+    messages: number;
+    events: number;
+    waypoints: number;
+    contacts: number;
+    scratch_applied: number;
+  };
+  regions: { name: string; start: number; len: number }[];
+  steps: number;
+};
+/** The regions (`[start, len]`) to back up from a chip on `layout`, or null when Console doesn't know it. */
+export const migrateRegions = (layout: number): [number, number][] | null => JSON.parse(wasm.migrate_regions(layout));
+/** The CRC-32 an erased range of `len` bytes reads as. */
+export const erasedCrc = (len: number): number => wasm.migrate_erased_crc(len);
+/** CRC-32/ISO-HDLC, as DATA_READ's CRC. */
+export const dataCrc32 = (b: Uint8Array): number => wasm.data_crc32(b);

@@ -18,7 +18,7 @@
 //! [`into_new_zone`]: the file's channels, in their order, at free numbers in a new zone (a RepeaterBook or CHIRP
 //! export numbers from 0 or 1, so merging it would overwrite the owner's first channels).
 
-use crate::channels::{mhz_text, parse_mhz, ChanView, Position, ZoneView};
+use crate::channels::{mhz_text, parse_mhz, ChanView, Position, ZoneView, ZONE_CAP};
 use crate::plan::Set;
 use crate::radioside::MAX_ZONES;
 use ferrite_app::chan::MAX_CHANNELS;
@@ -367,7 +367,7 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
         v.power = power_of(&get(r, "Power")).into();
         let comment = get(r, "Comment");
         v.zone =
-            zones.iter().position(|z| !comment.is_empty() && z.name.eq_ignore_ascii_case(&comment)).map(|i| i as u8);
+            zones.iter().position(|z| !comment.is_empty() && z.name.eq_ignore_ascii_case(&comment)).map(|i| i as u16);
         if let (Some(a), Some(b)) = (lat_col, lon_col) {
             let deg = |i: usize| r.get(i).and_then(|s| s.trim().parse::<f64>().ok());
             match (deg(a), deg(b)) {
@@ -378,7 +378,7 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
                 _ => {} // blank (or 0, 0): no position
             }
         }
-        if let Some(e) = crate::plan::check_channel(&v, zones.len() as u8) {
+        if let Some(e) = crate::plan::check_channel(&v, zones.len() as u16) {
             note(format!("channel {number}: {e}: skipped"));
             out.skipped += 1;
             continue;
@@ -432,29 +432,38 @@ pub fn ranges(nums: &[u16]) -> String {
     out.join(", ")
 }
 
-/// What [`into_new_zone`] gives: the channels renumbered into the new zone, the zone, their numbers as ranges, and
-/// why it can't be done: `room` (not enough free numbers or no zone left: the option is off) or `name_error` (the
-/// name as typed: fix it).
+/// What [`into_new_zone`] gives: the channels renumbered into the new zone (zones: a list longer than a zone holds
+/// is split over several, CHAN-35), the zones, their numbers as ranges, and why it can't be done: `room` (not enough
+/// free numbers or zones left: the option is off) or `name_error` (the name as typed: fix it).
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct NewZone {
     pub channels: Vec<ChanView>,
-    pub zone: Option<ZoneView>,
+    /// The new zones, in order: one, or for more than 256 channels one per 256 ("Repeaters 1", "Repeaters 2", ...).
+    pub zones: Vec<ZoneView>,
     pub numbers: String,
     pub room: String,
     pub name_error: String,
 }
 
 /// The imported channels, in their order, at free numbers in a new zone named `name` at the end of the table's.
-/// Numbers: the run right after the table's highest channel when it fits below 1000; else the first free run that
+/// Numbers: the run right after the table's highest channel when it fits below 4000; else the first free run that
 /// holds them all; else the free numbers from 1 up. A Comment that named a zone is ignored: every channel goes in
-/// the new zone.
+/// the new zone. More than 256 (CHAN-35): split over new zones of 256, `name` 1, `name` 2 and so on.
 pub fn into_new_zone(channels: &[ChanView], table: &Set, name: &str) -> NewZone {
     let mut out = NewZone::default();
     let n = channels.len();
     let used: std::collections::BTreeSet<u16> = table.channels.iter().map(|c| c.number).collect();
     let free: Vec<u16> = (1..=MAX_CHANNELS).filter(|k| !used.contains(k)).collect();
-    if table.zones.len() >= MAX_ZONES {
-        out.room = format!("the table has {MAX_ZONES} zones, the most the radio holds");
+    let parts = n.div_ceil(ZONE_CAP).max(1);
+    if table.zones.len() + parts > MAX_ZONES {
+        out.room = if parts == 1 {
+            format!("the table has {MAX_ZONES} zones, the most the radio holds")
+        } else {
+            format!(
+                "{n} channels need {parts} zones of {ZONE_CAP}, but the table has {} of the radio's {MAX_ZONES} zones",
+                table.zones.len()
+            )
+        };
         return out;
     }
     if free.len() < n {
@@ -484,10 +493,24 @@ pub fn into_new_zone(channels: &[ChanView], table: &Set, name: &str) -> NewZone 
     } else if table.zones.iter().any(|z| z.name.trim_end().eq_ignore_ascii_case(&clean)) {
         out.name_error = format!("the table has a zone named {clean:?}");
     }
-    let index = table.zones.len() as u8;
-    out.zone = Some(ZoneView::new(index + 1, &clean));
-    out.channels =
-        channels.iter().zip(&nums).map(|(c, &k)| ChanView { number: k, zone: Some(index), ..c.clone() }).collect();
+    let index = table.zones.len() as u16;
+    if parts == 1 {
+        out.zones.push(ZoneView::new(index + 1, &clean));
+    } else {
+        for k in 0..parts {
+            let part = crate::zonecap::part_name(&clean, k + 1);
+            if out.name_error.is_empty() && table.zones.iter().any(|z| z.name.trim_end().eq_ignore_ascii_case(&part)) {
+                out.name_error = format!("the table has a zone named {part:?}");
+            }
+            out.zones.push(ZoneView::new(index + 1 + k as u16, &part));
+        }
+    }
+    out.channels = channels
+        .iter()
+        .zip(&nums)
+        .enumerate()
+        .map(|(i, (c, &k))| ChanView { number: k, zone: Some(index + (i / ZONE_CAP) as u16), ..c.clone() })
+        .collect();
     out
 }
 
@@ -662,12 +685,31 @@ mod tests {
 
     fn table(numbers: impl IntoIterator<Item = u16>, zones: &[&str]) -> Set {
         Set {
-            zones: zones.iter().enumerate().map(|(i, z)| ZoneView::new(i as u8 + 1, z)).collect(),
+            zones: zones.iter().enumerate().map(|(i, z)| ZoneView::new(i as u16 + 1, z)).collect(),
             channels: numbers.into_iter().map(|n| ChanView::new(n, 14_652_000)).collect(),
         }
     }
 
     /// Into a new zone: after the highest number, keeping the file's order; a Comment's zone ignored.
+    /// CHAN-35: a list longer than a zone holds goes into new zones of 256, named 1, 2, ...
+    #[test]
+    fn long_list_split_over_zones() {
+        let chans: Vec<ChanView> = (1..=600u16).map(|n| ChanView::new(n, 44_000_000 + n as u32 * 1250)).collect();
+        let t = table([1, 2], &["Local"]);
+        let z = into_new_zone(&chans, &t, "Repeaters");
+        assert_eq!((z.room.as_str(), z.name_error.as_str()), ("", ""));
+        let names: Vec<(u16, &str)> = z.zones.iter().map(|z| (z.number, z.name.as_str())).collect();
+        assert_eq!(names, [(2, "Repeaters 1"), (3, "Repeaters 2"), (4, "Repeaters 3")]);
+        let per = |k: u16| z.channels.iter().filter(|c| c.zone == Some(k)).count();
+        assert_eq!((per(1), per(2), per(3)), (256, 256, 88));
+        assert_eq!(z.channels[0].number, 3, "after the table's highest");
+        let t = table([1], &["Local", "Repeaters 2"]);
+        assert!(into_new_zone(&chans, &t, "Repeaters").name_error.contains("Repeaters 2"));
+        let full: Vec<String> = (1..=510).map(|k| format!("Z{k}")).collect();
+        let t = table([1], &full.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        assert!(into_new_zone(&chans, &t, "x").room.contains("need 3 zones"), "{}", into_new_zone(&chans, &t, "x").room);
+    }
+
     #[test]
     fn new_zone_numbers() {
         let i = import(FILE, &zones()).unwrap();
@@ -675,7 +717,7 @@ mod tests {
         let t = table([1, 2, 3, 500], &["Local", "Repeaters"]);
         let z = into_new_zone(&i.channels, &t, "My file");
         assert_eq!((z.room.as_str(), z.name_error.as_str(), z.numbers.as_str()), ("", "", "501-508"));
-        assert_eq!(z.zone.as_ref().map(|z| (z.number, z.name.as_str())), Some((3, "My file")));
+        assert_eq!(z.zones.iter().map(|z| (z.number, z.name.as_str())).collect::<Vec<_>>(), [(3, "My file")]);
         assert!(z.channels.iter().all(|c| c.zone == Some(2)));
         let names: Vec<&str> = z.channels.iter().map(|c| c.name.as_str()).collect();
         let want: Vec<&str> = i.channels.iter().map(|c| c.name.as_str()).collect();
@@ -683,18 +725,18 @@ mod tests {
         for c in &z.channels {
             assert_eq!(crate::plan::check_channel(c, 3), None);
         }
-        // No room after 995: the first free run that holds 8.
-        let t = table((1..=5).chain([995]), &[]);
+        // No room after 3995: the first free run that holds 8.
+        let t = table((1..=5).chain([3995]), &[]);
         assert_eq!(into_new_zone(&i.channels, &t, "x").numbers, "6-13");
         // No run of 8: the free numbers from 1.
-        let t = table((1..=1000).filter(|n| n % 4 != 0), &[]);
+        let t = table((1..=4000).filter(|n| n % 4 != 0), &[]);
         assert_eq!(into_new_zone(&i.channels, &t, "x").numbers, "4, 8, 12, 16, 20, 24, 28, 32");
         // Too few free numbers, or no zone left: the option is off.
-        let t = table(1..=995, &[]);
+        let t = table(1..=3995, &[]);
         assert_eq!(into_new_zone(&i.channels, &t, "x").room, "8 channels, but only 5 channel numbers are free");
-        let full: Vec<String> = (1..=254).map(|k| format!("Z{k}")).collect();
+        let full: Vec<String> = (1..=512).map(|k| format!("Z{k}")).collect();
         let t = table([1], &full.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-        assert!(into_new_zone(&i.channels, &t, "x").room.contains("254 zones"));
+        assert!(into_new_zone(&i.channels, &t, "x").room.contains("512 zones"));
         // The name: needed, printable, 16 characters, not one the table has.
         let t = table([1], &["Local"]);
         assert_eq!(into_new_zone(&i.channels, &t, " ").name_error, "the new zone needs a name");

@@ -208,10 +208,11 @@ class Library {
     return this.placeText !== was || this.placeFrom === "From this computer's location";
   }
 
-  /** Entries into the table (through the core's checks). The table's new rows show green until written. */
-  add(items: LibraryItem[], what: string): LibraryAdded {
+  /** Entries into the table (through the core's checks). The table's new rows show green until written. `split`: a
+   *  zone's channels past 256 (CHAN-35) go on in a new zone (" 2", " 3"), else they're skipped. */
+  add(items: LibraryItem[], what: string, split = true): LibraryAdded {
     const t = $state.snapshot(channels.table);
-    const a = libraryAdd(items, t);
+    const a = libraryAdd(items, t, split);
     channels.addLibrary(a, what);
     return a;
   }

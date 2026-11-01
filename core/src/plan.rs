@@ -33,7 +33,7 @@ impl Set {
         let mut set = Set::default();
         for (i, r) in zones.iter().enumerate() {
             match zone_from_record(r) {
-                Some((n, c)) => set.zones.push(ZoneView::of(i as u8, n.as_bytes(), &c)),
+                Some((n, c)) => set.zones.push(ZoneView::of(i as u16, n.as_bytes(), &c)),
                 None => bad.push(format!("zone {}: a record of {} bytes didn't parse", i + 1, r.len())),
             }
         }
@@ -73,8 +73,8 @@ pub struct Problem {
 }
 
 impl Problem {
-    fn zone(n: u8, e: String) -> Self {
-        Problem { what: "zone".into(), number: n as u16, error: e }
+    fn zone(n: u16, e: String) -> Self {
+        Problem { what: "zone".into(), number: n, error: e }
     }
     fn channel(n: u16, e: String) -> Self {
         Problem { what: "channel".into(), number: n, error: e }
@@ -189,17 +189,17 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
         let v = &want.zones[i];
         changes.push(Change {
             what: "zone",
-            number: v.number as u16,
+            number: v.number,
             kind: if old.is_some() { "changed" } else { "added" },
             name: v.name.clone(),
             fields: old.map_or_else(Vec::new, |(on, oc)| {
-                fields(&ZoneView::of(i as u8, on.as_bytes(), oc), &ZoneView::of(i as u8, n.as_bytes(), c))
+                fields(&ZoneView::of(i as u16, on.as_bytes(), oc), &ZoneView::of(i as u16, n.as_bytes(), c))
             }),
         });
         ops.push(Op {
             kind: "write",
             what: "zone",
-            number: v.number as u16,
+            number: v.number,
             msg: msg::WRITE,
             payloads: write_payloads(what::ZONE, i as u16, &zone_record(n.as_bytes(), c)),
         });
@@ -229,7 +229,13 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
             payloads: vec![delete_payload(what::CHANNEL, *num)],
         });
     }
+    // CHAN-35: a zone holds 256 channels at most; the radio would refuse the 257th.
+    for o in crate::zonecap::over_cap(want) {
+        problems.push(Problem::zone(o.number, format!("{} channels: a zone holds {} at most (CHAN-35)", o.count, crate::channels::ZONE_CAP)));
+    }
     let mut positions = Vec::new();
+    // Channel writes, put in an order that never takes a zone past 256 on the way (below).
+    let mut writes: Vec<(u16, Op)> = Vec::new();
     for (num, (c, v)) in &new {
         if c.zone != NO_ZONE && c.zone as usize >= wz.len() {
             problems.push(Problem::channel(v.number, format!("zone {}: there is no such zone", c.zone as u32 + 1)));
@@ -271,21 +277,26 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
             name: v.name.clone(),
             fields: fs,
         });
-        ops.push(Op {
-            kind: "write",
-            what: "channel",
-            number: v.number,
-            msg: msg::WRITE,
-            payloads: write_payloads(what::CHANNEL, *num, &channel_record(c)),
-        });
+        writes.push((
+            *num,
+            Op {
+                kind: "write",
+                what: "channel",
+                number: v.number,
+                msg: msg::WRITE,
+                payloads: write_payloads(what::CHANNEL, *num, &channel_record(c)),
+            },
+        ));
     }
+    let deleted: Vec<u16> = old.keys().filter(|n| !new.contains_key(n)).copied().collect();
+    ops.extend(order_writes(bc, &deleted, wc, writes));
 
     // Zones past the new count, last first.
     for i in (wz.len()..bz.len()).rev() {
         let v = &base.zones[i];
         changes.push(Change {
             what: "zone",
-            number: v.number as u16,
+            number: v.number,
             kind: "deleted",
             name: v.name.clone(),
             fields: Vec::new(),
@@ -293,7 +304,7 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
         ops.push(Op {
             kind: "delete",
             what: "zone",
-            number: v.number as u16,
+            number: v.number,
             msg: msg::DELETE,
             payloads: vec![delete_payload(what::ZONE, i as u16)],
         });
@@ -301,6 +312,63 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
 
     problems.extend(dry_run(&base_parts, &ops, &want_parts));
     Plan { changes, begin: begin_payload(ops.len() as u16), ops, problems, positions }
+}
+
+/// The channel writes in an order that never takes a zone past its 256 on the way (CHAN-35: the radio refuses the
+/// 257th, whatever comes after it): a write that takes a channel into a zone waits until the zone has room, so the
+/// channels leaving it go first. Two full zones trading channels would wait on each other: one of them goes to no zone
+/// first (one write more), then on as usual. Writes into no zone, or within their own zone, go in number order.
+fn order_writes(base: &[Channel], deleted: &[u16], want: &[Channel], writes: Vec<(u16, Op)>) -> Vec<Op> {
+    let cap = crate::channels::ZONE_CAP;
+    let zone_of: BTreeMap<u16, u16> = base.iter().filter(|c| !deleted.contains(&c.num)).map(|c| (c.num, c.zone)).collect();
+    let wanted: BTreeMap<u16, &Channel> = want.iter().map(|c| (c.num, c)).collect();
+    let mut count: BTreeMap<u16, usize> = BTreeMap::new();
+    for &z in zone_of.values().filter(|&&z| z != NO_ZONE) {
+        *count.entry(z).or_default() += 1;
+    }
+    let mut now = zone_of.clone();
+    let mut pending: Vec<(u16, Op)> = writes;
+    let mut out = Vec::new();
+    while !pending.is_empty() {
+        let mut moved = false;
+        let mut rest = Vec::new();
+        for (num, op) in pending {
+            let to = wanted.get(&num).map_or(NO_ZONE, |c| c.zone);
+            let from = now.get(&num).copied();
+            let enters = to != NO_ZONE && from != Some(to);
+            if enters && count.get(&to).copied().unwrap_or(0) >= cap {
+                rest.push((num, op));
+                continue;
+            }
+            if let Some(f) = from.filter(|&f| f != NO_ZONE && f != to) {
+                *count.entry(f).or_default() -= 1;
+            }
+            if enters {
+                *count.entry(to).or_default() += 1;
+            }
+            now.insert(num, to);
+            out.push(op);
+            moved = true;
+        }
+        pending = rest;
+        if !moved {
+            // Waiting on each other: the first one to no zone for now (its write comes again when there is room).
+            let (num, op) = &pending[0];
+            if now.get(num).is_none_or(|&f| f == NO_ZONE) {
+                // Nothing leaves those zones: the table holds more than they may (a problem the plan names).
+                out.extend(pending.into_iter().map(|(_, op)| op));
+                break;
+            }
+            let c = wanted[num];
+            let parked = Channel { zone: NO_ZONE, ..*c };
+            if let Some(f) = now.get(num).copied().filter(|&f| f != NO_ZONE) {
+                *count.entry(f).or_default() -= 1;
+            }
+            now.insert(*num, NO_ZONE);
+            out.push(Op { payloads: write_payloads(what::CHANNEL, *num, &channel_record(&parked)), ..op.clone() });
+        }
+    }
+    out
 }
 
 /// A position as the diff shows it: "45.42150, -75.69720 (FN25dk)", or empty for none.
@@ -375,7 +443,7 @@ fn dry_run(base: &Parts, ops: &[Op], want: &Parts) -> Vec<Problem> {
 
 /// One channel's problem, checked as the radio would (its fields, then ferrite's own link checks with `zones`
 /// zones), or None. For the table, as a row is edited.
-pub fn check_channel(v: &ChanView, zones: u8) -> Option<String> {
+pub fn check_channel(v: &ChanView, zones: u16) -> Option<String> {
     let c = match v.channel() {
         Ok(c) => c,
         Err(e) => return Some(e),
@@ -422,6 +490,21 @@ pub struct BackupRecord {
 }
 
 pub const BACKUP_FORMAT: &str = "ferrite-console-channels";
+/// The channels part's version: 2 since protocol 3 (decision 333: the channel record's zone is 2 bytes, 41 bytes in
+/// all). Version 1 files (a one-byte zone, 255 none; 40 bytes) are still read: their records widened on reading.
+pub const BACKUP_VERSION: u32 = 2;
+
+/// A version 1 channel record (a one-byte zone at 2, 255 none; 40 bytes, 39 without the end tone) as version 2's.
+pub fn widen_v1_channel(r: &[u8]) -> Vec<u8> {
+    if r.len() < 3 {
+        return r.to_vec();
+    }
+    let zone: u16 = if r[2] == 0xFF { NO_ZONE } else { r[2] as u16 };
+    let mut out = r[..2].to_vec();
+    out.extend(zone.to_le_bytes());
+    out.extend_from_slice(&r[3..]);
+    out
+}
 
 pub(crate) fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
@@ -438,14 +521,14 @@ pub fn backup(set: &Set, saved: &str, radio: BTreeMap<String, String>) -> Result
     let (zones, chans) = set.parts()?;
     let b = Backup {
         format: BACKUP_FORMAT.into(),
-        version: 1,
+        version: BACKUP_VERSION,
         saved: saved.into(),
         radio,
         zones: zones
             .iter()
             .zip(&set.zones)
             .map(|((n, c), v)| BackupRecord {
-                number: v.number as u16,
+                number: v.number,
                 name: v.name.clone(),
                 record: hex(&zone_record(n.as_bytes(), c)),
                 pos: None,
@@ -471,7 +554,7 @@ pub fn restore(text: &str) -> Result<(Set, Backup), String> {
     if b.format != BACKUP_FORMAT {
         return Err(format!("not a channel backup (format {:?})", b.format));
     }
-    if b.version != 1 {
+    if b.version == 0 || b.version > BACKUP_VERSION {
         return Err(format!("backup version {} is newer than this Console reads", b.version));
     }
     let mut zones = b.zones.clone();
@@ -484,7 +567,10 @@ pub fn restore(text: &str) -> Result<(Set, Backup), String> {
     let rec =
         |r: &BackupRecord, w: &str| unhex(&r.record).ok_or_else(|| format!("{w} {}: its record isn't hex", r.number));
     let zr = zones.iter().map(|z| rec(z, "zone")).collect::<Result<Vec<_>, _>>()?;
-    let cr = b.channels.iter().map(|c| rec(c, "channel")).collect::<Result<Vec<_>, _>>()?;
+    let mut cr = b.channels.iter().map(|c| rec(c, "channel")).collect::<Result<Vec<_>, _>>()?;
+    if b.version == 1 {
+        cr = cr.iter().map(|r| widen_v1_channel(r)).collect();
+    }
     let (mut set, bad) = Set::from_records(&zr, &cr);
     if let Some(e) = bad.first() {
         return Err(e.clone());
@@ -642,5 +728,63 @@ mod tests {
         assert_eq!(file.radio["firmware"], "0.1.0");
         assert!(restore("{}").is_err());
         assert!(restore(&text.replace(BACKUP_FORMAT, "other")).is_err());
+    }
+
+    fn zoned(zones: &[&str], members: impl IntoIterator<Item = (u16, Option<u16>)>) -> Set {
+        Set {
+            zones: zones.iter().enumerate().map(|(i, z)| ZoneView::new(i as u16 + 1, z)).collect(),
+            channels: members
+                .into_iter()
+                .map(|(n, z)| ChanView { zone: z, ..ChanView::new(n, 44_000_000 + n as u32 * 1250) })
+                .collect(),
+        }
+    }
+
+    /// CHAN-35: a 257th channel in a zone is a problem before anything is sent, in Console's words and the radio's.
+    #[test]
+    fn zone_over_256_refused() {
+        let base = zoned(&["Local"], (1..=256).map(|n| (n, Some(0))).chain([(300, None)]));
+        let want = zoned(&["Local"], (1..=256).map(|n| (n, Some(0))).chain([(300, Some(0))]));
+        let p = plan(&base, &want);
+        assert!(p.problems.iter().any(|x| x.what == "zone" && x.error.contains("257 channels")), "{:?}", p.problems);
+        assert!(p.problems.iter().any(|x| x.error.contains("zone: full")), "the radio's own refusal too: {:?}", p.problems);
+    }
+
+    /// Channels moving between full zones are written in an order the radio takes: the ones leaving first, and two
+    /// full zones trading a channel each through no zone.
+    #[test]
+    fn writes_never_overfill_a_zone() {
+        // 1-256 in A, 257-512 in B: channel 1 moves to B and 300 to A (a swap of two full zones).
+        let base = zoned(&["A", "B"], (1..=512).map(|n| (n, Some(if n <= 256 { 0 } else { 1 }))));
+        let mut want = base.clone();
+        want.channels[0].zone = Some(1);
+        want.channels[299].zone = Some(0);
+        let p = plan(&base, &want);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(p.ops.len(), 3, "one write more, through no zone");
+        // A channel joining a full zone after one leaves it, though its number comes first.
+        let base = zoned(&["A"], (2..=257).map(|n| (n, Some(0))).chain([(1, None)]));
+        let mut want = base.clone();
+        want.channels.iter_mut().find(|c| c.number == 1).unwrap().zone = Some(0);
+        want.channels.iter_mut().find(|c| c.number == 257).unwrap().zone = None;
+        let p = plan(&base, &want);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(p.ops.iter().map(|o| o.number).collect::<Vec<_>>(), [257, 1]);
+    }
+
+    /// A zone deleted on the radio before a later one reads as an empty, unnamed record (CHAN-12; the update keeps it,
+    /// Appendix G): the set still plans, and a channel edit elsewhere writes; renaming nothing into it is refused by
+    /// the radio's own check.
+    #[test]
+    fn an_unnamed_deleted_zone_still_plans() {
+        let mut base = zoned(&["Local", "", "Last"], [(1, Some(0)), (2, Some(2))]);
+        base.zones[1] = ZoneView::of(1, b"", &ZoneCfg::default());
+        let mut want = base.clone();
+        want.channels[0].name = "Edited".into();
+        let p = plan(&base, &want);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(p.ops.len(), 1);
+        want.zones[1].scan_all = !want.zones[1].scan_all;
+        assert!(plan(&base, &want).problems.iter().any(|x| x.error.contains("name")), "the radio refuses an unnamed zone written");
     }
 }

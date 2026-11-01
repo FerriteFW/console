@@ -3,6 +3,8 @@
   // keep the cable in) → Done. The flow itself is firmware.svelte.ts; the image is the bundled release unless a file
   // was chosen under Advanced. It can't be closed while the radio is in the middle of it.
   import { firmware } from "../firmware.svelte";
+  import { migrate } from "../migrate.svelte";
+  import MigrateProgress from "./MigrateProgress.svelte";
   import { Eta, etaText } from "../eta";
   import { radio } from "../radio.svelte";
   import { signatureText } from "../signature";
@@ -61,7 +63,9 @@
           <ul class="notes">
             <li>Your channels and settings stay. Calibration is never touched.</li>
             <li>About {Math.max(30, Math.ceil(check.blocks / 8))} s. Keep the cable in and don't transmit.</li>
+            <li>A firmware that stores your data in a new layout gets it moved as part of the update: Console backs it up first.</li>
           </ul>
+          <label class="opt"><input type="checkbox" bind:checked={migrate.saveFile} /> If the data moves, save its backup to a file too (Console keeps a copy either way)</label>
         {:else}
           <div class="err" role="alert">
             <strong>Console won't install this file.</strong>
@@ -84,13 +88,19 @@
       {#if firmware.stage === "sending"}
         <progress max={firmware.blocks} value={firmware.done} aria-label="Sent"></progress>
         <p class="sub">{firmware.pct}%{etaText(left)}</p>
+      {:else if firmware.stage === "migrating"}
+        <MigrateProgress />
       {/if}
       {#if firmware.running}
         <p class="warn">Keep the cable in until this says done.</p>
       {/if}
       {#if firmware.error}<div class="err" role="alert" aria-label="Update error">{firmware.error}</div>{/if}
       {#if firmware.stage === "failed" && !firmware.running}
-        <p class="sub">The radio is waiting in its bootloader (a blank screen). It's safe: send the image again.</p>
+        {#if radio.phase === "updating"}
+          <p class="sub">The radio is waiting in its bootloader (a blank screen). It's safe: send the image again.</p>
+        {:else if migrate.stage === "failed"}
+          <p class="sub">The new firmware runs; your data waits safely in the old layout. Finish the update (the banner) tries again.</p>
+        {/if}
         <div class="row">
           {#if radio.phase === "updating"}
             <button class="btn" onclick={() => firmware.release()}>Give up and disconnect</button>
@@ -104,6 +114,9 @@
       <div class="done" role="region" aria-label="Update done">
         <p class="big">Done</p>
         <p>The radio runs <span data-k="after">{firmware.after?.firmware ?? "the new firmware"}</span>{firmware.after?.build ? ` (${firmware.after.build})` : ""}.</p>
+        {#if migrate.stage === "done" && migrate.summary}
+          <MigrateProgress />
+        {/if}
         {#if check?.version && firmware.after && check.version !== firmware.after.firmware}
           <p class="warn">The file said {check.version}: check the radio's About page (MENU 0 9 8).</p>
         {/if}
@@ -191,6 +204,13 @@
   }
   .sig.bad {
     color: var(--red);
+  }
+  .opt {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    font-size: 13px;
+    color: var(--sub);
   }
   .notes {
     margin: 0;

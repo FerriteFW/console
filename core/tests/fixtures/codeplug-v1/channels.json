@@ -1,0 +1,43 @@
+{
+  "format": "ferrite-console-channels",
+  "version": 1,
+  "saved": "2026-10-30T21:12:00.000Z",
+  "radio": {
+    "callsign": "VA7IF",
+    "connection": "Cable",
+    "firmware": "0.8.2"
+  },
+  "zones": [
+    {
+      "number": 1,
+      "name": "Local",
+      "record": "4c6f63616c000000000000000000000001010000ff00ffffffff"
+    },
+    {
+      "number": 2,
+      "name": "Repeaters",
+      "record": "526570656174657273000000000000000001000bff000900ffff"
+    }
+  ],
+  "channels": [
+    {
+      "number": 1,
+      "name": "Calling 2 m",
+      "record": "0000006092df0043616c6c696e672032206d000000000001010000000000000000000a0a00000000"
+    },
+    {
+      "number": 10,
+      "name": "North hill",
+      "record": "0900017036e0004e6f7274682068696c6c00000000000001010000e803a015ffff010a0a00000000",
+      "pos": [
+        49.35,
+        -123.07
+      ]
+    },
+    {
+      "number": 20,
+      "name": "Calling 70 cm",
+      "record": "1300ffc08aa80243616c6c696e6720373020636d00000001010000000000000000000a0a00000100"
+    }
+  ]
+}

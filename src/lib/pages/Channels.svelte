@@ -332,8 +332,8 @@
     </div>
     <div class="grp adds">
       {#if tab === "channels"}
-        <button class="btn" disabled={busy || t.channels.length >= 1000} onclick={addChannel}>+ Add channel</button>
-        <button class="btn" disabled={busy || t.channels.length >= 1000} onclick={() => library.show()} title="Fixed sets, and licensed sites (Canada, US), airports and repeaters near a place">
+        <button class="btn" disabled={busy || t.channels.length >= (choices?.maxChannels ?? 4000)} onclick={addChannel}>+ Add channel</button>
+        <button class="btn" disabled={busy || t.channels.length >= (choices?.maxChannels ?? 4000)} onclick={() => library.show()} title="Fixed sets, and licensed sites (Canada, US), airports and repeaters near a place">
           Add from library…
         </button>
       {/if}
@@ -373,7 +373,7 @@
             <select aria-label="Set zone" onchange={(e) => bulk(e, (v) => channels.setMany(selected, { zone: v === "none" ? null : Number(v) }))}>
               <option value="">Zone…</option>
               <option value="none">No zone</option>
-              {#each t.zones as z (z.number)}<option value={String(z.number - 1)}>{z.number} {z.name}</option>{/each}
+              {#each t.zones as z (z.number)}<option value={String(z.number - 1)}>{z.number} {z.name}{channels.fullZones.has(z.number - 1) ? " (full)" : ""}</option>{/each}
             </select>
             <select aria-label="Set scan skip" onchange={(e) => bulk(e, (v) => channels.setMany(selected, { skip: v === "on" }))}>
               <option value="">Skip…</option>

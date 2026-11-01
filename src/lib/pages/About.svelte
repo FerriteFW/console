@@ -19,7 +19,7 @@
     <dt>Version</dt>
     <dd>0.1.0 ({shell})</dd>
     <dt>Protocol</dt>
-    <dd>Ferrite link protocol v2 (manual chapter 29), the same code as the radio's (ferrite-core, compiled to WebAssembly)</dd>
+    <dd>Ferrite link protocol 3 (manual chapter 29), the same code as the radio's (ferrite-core, compiled to WebAssembly)</dd>
     <dt>Connections</dt>
     <dd>The programming cable (Web Serial, 115200 8N1, raised to 230400 when the radio takes it) and the radio's Bluetooth (Web Bluetooth, FFE0/FFE1)</dd>
     <dt>Never</dt>

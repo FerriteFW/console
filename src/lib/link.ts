@@ -24,6 +24,7 @@ import {
   type Answer,
   type Hello,
   type Info,
+  type Layouts,
   type LogRecord,
   type Message,
   type PlanOp,
@@ -44,6 +45,16 @@ export class RadioError extends Error {
 }
 
 export class TimeoutError extends Error {}
+
+/** UPD-16: the radio's data waits in another layout (it shows D25 "Finish the update"): its records aren't there to
+ *  read or write until Console moves the data (LINK-62). */
+export class LayoutPending extends Error {
+  constructor(readonly layouts: Layouts) {
+    super(
+      `The radio's channels and settings are waiting in the old layout (layout ${layouts.chip}): finish the update first (the banner at the top, or Update Ferrite).`,
+    );
+  }
+}
 
 /** LINK-50: a stream's frame didn't come (lost on the way, or none in time); `got` is what came before it. */
 export class StreamGap extends Error {
@@ -76,8 +87,13 @@ export class Link {
   private dropUnlock = false;
   /** LINK-35.2: what the radio does beyond protocol 2 (HELLO). */
   caps = 0;
-  /** LINK-35.2: the second capability byte (1 range preset skip lists, LINK-58); 0 from older firmware. */
+  /** LINK-35.2: the second capability byte (1 range preset skip lists, LINK-58; 2 protocol 3's raw data and layouts);
+   *  0 from older firmware. */
   caps2 = 0;
+  /** HELLO's protocol (3: 2-byte zones, the layouts; LINK-62). */
+  protocol = 0;
+  /** LINK-62: the layouts HELLO gave (this firmware's, the chip's); null from a radio before protocol 3. */
+  layouts: Layouts | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private holdUntil = 0;
   private closed = false;
@@ -230,6 +246,8 @@ export class Link {
     if (!h) throw new Error("The radio's HELLO answer didn't parse.");
     this.caps = h.caps ?? 0;
     this.caps2 = h.caps2 ?? 0;
+    this.protocol = h.protocol;
+    this.layouts = h.layouts ?? null;
     this.session.set_lz((this.caps & CAP_LZ) !== 0);
     return h;
   }
@@ -315,13 +333,69 @@ export class Link {
     return frames;
   }
 
+  /** UPD-16: the records are there only once the chip's data is in this firmware's layout. */
+  private records() {
+    if (this.layouts && this.layouts.firmware !== this.layouts.chip) throw new LayoutPending(this.layouts);
+  }
+
+  /**
+   * LINK-59, LINK-60: one raw data request (`DATA_READ` or `DATA_WRITE`, its payload as the core's plan builds it),
+   * its answer after the status. `busy` (the store still writing, or its queue full) is sent again for up to 20 s; no
+   * answer is sent again twice (an erase or a program done twice leaves the same bytes; a read changes nothing).
+   */
+  data(ty: number, payload: Uint8Array, timeoutMs = 5000): Promise<Uint8Array> {
+    return this.exclusive(async () => {
+      let busyUntil = performance.now() + 20_000;
+      for (let tries = 0; ; ) {
+        let a: { status: number; rest: Uint8Array };
+        try {
+          a = await this.askRaw(ty, payload, timeoutMs, false);
+        } catch (e) {
+          if (!(e instanceof TimeoutError)) throw e;
+          if (++tries > 2) throw new TimeoutError(`${e.message} (${ty === P.msg.DATA_WRITE ? "DATA_WRITE" : "DATA_READ"} ${payload[0]} at 0x${new DataView(payload.buffer, payload.byteOffset).getUint32(1, true).toString(16)})`);
+          continue;
+        }
+        if (a.status === 0) return a.rest;
+        if (a.status === 7 && performance.now() < busyUntil) {
+          await sleep(20);
+          continue;
+        }
+        if (a.status !== 7) busyUntil = 0;
+        throw new RadioError(ty, a.status, a.rest);
+      }
+    });
+  }
+
+  /** LINK-59: `len` bytes (1-232) at `addr`. */
+  async dataRead(addr: number, len: number): Promise<Uint8Array> {
+    const p = new Uint8Array(6);
+    const d = new DataView(p.buffer);
+    p[0] = P.data.READ;
+    d.setUint32(1, addr, true);
+    p[5] = len;
+    const r = await this.data(P.msg.DATA_READ, p);
+    if (r.length !== len) throw new Error(`DATA_READ at ${addr.toString(16)}: ${r.length} bytes, not ${len}`);
+    return r;
+  }
+
+  /** LINK-59: the CRC-32 of `len` bytes at `addr`. */
+  async dataCrc(addr: number, len: number): Promise<number> {
+    const p = new Uint8Array(9);
+    const d = new DataView(p.buffer);
+    p[0] = P.data.CRC;
+    d.setUint32(1, addr, true);
+    d.setUint32(5, len, true);
+    const r = await this.data(P.msg.DATA_READ, p, 15_000);
+    return new DataView(r.buffer, r.byteOffset).getUint32(0, true);
+  }
+
   /** LINK-30: the radio's PIN on Bluetooth while its PIN lock is on. */
   auth(pin: string) {
     return this.ok(P.msg.AUTH, authPayload(pin));
   }
 
   async info(): Promise<Info> {
-    const i = parseInfo(await this.ok(P.msg.INFO));
+    const i = parseInfo(await this.ok(P.msg.INFO), this.protocol);
     if (!i) throw new Error("The radio's INFO answer didn't parse.");
     return i;
   }
@@ -456,6 +530,7 @@ export class Link {
    */
   readRecord(what: number, index: number): Promise<Uint8Array | null> {
     return this.exclusive(async () => {
+      this.records();
       const r = recordReader(what, index);
       try {
         while (!r.done()) {
@@ -566,6 +641,7 @@ export class Link {
    */
   writeContacts(recs: Uint8Array[]): Promise<void> {
     return this.exclusive(async () => {
+      this.records();
       for (let i = 0; i < recs.length; ) {
         const part = recs.slice(i, i + 9);
         const body = new Uint8Array(1 + part.length * 26);
@@ -607,6 +683,7 @@ export class Link {
    */
   writeRecords(what: number, recs: { index: number; record: Uint8Array }[], progress?: (done: number) => void): Promise<void> {
     return this.exclusive(async () => {
+      this.records();
       let i = 0;
       let end = performance.now() + P.timing.busy_retry_ms;
       while (i < recs.length) {
@@ -648,6 +725,7 @@ export class Link {
    */
   readMany(what: number, first: number, end: number, progress?: (at: number, got: number) => void): Promise<Map<number, Uint8Array>> {
     return this.exclusive(async () => {
+      this.records();
       const out = new Map<number, Uint8Array>();
       let at = first;
       const take = (a: Uint8Array) => {
@@ -867,6 +945,7 @@ export class Link {
    */
   writeSession(begin: Uint8Array, ops: PlanOp[], progress: (done: number) => void): Promise<void> {
     return this.exclusive(async () => {
+      this.records();
       await this.okRaw(P.msg.BEGIN, begin);
       try {
         for (let i = 0; i < ops.length; ) {

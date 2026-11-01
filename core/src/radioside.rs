@@ -1,9 +1,9 @@
 //! Ferrite's own radio side of the link, in memory: ferrite-app's `App` and `link::Session` (the code the radio
-//! runs) over a channel store kept here ([`MemStore`]: 1,000 channels, 254 zones, like the radio's). The demo radio
+//! runs) over a channel store kept here ([`MemStore`]: 4,000 channels, 512 zones, like the radio's). The demo radio
 //! answers records through it, and [`crate::plan`] dry-runs a write through it before anything goes to a radio,
 //! so every check and refusal is the firmware's own, never a copy.
 
-use ferrite_app::chan::{ChanWrite, Channel, ChannelStore, Name, MAX_CHANNELS, NO_ZONE};
+use ferrite_app::chan::{ChanWrite, Channel, ChannelStore, Name, ZoneId, MAX_CHANNELS, NO_ZONE};
 use ferrite_app::data::{Data, Dtmf, Event, Op, Pos, RangePreset, Src, Waypoint, ZoneCfg, DTMF_MEMS};
 use ferrite_ui::text::Buf;
 use ferrite_app::link::Session;
@@ -15,8 +15,8 @@ use ferrite_core::msg::{Device, LiveAll};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
-/// The most zones the radio stores (0-253; 255 is "no zone").
-pub const MAX_ZONES: usize = 254;
+/// The most zones the radio stores (0-511; 0xFFFF is "no zone", 0xFFFE Local: CHAN-6, decision 333).
+pub const MAX_ZONES: usize = ferrite_app::chan::MAX_ZONES as usize;
 
 /// Channels by number and zones by index, in memory: ferrite's `ChannelStore` and the zone half of its `Data`.
 #[derive(Default)]
@@ -95,16 +95,16 @@ impl MemStore {
 }
 
 impl ChannelStore for MemStore {
-    fn zones(&self) -> u8 {
-        self.zones.borrow().len() as u8
+    fn zones(&self) -> ZoneId {
+        self.zones.borrow().len() as ZoneId
     }
-    fn zone_name(&self, zone: u8) -> Option<Name> {
+    fn zone_name(&self, zone: ZoneId) -> Option<Name> {
         self.zones.borrow().get(zone as usize).map(|z| z.0)
     }
-    fn zone_len(&self, zone: u8) -> u16 {
+    fn zone_len(&self, zone: ZoneId) -> u16 {
         self.chans.borrow().values().filter(|c| c.zone == zone).count() as u16
     }
-    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel> {
+    fn zone_at(&self, zone: ZoneId, i: u16) -> Option<Channel> {
         self.chans.borrow().values().filter(|c| c.zone == zone).nth(i as usize).copied()
     }
     fn count(&self) -> u16 {
@@ -133,7 +133,7 @@ impl Data for MemStore {
     fn version(&self) -> u32 {
         self.version.get()
     }
-    fn zone_cfg(&self, zone: u8) -> ZoneCfg {
+    fn zone_cfg(&self, zone: ZoneId) -> ZoneCfg {
         self.zones.borrow().get(zone as usize).map(|z| z.1).unwrap_or_default()
     }
     fn quick(&self, i: usize) -> Option<Buf<67>> {

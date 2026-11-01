@@ -16,6 +16,9 @@ ferrite-core = { path = "../ferrite/crates/ferrite-core" }
 # the demo radio and the write dry-run run ferrite's real radio side.
 ferrite-app = { path = "../ferrite/crates/ferrite-app" }
 ferrite-ui = { path = "../ferrite/crates/ferrite-ui" }
+# The radio's SPI flash store: its record and ring formats and its header, for moving data between layouts
+# (LINK-59 – LINK-62; core::migrate) and, in the tests, its simulated flash to mount the result on.
+ferrite-store = { path = "../ferrite/crates/ferrite-store" }
 ferrite-console-core = { path = "core" }
 # Ferrite release images are signed with minisign (Ed25519); Console checks them. No dependencies of its own.
 minisign-verify = "0.3"

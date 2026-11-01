@@ -1,6 +1,6 @@
 <script lang="ts" module>
   /** Where added channels go: one zone per group (airport, licensee name), a new zone, an existing one, or none. */
-  export type Target = { kind: "each" | "new" | "existing" | "none"; name: string; existing: number };
+  export type Target = { kind: "each" | "new" | "existing" | "none"; name: string; existing: number; split?: boolean };
   /** The zone's name for a channel of `group`, by the target. */
   export function zoneName(t: Target, group: string, zones: { name: string }[]): string {
     if (t.kind === "each") return group;
@@ -12,10 +12,12 @@
 
 <script lang="ts">
   import { channels } from "../../channels.svelte";
+  import { P } from "../../core";
 
   let { value = $bindable(), each = "" }: { value: Target; each?: string } = $props();
   const zones = $derived(channels.table.zones);
-  const full = $derived(zones.length >= 254);
+  const full = $derived(zones.length >= P.limits.zones);
+  const counts = $derived(channels.zoneCounts());
 </script>
 
 <fieldset class="zt">
@@ -30,10 +32,15 @@
   <label class="row">
     <input type="radio" bind:group={value.kind} value="existing" disabled={!zones.length} /> Existing
     <select bind:value={value.existing} disabled={value.kind !== "existing"} aria-label="Existing zone">
-      {#each zones as z, i (z.number)}<option value={i}>{z.number} {z.name}</option>{/each}
+      {#each zones as z, i (z.number)}<option value={i}>{z.number} {z.name}{counts[i] >= P.limits.zoneCap ? " (full)" : ""}</option>{/each}
     </select>
   </label>
   <label><input type="radio" bind:group={value.kind} value="none" /> No zone</label>
+  {#if value.kind !== "none"}
+    <label title="A zone holds {P.limits.zoneCap} channels (CHAN-35): past that, the rest go on in a new zone named 2, 3 and so on; unticked, they're skipped"
+      ><input type="checkbox" bind:checked={value.split} /> Past {P.limits.zoneCap}, go on in a new zone</label
+    >
+  {/if}
 </fieldset>
 
 <style>

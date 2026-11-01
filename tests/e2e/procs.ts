@@ -72,7 +72,8 @@ export type Bridges = {
 
 /** Starts the bridge (and, without `serial`, a simulator behind it). Returns its ws:// URL and a stop function. */
 /** On the simulator the bridge also runs the fake bootloader (tools/fakeboot.py), its mode file in `fakeboot`. */
-export async function startBridge(serial?: string): Promise<Bridges> {
+/** `simArgs`: more of the simulator's arguments (`--flash FILE`: a radio whose flash holds FILE, migrate.spec). */
+export async function startBridge(serial?: string, simArgs: string[] = []): Promise<Bridges> {
   const procs: ChildProcess[] = [];
   const stop = () => {
     for (const p of procs.reverse()) p.kill();
@@ -80,7 +81,7 @@ export async function startBridge(serial?: string): Promise<Bridges> {
   try {
     if (serial) return { url: await bridgeOn(["--serial", serial], procs), stop };
     const [simPort, btPort] = [await freePort(), await freePort()];
-    const sim = spawn(simExe, ["--term-headless", "3600", "--term-tcp", String(simPort), "--bt-tcp", String(btPort)], {
+    const sim = spawn(simExe, ["--term-headless", "3600", "--term-tcp", String(simPort), "--bt-tcp", String(btPort), ...simArgs], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     procs.push(sim);

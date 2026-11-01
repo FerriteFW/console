@@ -102,8 +102,10 @@
   function bringIn(nums: number[]) {
     if (!zone || !nums.length) return;
     const from = new Set(t.channels.filter((c) => nums.includes(c.number) && c.zone !== null).map((c) => c.zone));
-    channels.moveToZone(nums, zone.number - 1);
-    if (nums.length > 1) onsay(`${plural(nums.length, "channel")} into zone ${zone.number}${from.size ? " (moved from their zones)" : ""}.`, true);
+    // CHAN-35: a zone holds 256; as many as fit go, and the refusal says how many.
+    const full = channels.moveToZone(nums, zone.number - 1);
+    if (full) onsay(full, true);
+    else if (nums.length > 1) onsay(`${plural(nums.length, "channel")} into zone ${zone.number}${from.size ? " (moved from their zones)" : ""}.`, true);
   }
 
   function takeOut(n: number) {
@@ -202,7 +204,7 @@
         </div>
       </div>
 
-      <h3>Channels in this zone <span class="sub">({members.length})</span></h3>
+      <h3>Channels in this zone <span class="sub">({members.length}/{choices.zoneCap})</span></h3>
       <p class="sub small">In channel-number order. ▲ ▼ swap a channel's number with its neighbour's, so the radio's order changes too.</p>
       {#if members.length}
         <ol class="members" aria-label="Channels in this zone">

@@ -8,16 +8,17 @@
 //! `off`, `100.0`, `D023N`).
 
 use ferrite_app::chan::{
-    Channel, Name, END_TONES, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE,
-    TAILS,
+    Channel, Name, END_TONES, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE, TAILS,
 };
 use ferrite_app::data::ZoneCfg;
 use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::slot::{SlotCfg, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SQ_GLOBAL, STEPS};
 use serde::{Deserialize, Serialize};
 
-/// A channel record's length over the link (Appendix G).
-pub const CHANNEL_LEN: usize = 40;
+/// The most channels the radio holds (4,000 since layout 3, decision 333).
+pub const MAX_CHANNELS: u16 = ferrite_app::chan::MAX_CHANNELS;
+/// A channel record's length over the link (Appendix G; protocol 3: the zone is 2 bytes, decision 333).
+pub const CHANNEL_LEN: usize = 41;
 /// The symbols a channel name may hold besides letters, digits and space (CHAN-31, decision 221): the same set as
 /// ferrite's `ferrite_core::name`, which the radio maps every name to.
 pub const NAME_SYMBOLS: &str = "-./_#+&()'!";
@@ -31,8 +32,12 @@ pub fn name_char(c: char) -> bool {
 pub fn map_name(s: &str) -> String {
     s.chars().map(|c| if name_char(c) { c } else { '-' }).collect()
 }
-/// A zone record's length over the link.
+/// A zone record's length over the link as written (Appendix G).
 pub const ZONE_LEN: usize = 26;
+/// A zone record as read (protocol 3): [`ZONE_LEN`] bytes, then its channel count (u16, read only: CHAN-36).
+pub const ZONE_READ_LEN: usize = ZONE_LEN + 2;
+/// The most channels a zone holds (CHAN-35, decision 333); "no zone" has no limit.
+pub const ZONE_CAP: usize = ferrite_app::chan::ZONE_CAP as usize;
 /// CTCSS tones a channel may hold (TONE-15): 60.0 to 260.0 Hz, in 0.1 Hz.
 const CTCSS_MIN: u16 = 600;
 const CTCSS_MAX: u16 = 2600;
@@ -140,11 +145,13 @@ pub fn zone_record(name: &[u8], c: &ZoneCfg) -> Vec<u8> {
     s.0
 }
 
-/// A zone from its record (name and settings), as the radio's `apply` reads one.
+/// A zone from its record (name and settings), as the radio's `apply` reads one: the written form, or the read
+/// form with its channel count after (protocol 3; the count is the radio's, read only, so it is dropped here).
 pub fn zone_from_record(rec: &[u8]) -> Option<(Name, ZoneCfg)> {
-    if rec.len() != ZONE_LEN {
+    if rec.len() != ZONE_LEN && rec.len() != ZONE_READ_LEN {
         return None;
     }
+    let rec = &rec[..ZONE_LEN];
     let mut r = Rd { b: rec, n: 0 };
     let mut name = [0u8; 16];
     if !r.take(&mut name) {
@@ -234,7 +241,7 @@ pub fn parse_tone(w: &str) -> Result<u16, String> {
     Ok(t)
 }
 
-/// A channel as the table shows and edits it. `number` is as the radio shows it, 1-1000.
+/// A channel as the table shows and edits it. `number` is as the radio shows it, 1-4000.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChanView {
     pub number: u16,
@@ -253,8 +260,8 @@ pub struct ChanView {
     pub step: String,
     /// "Global" (the slot's level) or 0-9.
     pub squelch: String,
-    /// The zone's index (0-253), or None.
-    pub zone: Option<u8>,
+    /// The zone's index (0-511), or None.
+    pub zone: Option<u16>,
     pub busy: bool,
     pub reverse: bool,
     pub skip: bool,
@@ -499,7 +506,7 @@ impl ChanView {
         Ok(ChanView { pos: self.pos, ..ChanView::of(&self.channel()?) })
     }
 
-    /// A new channel at `number` (1-1000) on `rx`: the radio's VFO defaults, squelch Global (the slot's level).
+    /// A new channel at `number` (1-4000) on `rx`: the radio's VFO defaults, squelch Global (the slot's level).
     pub fn new(number: u16, rx: u32) -> Self {
         let cfg = SlotCfg { squelch: SQ_GLOBAL, ..DEFAULT_CFG };
         let c = Channel { num: number.saturating_sub(1), zone: NO_ZONE, rx, name: [0; 16], cfg, flags: 0, tones: 0 };
@@ -568,10 +575,10 @@ impl ChanView {
     }
 }
 
-/// A zone as the table shows and edits it. `number` is as the radio shows it, 1-254.
+/// A zone as the table shows and edits it. `number` is as the radio shows it, 1-512.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ZoneView {
-    pub number: u8,
+    pub number: u16,
     pub name: String,
     pub scan_all: bool,
     pub shown: bool,
@@ -580,13 +587,13 @@ pub struct ZoneView {
     pub resume: String,
     /// "Radio", or 1-254 seconds.
     pub dwell: String,
-    /// Priority channels, 1-1000.
+    /// Priority channels, 1-4000.
     pub pri1: Option<u16>,
     pub pri2: Option<u16>,
 }
 
 impl ZoneView {
-    pub fn of(index: u8, name: &[u8], c: &ZoneCfg) -> Self {
+    pub fn of(index: u16, name: &[u8], c: &ZoneCfg) -> Self {
         ZoneView {
             number: index + 1,
             name: String::from_utf8_lossy(name).into_owned(),
@@ -601,13 +608,16 @@ impl ZoneView {
     }
 
     /// A new zone at `number` as the radio makes one: shown in ◀▶, the radio's resume and dwell.
-    pub fn new(number: u8, name: &str) -> Self {
+    pub fn new(number: u16, name: &str) -> Self {
         Self::of(number - 1, name.as_bytes(), &ZoneCfg { shown: true, dwell: 255, ..ZoneCfg::default() })
     }
 
+    /// The radio's types, or what is wrong. An empty name is taken as read: a zone deleted on the radio before a later
+    /// one stays as an empty, unnamed record (CHAN-12, Appendix G), and a table holding it must still plan; writing
+    /// one is the radio's to refuse ("name: 1 to 16 printable characters"), which the plan's dry run shows.
     pub fn zone(&self) -> Result<(Name, ZoneCfg), String> {
         let name = self.name.trim_end();
-        if name.is_empty() || name.len() > 16 || !name.bytes().all(|b| (0x20..0x7F).contains(&b)) {
+        if name.len() > 16 || !name.bytes().all(|b| (0x20..0x7F).contains(&b)) {
             return Err("name: 1 to 16 printable ASCII characters".into());
         }
         let pri = |p: Option<u16>| match p {
@@ -624,7 +634,8 @@ impl ZoneView {
                 .trim()
                 .parse::<u8>()
                 .ok()
-                .filter(|d| (1..=254).contains(d))
+                // 0: what an unnamed (deleted) zone's empty record reads as; writing it is the radio's to refuse
+                .filter(|d| *d <= 254)
                 .ok_or("dwell: Radio or 1 to 254 s")?
         };
         let c = ZoneCfg {
@@ -654,6 +665,7 @@ pub fn choices() -> serde_json::Value {
         "dcs": ferrite_app::slot::DCS.iter().map(|&d| format!("{d:03o}")).collect::<Vec<_>>(),
         "maxChannels": MAX_CHANNELS,
         "maxZones": crate::radioside::MAX_ZONES,
+        "zoneCap": ZONE_CAP,
     })
 }
 
@@ -755,9 +767,9 @@ mod tests {
         assert_eq!(from_radio.len(), CHANNEL_LEN);
         assert_eq!(channel_from_record(&from_radio), Some(c));
         assert_eq!(
-            channel_from_record(&from_radio[..39]).map(|x| x.tones),
+            channel_from_record(&from_radio[..40]).map(|x| x.tones),
             Some(0),
-            "a writer without byte 40: Global"
+            "a writer without byte 41: Global"
         );
         assert_eq!(channel_from_record(&from_radio[..30]), None);
     }

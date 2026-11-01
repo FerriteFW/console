@@ -19,12 +19,12 @@ type Want = { name: string; rx: string; duplex?: string; offset?: string; tx_ton
 /** The numbers the import takes (the dialog's rule): after the highest when they fit, else the first free run, else the free ones from 1. */
 function numbersFor(used: number[], n: number): number[] {
   const u = new Set(used);
-  const fits = (s: number) => s + n - 1 <= 1000 && Array.from({ length: n }, (_, k) => s + k).every((k) => !u.has(k));
+  const fits = (s: number) => s + n - 1 <= 4000 && Array.from({ length: n }, (_, k) => s + k).every((k) => !u.has(k));
   const run = (s: number) => Array.from({ length: n }, (_, k) => s + k);
   const after = used.length ? Math.max(...used) + 1 : 1;
   if (fits(after)) return run(after);
-  for (let s = 1; s <= 1000; s++) if (fits(s)) return run(s);
-  return Array.from({ length: 1000 }, (_, k) => k + 1).filter((k) => !u.has(k)).slice(0, n);
+  for (let s = 1; s <= 4000; s++) if (fits(s)) return run(s);
+  return Array.from({ length: 4000 }, (_, k) => k + 1).filter((k) => !u.has(k)).slice(0, n);
 }
 const rangeText = (nums: number[]) => {
   const out: string[] = [];

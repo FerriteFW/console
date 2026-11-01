@@ -215,6 +215,11 @@ class Radio {
     return t;
   }
 
+  /** Firmware Update or Finish the update still holds this transport (the cable wasn't pulled or let go). */
+  holds(t: Transport): boolean {
+    return this.phase === "updating" && this.t === t;
+  }
+
   /** The update is done: the same cable, connected again as usual (HELLO, INFO, the faster rate). */
   async handBack(t: Transport) {
     if (this.phase !== "updating" || this.t !== t) return;

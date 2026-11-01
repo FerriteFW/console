@@ -162,7 +162,7 @@ class Nearby {
   mode = $state<"NFM" | "FM">("NFM");
   /** Airports: also the common airband frequencies (the fixed Airband set). */
   common = $state(false);
-  target = $state<Target>({ kind: "each", name: "Near me", existing: 0 });
+  target = $state<Target>({ kind: "each", name: "Near me", existing: 0, split: true });
   /** Licensed sites' sources on or off (Canada, the US): the map and the list. */
   layers = $state<Record<string, boolean>>({ tafl: true, fcc: true });
 
@@ -382,7 +382,7 @@ class Nearby {
       this.nCommon && !a.length ? "common airband frequencies" : "",
       r.length === 1 ? r[0].r.c : r.length ? `${r.length} repeaters` : "",
     ].filter(Boolean);
-    library.add($state.snapshot(this.items) as LibraryItem[], what.join(", "));
+    library.add($state.snapshot(this.items) as LibraryItem[], what.join(", "), this.target.split !== false);
     this.set(
       [...this.pickedSites.map((e) => e.key), ...a.flatMap((x) => x.freqs.map((q) => q.key)), ...r.flatMap((x) => x.freqs.map((q) => q.key))],
       false,

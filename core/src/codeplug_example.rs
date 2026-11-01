@@ -190,7 +190,7 @@ fn parts() -> Vec<(&'static str, String)> {
     // Saved before Radio Settings was read: no settings part (a part may be missing).
     let manifest = serde_json::to_string_pretty(&Manifest {
         format: "ferrite-codeplug",
-        version: 1,
+        version: 2,
         created: SAVED,
         console: "0.1.0",
         radio: Radio { callsign: "VA7IF", firmware: "0.8.2", build: "tx" },
@@ -299,19 +299,32 @@ fn record_layouts_as_documented() {
     assert_eq!(u16::from_le_bytes([z[22], z[23]]), 9, "priority 1: channel 10, 0-based");
     assert_eq!(u16::from_le_bytes([z[24], z[25]]), 0xFFFF, "priority 2: none");
     let c = crate::channels::channel_record(&chans[1]);
-    assert_eq!(c.len(), 40);
+    assert_eq!(c.len(), 41, "protocol 3: the zone is 2 bytes");
     assert_eq!(u16::from_le_bytes([c[0], c[1]]), 9, "number, 0-based");
-    assert_eq!(c[2], 1, "zone index");
-    assert_eq!(u32::from_le_bytes(c[3..7].try_into().unwrap()), 14_694_000, "RX, 10 Hz");
-    assert_eq!(&c[7..17], b"North hill");
-    assert_eq!(u16::from_le_bytes([c[25], c[26]]), 0, "RX tone: none");
-    assert_eq!(u16::from_le_bytes([c[27], c[28]]), 1000, "TX tone: 100.0 Hz in 0.1 Hz");
-    assert_eq!(i32::from_le_bytes(c[29..33].try_into().unwrap()), -60_000, "offset, 10 Hz");
-    assert_eq!(c[33], 1, "power: mid");
-    assert_eq!(c[35], 10, "squelch: Global");
+    assert_eq!(u16::from_le_bytes([c[2], c[3]]), 1, "zone index");
+    assert_eq!(u32::from_le_bytes(c[4..8].try_into().unwrap()), 14_694_000, "RX, 10 Hz");
+    assert_eq!(&c[8..18], b"North hill");
+    assert_eq!(u16::from_le_bytes([c[26], c[27]]), 0, "RX tone: none");
+    assert_eq!(u16::from_le_bytes([c[28], c[29]]), 1000, "TX tone: 100.0 Hz in 0.1 Hz");
+    assert_eq!(i32::from_le_bytes(c[30..34].try_into().unwrap()), -60_000, "offset, 10 Hz");
+    assert_eq!(c[34], 1, "power: mid");
+    assert_eq!(c[36], 10, "squelch: Global");
     let c3 = crate::channels::channel_record(&chans[2]);
-    assert_eq!(c3[2], 255, "no zone");
-    assert_eq!(c3[38], 1, "flags: skip");
+    assert_eq!(u16::from_le_bytes([c3[2], c3[3]]), 0xFFFF, "no zone");
+    assert_eq!(c3[39], 1, "flags: skip");
+}
+
+/// A version 1 file (before protocol 3: a one-byte zone, 40-byte records; `tests/fixtures/codeplug-v1/`, the
+/// example as Console wrote it until Nov 1, 2026) still opens, to the same set as today's.
+#[test]
+fn version_1_still_reads() {
+    let v1 = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codeplug-v1/channels.json");
+    let (old, b) = plan::restore(&std::fs::read_to_string(v1).unwrap()).unwrap();
+    assert_eq!(b.version, 1);
+    let (now, _) = plan::restore(&std::fs::read_to_string(dir().join("channels.json")).unwrap()).unwrap();
+    assert_eq!(old, Set { channels: now.channels.iter().map(|c| ChanView { pos: c.pos, ..c.clone() }).collect(), ..now.clone() });
+    assert_eq!(old.channels[2].zone, None, "255 was no zone");
+    assert_eq!(old.channels[1].zone, Some(1));
 }
 
 /// The PIN lock never goes in a codeplug (Alex, Oct 30): no key naming it anywhere in settings.json, its menu

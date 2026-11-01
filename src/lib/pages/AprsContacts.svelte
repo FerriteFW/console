@@ -90,7 +90,7 @@
       <input placeholder="Callsign-SSID" aria-label="Callsign" bind:value={call} maxlength="9" />
       <input placeholder="Name" aria-label="Name" bind:value={name} maxlength="12" />
       <button class="btn primary" disabled={!callOk(callUp) || full || !!c.busy}>Add or rename</button>
-      {#if full}<span class="dim">128 contacts: delete one first.</span>{/if}
+      {#if full}<span class="dim">{MAX} contacts: delete one first.</span>{/if}
     </form>
     <div class="pg-scroll">
       <table class="tbl" aria-label="Contacts">

@@ -13,6 +13,7 @@
   import FixedTab from "./FixedTab.svelte";
   import NearbyTab from "./NearbyTab.svelte";
   import { channels } from "../../channels.svelte";
+  import { P } from "../../core";
   import { airportSites, repeaterSites, sites } from "../../sites.svelte";
   import { CAT_ORDER, nearby, type Kind } from "../../nearby.svelte";
   import { CATEGORIES } from "../../sitedata";
@@ -56,7 +57,7 @@
     } else nearby.toggleKind(k);
   }
 
-  const room = $derived(1000 - channels.table.channels.length);
+  const room = $derived(P.limits.channels - channels.table.channels.length);
   const close = () => (library.open = false);
   const tuneMode = $derived(library.mode === "tune");
   async function tune(t: Tune) {

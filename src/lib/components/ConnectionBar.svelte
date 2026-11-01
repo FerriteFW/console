@@ -2,6 +2,7 @@
   import { radio } from "../radio.svelte";
   import { theme, type ThemeMode } from "../theme.svelte";
   import { firmware } from "../firmware.svelte";
+  import { migrate } from "../migrate.svelte";
   import type { TransportKind } from "../transport";
   import { bridgeEnabled, bridgeUrl } from "../transport/bridge";
   import { DEV_TOOLS } from "../devtools";
@@ -19,7 +20,7 @@
     if (radio.retrying && (radio.phase === "idle" || radio.phase === "connecting")) return { dot: "busy", text: "Radio lost: reconnecting…" };
     if (radio.phase === "connecting") return { dot: "busy", text: "Connecting…" };
     if (radio.phase === "pin") return { dot: "busy", text: "The radio asks for its PIN" };
-    if (radio.phase === "updating") return { dot: "busy", text: `Firmware Update holds ${radio.label}` };
+    if (radio.phase === "updating") return { dot: "busy", text: migrate.running ? `Finishing the update on ${radio.label}` : `Firmware Update holds ${radio.label}` };
     if (radio.phase === "connected")
       return radio.notAnswering
         ? { dot: "bad", text: `${radio.label}: the radio isn't answering` }
@@ -78,8 +79,8 @@
     {:else}
       <button
         class="btn"
-        disabled={firmware.running}
-        title={firmware.running ? "Firmware Update is using the cable: wait until it is done" : undefined}
+        disabled={firmware.running || migrate.running}
+        title={firmware.running || migrate.running ? `${migrate.running ? "Finish the update" : "Firmware Update"} is using the cable: wait until it is done` : undefined}
         onclick={() => radio.disconnect()}>Disconnect</button
       >
     {/if}

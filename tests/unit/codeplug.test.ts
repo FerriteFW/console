@@ -83,8 +83,8 @@ test("the lists' parts refused: another format, a newer version, the wrong shape
   assert.throws(() => readQuick(JSON.stringify({ format: "ferrite-console-quick", version: 2, messages: [] })), /newer/);
   assert.throws(() => readQuick(JSON.stringify({ format: "ferrite-console-quick", version: 1, messages: [{ own: true, text: "x" }] })), /the radio has 9/);
   assert.throws(() => readWaypoints(JSON.stringify({ format: "ferrite-console-waypoints", version: 1, waypoints: [{ name: "x", lat: "1" }] })), /\{name, lat, lon, source\}/);
-  const many = Array.from({ length: 257 }, () => ({ name: "x", lat: 1, lon: 1, source: "link" }));
-  assert.throws(() => readWaypoints(JSON.stringify({ format: "ferrite-console-waypoints", version: 1, waypoints: many })), /keeps 256/);
+  const many = Array.from({ length: 2033 }, () => ({ name: "x", lat: 1, lon: 1, source: "link" }));
+  assert.throws(() => readWaypoints(JSON.stringify({ format: "ferrite-console-waypoints", version: 1, waypoints: many })), /keeps 2032/);
   assert.throws(() => readDtmf(JSON.stringify({ format: "ferrite-console-dtmf", version: 1, memories: [{ number: 17, symbols: "1", name: "" }] })), /1-16/);
   const twice = [{ number: 3, symbols: "1", name: "" }, { number: 3, symbols: "2", name: "" }];
   assert.throws(() => readDtmf(JSON.stringify({ format: "ferrite-console-dtmf", version: 1, memories: twice })), /twice/);
@@ -160,7 +160,7 @@ test("refused: not a zip, not a codeplug, a newer version, a listed part missing
   await assert.rejects(readCodeplug(await zip([{ name: "manifest.json", data: "{" }])), /isn't JSON/);
   await assert.rejects(
     readCodeplug(await zip([{ name: "manifest.json", data: JSON.stringify({ ...m, version: VERSION + 1 }) }])),
-    /newer codeplug \(format version 2\) than this Console reads \(version 1\): update Ferrite Console/,
+    /newer codeplug \(format version 3\) than this Console reads \(version 2\): update Ferrite Console/,
   );
   await assert.rejects(readCodeplug(await zip([{ name: "manifest.json", data: JSON.stringify(m) }])), /damaged codeplug: the manifest lists channels but there is no channels\.json/);
   // A damaged zip is refused by the zip reader's checks.
@@ -179,4 +179,16 @@ test("a part this Console doesn't know (added later in the same version) is left
   ]));
   const back = await readCodeplug(file);
   assert.deepEqual(Object.keys(back.parts), ["contacts"]);
+});
+
+test("a version 1 codeplug (before protocol 3) still opens", async () => {
+  // core/tests/fixtures/codeplug-v1/: the example's manifest and channels.json as Console wrote them until Nov 1, 2026;
+  // core's codeplug_example::version_1_still_reads checks the channels load as today's.
+  const v1 = (n: string) => readFileSync(new URL(`../../core/tests/fixtures/codeplug-v1/${n}`, import.meta.url), "utf8");
+  const m: Manifest = JSON.parse(v1("manifest.json"));
+  assert.equal(m.version, 1);
+  const file = await bytes(await buildCodeplug({ channels: v1("channels.json") }, { ...m, parts: ["channels"] }));
+  const back = await readCodeplug(file);
+  assert.equal(back.manifest.version, 1);
+  assert.equal(JSON.parse(back.parts.channels!).version, 1);
 });

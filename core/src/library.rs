@@ -12,7 +12,7 @@
 //! Also here: places as typed (`lat,lon`, a grid square, an NMEA GGA sentence or the terminal's answers),
 //! distances, airport channel names and licensees' organization names and groups.
 
-use crate::channels::{mhz_text, ChanView, ZoneView};
+use crate::channels::{mhz_text, ChanView, ZoneView, ZONE_CAP};
 use crate::plan::{check_channel, Set};
 use crate::radioside::MAX_ZONES;
 use ferrite_app::chan::MAX_CHANNELS;
@@ -98,9 +98,15 @@ fn airband_833(rx: u32) -> bool {
     (10_800_000..13_700_000).contains(&rx) && rx.is_multiple_of(500) && !rx.is_multiple_of(2500)
 }
 
-/// The entries as channels and zones for `table`. Numbers are the first free ones; zones match by name.
-pub fn add(items: &[Item], table: &Set) -> Added {
+/// The entries as channels and zones for `table`. Numbers are the first free ones; zones match by name. A zone holds
+/// 256 channels at most (CHAN-35): past that, with `split` the rest go on in new zones named " 2", " 3" and so on
+/// (a copy of the zone's settings); without it they are skipped, said so.
+pub fn add(items: &[Item], table: &Set, split: bool) -> Added {
     let mut out = Added::default();
+    let mut counts = crate::zonecap::counts(table);
+    // A full zone's channels go on here (its latest part).
+    let mut spill: std::collections::BTreeMap<u16, u16> = std::collections::BTreeMap::new();
+    let mut full_noted: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
     let mut used: std::collections::BTreeSet<u16> = table.channels.iter().map(|c| c.number).collect();
     let mut zone_names: Vec<String> = table.zones.iter().map(|z| z.name.clone()).collect();
     // A set goes in one run of free numbers when there is one (the first that fits), else into the gaps.
@@ -120,11 +126,12 @@ pub fn add(items: &[Item], table: &Set) -> Added {
         } else {
             let zn = clean_zone_name(&it.zone);
             match zone_names.iter().position(|z| z.eq_ignore_ascii_case(&zn)) {
-                Some(i) => Some(i as u8),
+                Some(i) => Some(i as u16),
                 None if zone_names.len() < MAX_ZONES => {
-                    let n = zone_names.len() as u8 + 1;
+                    let n = zone_names.len() as u16 + 1;
                     out.zones.push(ZoneView::new(n, &zn));
                     zone_names.push(zn);
+                    counts.push(0);
                     Some(n - 1)
                 }
                 None => {
@@ -181,8 +188,55 @@ pub fn add(items: &[Item], table: &Set) -> Added {
             full = true;
             continue;
         }
+        // CHAN-35: the zone's 257th goes on in its next part, or is skipped.
+        if let Some(z0) = v.zone {
+            let mut z = *spill.get(&z0).unwrap_or(&z0);
+            if counts.get(z as usize).is_some_and(|&n| n >= ZONE_CAP) {
+                let base = zone_names[z0 as usize].clone();
+                if !split {
+                    if full_noted.insert(z0) {
+                        out.notes.push(format!("zone {base}: full ({ZONE_CAP} channels at most): the rest for it skipped"));
+                    }
+                    out.skipped += 1;
+                    continue;
+                }
+                if zone_names.len() >= MAX_ZONES {
+                    if full_noted.insert(z0) {
+                        out.notes.push(format!("zone {base}: full ({ZONE_CAP} channels at most) and no zone left (the radio has {MAX_ZONES}): the rest with no zone"));
+                    }
+                    v.zone = None;
+                } else {
+                    let mut k = 2;
+                    let name = loop {
+                        let n = crate::zonecap::part_name(&base, k);
+                        k += 1;
+                        if !zone_names.iter().any(|x| x.eq_ignore_ascii_case(&n)) {
+                            break n;
+                        }
+                    };
+                    let n = zone_names.len() as u16 + 1;
+                    // A copy of the zone's settings (one of the table's, or one this add made), without its priority channels.
+                    let src = table.zones.get(z0 as usize).cloned().or_else(|| {
+                        out.zones.iter().find(|x| x.number == z0 + 1).cloned()
+                    });
+                    let zv = match src {
+                        Some(src) => ZoneView { number: n, name: name.clone(), pri1: None, pri2: None, ..src },
+                        None => ZoneView::new(n, &name),
+                    };
+                    out.zones.push(zv);
+                    out.notes.push(format!("zone {base}: full ({ZONE_CAP} channels at most): the rest go on in a new zone, {name}"));
+                    zone_names.push(name);
+                    counts.push(0);
+                    z = n - 1;
+                    spill.insert(z0, z);
+                    v.zone = Some(z);
+                }
+            } else {
+                v.zone = Some(z);
+            }
+        }
         v.number = next;
-        let zones = (zone_names.len()) as u8;
+        let zones = zone_names.len() as u16;
         let v = match check_channel(&v, zones) {
             None => v,
             Some(e) if !v.rx_only => {
@@ -209,6 +263,9 @@ pub fn add(items: &[Item], table: &Set) -> Added {
         let v = normal(&v);
         have.insert(key(&v));
         used.insert(v.number);
+        if let Some(n) = v.zone.and_then(|z| counts.get_mut(z as usize)) {
+            *n += 1;
+        }
         out.channels.push(v);
     }
     out
@@ -647,7 +704,7 @@ mod tests {
             item("FRS 2", 462.5875, None, "NFM", "frs"),
             item("MURS 1", 151.82, None, "NFM", "Local"),
         ];
-        let a = add(&items, &table());
+        let a = add(&items, &table(), true);
         // One run that holds all three: 4-6 (2 is a gap of one).
         assert_eq!(a.channels.iter().map(|c| c.number).collect::<Vec<_>>(), [4, 5, 6], "{:?}", a.notes);
         assert_eq!(a.zones.len(), 1);
@@ -665,7 +722,7 @@ mod tests {
     #[test]
     fn duplex() {
         let items = [item("GMRS 15R", 462.55, Some(467.55), "NFM", ""), item("Split", 145.8, Some(437.8), "FM", "")];
-        let a = add(&items, &Set::default());
+        let a = add(&items, &Set::default(), true);
         let s = |i: usize| (a.channels[i].duplex.as_str(), a.channels[i].offset.as_str());
         assert_eq!(s(0), ("+", "5.00000"), "{:?}", a.notes);
         assert_eq!(s(1), ("split", "437.80000"));
@@ -679,7 +736,7 @@ mod tests {
         a.rx_tone = Some("off".into());
         let mut b = item("VE7DCS", 443.2, Some(448.2), "FM", "Repeaters");
         b.tone = Some("D023N".into());
-        let got = add(&[a, b], &Set::default());
+        let got = add(&[a, b], &Set::default(), true);
         assert!(got.notes.is_empty(), "{:?}", got.notes);
         let c = |i: usize| {
             let v = &got.channels[i];
@@ -696,7 +753,7 @@ mod tests {
         it.rx_only = true;
         let mut b = it.clone();
         b.rx = 118.005;
-        let a = add(&[it, b], &Set::default());
+        let a = add(&[it, b], &Set::default(), true);
         assert!(a.notes.is_empty(), "{:?}", a.notes);
         assert_eq!(a.channels.len(), 2);
         assert!(a.channels[0].rx_only && a.channels[0].mode == "AM");
@@ -708,7 +765,7 @@ mod tests {
     #[test]
     fn refusals() {
         let a =
-            add(&[item("Too high", 700.0, None, "FM", ""), item("Bad mode", 146.5, None, "WFM", "")], &Set::default());
+            add(&[item("Too high", 700.0, None, "FM", ""), item("Bad mode", 146.5, None, "WFM", "")], &Set::default(), true);
         assert_eq!((a.channels.len(), a.skipped), (0, 2));
         assert!(a.notes[0].contains("Too high") && a.notes[0].contains("rx"), "{:?}", a.notes);
         assert!(a.notes[1].contains("mode"), "{:?}", a.notes);
@@ -722,19 +779,42 @@ mod tests {
             item("A", 146.94, None, "FM", ""),
             item("B", 146.94, None, "FM", ""),
         ];
-        let a = add(&items, &table());
+        let a = add(&items, &table(), true);
         assert_eq!(a.channels.len(), 1, "{:?} {:?}", a.notes, a.channels);
         assert_eq!(a.skipped, 2);
     }
 
-    /// 1000 channels at most: the rest skipped with a note.
+    /// 4000 channels at most: the rest skipped with a note.
     #[test]
     fn full() {
-        let items: Vec<Item> = (0..1005).map(|i| item("x", 440.0 + i as f64 * 0.0125, None, "NFM", "")).collect();
-        let a = add(&items, &Set::default());
-        assert_eq!(a.channels.len(), 1000);
+        let items: Vec<Item> = (0..4005).map(|i| item("x", 420.0 + i as f64 * 0.0125, None, "NFM", "")).collect();
+        let a = add(&items, &Set::default(), true);
+        assert_eq!(a.channels.len(), 4000);
         assert_eq!(a.skipped, 5);
-        assert!(a.notes.iter().any(|n| n.contains("1000 channels")));
+        assert!(a.notes.iter().any(|n| n.contains("4000 channels")));
+    }
+
+    /// CHAN-35: a zone's 257th goes on in "<zone> 2" (its settings copied), or is skipped without `split`.
+    #[test]
+    fn zone_cap() {
+        let items: Vec<Item> = (0..300).map(|i| item("r", 440.0 + i as f64 * 0.0125, None, "NFM", "Repeaters")).collect();
+        let a = add(&items, &Set::default(), true);
+        assert_eq!(a.channels.len(), 300);
+        let names: Vec<&str> = a.zones.iter().map(|z| z.name.as_str()).collect();
+        assert_eq!(names, ["Repeaters", "Repeaters 2"]);
+        let per = |k: u16| a.channels.iter().filter(|c| c.zone == Some(k)).count();
+        assert_eq!((per(0), per(1)), (256, 44));
+        assert!(a.notes.iter().any(|n| n.contains("new zone, Repeaters 2")), "{:?}", a.notes);
+        let a = add(&items, &Set::default(), false);
+        assert_eq!((a.channels.len(), a.skipped, a.zones.len()), (256, 44, 1));
+        // Into a zone the table already fills partly.
+        let t = Set {
+            zones: vec![ZoneView::new(1, "Repeaters")],
+            channels: (1..=250).map(|n| ChanView { zone: Some(0), ..ChanView::new(n, 14_400_000 + n as u32 * 1250) }).collect(),
+        };
+        let a = add(&items[..10], &t, true);
+        assert_eq!(a.channels.iter().filter(|c| c.zone == Some(0)).count(), 6);
+        assert_eq!(a.zones.iter().map(|z| z.name.as_str()).collect::<Vec<_>>(), ["Repeaters 2"]);
     }
 
     /// No run long enough: the gaps, lowest first.
@@ -742,11 +822,11 @@ mod tests {
     fn gaps() {
         let t = Set {
             zones: vec![],
-            channels: (1..=998).filter(|&n| n != 5).map(|n| ChanView::new(n, 14_400_000 + n as u32 * 1250)).collect(),
+            channels: (1..=3998).filter(|&n| n != 5).map(|n| ChanView::new(n, 14_400_000 + n as u32 * 1250)).collect(),
         };
         let items: Vec<Item> = (0..3).map(|i| item("g", 446.0 + i as f64 * 0.0125, None, "NFM", "")).collect();
-        let a = add(&items, &t);
-        assert_eq!(a.channels.iter().map(|c| c.number).collect::<Vec<_>>(), [5, 999, 1000], "{:?}", a.notes);
+        let a = add(&items, &t, true);
+        assert_eq!(a.channels.iter().map(|c| c.number).collect::<Vec<_>>(), [5, 3999, 4000], "{:?}", a.notes);
     }
 
     #[test]
@@ -825,7 +905,7 @@ mod tests {
         assert!(sets.len() >= 8);
         for s in &sets {
             let picks: Vec<usize> = (0..s.frequencies.len()).collect();
-            let a = add(&fixed_items(s, &picks, &s.name), &Set::default());
+            let a = add(&fixed_items(s, &picks, &s.name), &Set::default(), true);
             let rx_only = a.channels.iter().filter(|c| c.rx_only).count();
             println!(
                 "{}: {} added, {} skipped, {} RX only ({} by ferrite)",
@@ -847,12 +927,12 @@ mod tests {
             assert_eq!(a.zones.len(), 1);
         }
         let wx = sets.iter().find(|s| s.name == "Weather").unwrap();
-        let a = add(&fixed_items(wx, &[0], "WX"), &Set::default());
+        let a = add(&fixed_items(wx, &[0], "WX"), &Set::default(), true);
         assert!(a.channels[0].rx_only && a.channels[0].mode == "FM");
         // Airband: AM and RX only, every channel.
         let air = sets.iter().find(|s| s.name == "Airband").unwrap();
         let picks: Vec<usize> = (0..air.frequencies.len()).collect();
-        let a = add(&fixed_items(air, &picks, "Airband"), &Set::default());
+        let a = add(&fixed_items(air, &picks, "Airband"), &Set::default(), true);
         assert_eq!(a.channels.len(), air.frequencies.len());
         assert!(a.channels.iter().all(|c| c.rx_only && c.mode == "AM"), "{:?}", a.channels);
     }

@@ -17,6 +17,8 @@
   import Restore from "./lib/pages/Restore.svelte";
   import { install } from "./lib/install.svelte";
   import { firmware } from "./lib/firmware.svelte";
+  import { migrate } from "./lib/migrate.svelte";
+  import FinishUpdate from "./lib/components/FinishUpdate.svelte";
   import { settings } from "./lib/settings.svelte";
   import { channels } from "./lib/channels.svelte";
   import { library } from "./lib/library.svelte";
@@ -86,6 +88,13 @@
   const hrefOf = (x: Section) => `#/${x.tabs ? x.tabs[0].id : x.id}`;
 
   let navOpen = $state(false);
+  /** Finish the update's dialog (UPD-16). */
+  let finishing = $state(false);
+  // Each connection: whether Console holds a copy of this radio's old data from a try that was cut after writing
+  // (the radio then says the layouts are the same until it restarts, LINK-61: the banner still shows).
+  $effect(() => {
+    if (radio.phase === "connected" && !migrate.running) void migrate.lookKept();
+  });
   let coreError = $state("");
   const page = $derived(all.find((p) => p.id === route.id)?.id ?? "live");
   const section = $derived(sectionOf(page));
@@ -110,7 +119,7 @@
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts, lists };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts, lists, migrate };
   /** The sidebar's "N unwritten": the edits each section holds that aren't on the radio yet. */
   const unwritten = (id: string) =>
     id === "channels" ? channels.pending : id === "settings" ? settings.dirty.size + lists.dtmf.pending : id === "aprs" ? lists.quick.pending + lists.waypoints.pending : 0;
@@ -179,6 +188,14 @@
       <ConnectionBar />
     </header>
     {#if coreError}<div class="banner">{coreError}</div>{/if}
+    {#if (migrate.needed && radio.phase === "connected" && !firmware.running) || migrate.running}
+      <!-- UPD-16: the radio's data waits in the old layout (D25 on the radio); LINK-62's move from here. -->
+      <div class="banner finish" role="alert" aria-label="Finish the update">
+        <span>The radio's channels and settings are waiting in the old layout. Console moves them to the new one (a backup first).</span>
+        <button class="btn primary" onclick={() => (finishing = true)}>Finish the update…</button>
+      </div>
+    {/if}
+    {#if finishing}<FinishUpdate onclose={() => (finishing = false)} />{/if}
     <main>
       {#if section?.tabs}
         <div class="tabs" role="tablist" aria-label={section.name}>
@@ -356,6 +373,15 @@
     border: 1px solid var(--red);
     border-radius: 8px;
     color: var(--red);
+  }
+  .banner.finish {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    border-color: var(--amber);
+    color: var(--text);
   }
   @media (max-width: 860px) {
     .shell {

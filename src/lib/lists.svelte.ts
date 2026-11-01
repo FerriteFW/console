@@ -22,7 +22,7 @@ import {
   type Waypoint,
 } from "./core";
 import { download, stamp } from "./channels.svelte";
-import { dtmfJson, quickJson, readDtmf, readQuick, readWaypoints, waypointsJson } from "./codeplug";
+import { dtmfJson, quickJson, readDtmf, readQuick, readWaypoints, WAYPOINTS_MAX, waypointsJson } from "./codeplug";
 import { radio } from "./radio.svelte";
 
 export type ListField = { field: string; from: string; to: string };
@@ -391,12 +391,12 @@ const bare = (w: Waypoint): Waypoint => ({ name: w.name, lat: w.lat, lon: w.lon,
 export const degrees = (w: Waypoint): [number, number] => [w.lat / 1e7, w.lon / 1e7];
 export const SOURCE_WORDS: Record<string, string> = { marked: "Marked on the radio", aprs: "From an APRS station", link: "From Console", grid: "From a grid square" };
 
-/** Waypoints (GPS-10, LINK-55): up to 256, newest first; added here they go on top, as the radio adds them. */
+/** Waypoints (GPS-10, LINK-55): up to 2,032 (layout 3), newest first; added here they go on top, as the radio adds them. */
 class Waypoints extends ListEditor<WaypointItem> {
   readonly key = "waypoints";
   readonly noun = "waypoints";
-  readonly end = 256;
-  readonly max = 256;
+  readonly end = WAYPOINTS_MAX;
+  readonly max = WAYPOINTS_MAX;
   what() {
     return P.what.WAYPOINT;
   }

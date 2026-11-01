@@ -23,11 +23,14 @@
 //! - [`log`]: the event log (`LOG_READ`, LINK-42) for the Activity Log.
 //! - [`lists`]: the quick messages, waypoints and DTMF memories over the link (LINK-54 – LINK-56).
 //! - [`liveview`]: Live View from the radio's compact UI events (LINK-47, LINK-48), for Bluetooth.
+//! - [`migrate`]: an update's move of the radio's data to another SPI flash layout (LINK-59 – LINK-62): the PC's
+//!   copy, layout 2 to 3, and the raw writes in their safe order.
 //! - [`firmware`]: Firmware Update: the `.btf` checks and the stock bootloader's frames (tools/btf.py, flash.py).
 //! - [`install`]: the Install page: the reader backup (fdump), the SSB patch, back to stock (`STOCK_RESTORE`).
 //! - [`signature`]: release images' minisign signatures, checked with Ferrite's public key.
 //! - [`demo`]: a demo radio answering from memory, for trying Console without a radio.
 //! - [`timing`]: the reference client's time-outs and pacing, in one place.
+//! - [`zonecap`]: a zone holds 256 channels at most (CHAN-35): the counts, the refusal, and splitting a long list.
 
 pub mod answers;
 pub mod aprs;
@@ -46,6 +49,7 @@ pub mod library;
 pub mod lists;
 pub mod liveview;
 pub mod log;
+pub mod migrate;
 pub mod plan;
 pub mod presets;
 pub mod radioside;
@@ -56,6 +60,7 @@ pub mod signature;
 pub mod timing;
 pub mod ui;
 pub mod uid;
+pub mod zonecap;
 
 /// The protocol numbers, re-exported from ferrite so callers don't need a second dependency.
 pub use ferrite_core::link;

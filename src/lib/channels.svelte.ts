@@ -30,6 +30,7 @@ import {
   restoreFile,
   settingsHome,
   writePlan,
+  zoneSplit,
   type Channel,
   type ChannelSet,
   type ChirpImport,
@@ -44,7 +45,7 @@ import { radio } from "./radio.svelte";
 
 /** A read's progress; total 0 is an indeterminate bar (how much is to come isn't known yet). */
 export type Progress = { label: string; done: number; total: number };
-/** CHAN-17: the radio's home channel (1-1000), null for none, undefined when not known (not read: a demo radio). */
+/** CHAN-17: the radio's home channel (1-4000), null for none, undefined when not known (not read: a demo radio). */
 export type Home = number | null | undefined;
 /** The home channel a write sets (`home N` on the terminal after the records: the settings record isn't the table's). */
 export type HomeOp = { from: number | null; to: number | null };
@@ -167,6 +168,18 @@ class Channels {
     return { changed, deleted, zones, zonesDeleted, presets, presetsDeleted, home, count, any: count > 0 };
   });
 
+  /** CHAN-35: the table's zones (indices) holding their 256 channels: the editors mark them and step over them. */
+  #full = $derived.by(() => {
+    const cap = P?.limits?.zoneCap ?? 256;
+    const n = new Map<number, number>();
+    for (const c of this.table.channels) if (c.zone !== null) n.set(c.zone, (n.get(c.zone) ?? 0) + 1);
+    return new Set([...n].filter(([, k]) => k >= cap).map(([z]) => z));
+  });
+
+  get fullZones(): Set<number> {
+    return this.#full;
+  }
+
   /** Whether the table's home channel differs from the one read (only when both are known). */
   get homeChanged() {
     return this.home !== undefined && this.baseHome !== undefined && this.home !== this.baseHome;
@@ -235,11 +248,12 @@ class Channels {
           })
         : new Map<number, Uint8Array>();
       this.progress = { label: "Reading channels…", done: 0, total: info.channels || 0 };
-      const cmap = await link.readMany(CHANNEL, 0, 1000, (at, got) => {
+      const max = P.limits.channels;
+      const cmap = await link.readMany(CHANNEL, 0, max, (at, got) => {
         // By count (INFO's channels); by number only when the radio didn't say how many.
         this.progress = info.channels
           ? { label: `Reading channels: ${got} of ${info.channels}`, done: got, total: info.channels }
-          : { label: `Reading channels: at ${Math.min(at, 1000)} of 1000`, done: at, total: 1000 };
+          : { label: `Reading channels: at ${Math.min(at, max)} of ${max}`, done: at, total: max };
       });
       const zones: Uint8Array[] = [];
       for (let i = 0; i < info.zones; i++) {
@@ -255,9 +269,9 @@ class Channels {
       const canPos = (link.caps & P.caps.POSITION) !== 0;
       if (canPos) {
         this.progress = { label: "Reading positions…", done: 0, total: 0 };
-        const pmap = await link.readMany(POSITION, 0, 1000, (at, got) => {
+        const pmap = await link.readMany(POSITION, 0, max, (at, got) => {
           // How many have one isn't known before the end: the count so far, the bar by channel number.
-          this.progress = { label: `Reading positions: ${got}`, done: Math.min(at, 1000), total: 1000 };
+          this.progress = { label: `Reading positions: ${got}`, done: Math.min(at, max), total: max };
         });
         for (const c of set.channels) {
           const r = pmap.get(c.number - 1);
@@ -372,10 +386,13 @@ class Channels {
     this.error = "";
     try {
       const r = restoreFile(text);
+      // CHAN-35: a zone holds 256 channels; a file from before (layout 2 had no limit) has its long zones split as
+      // the radio's own update splits them, said in the notes (undo puts the table back).
+      const split = zoneSplit(r.set);
       this.remember();
-      this.table = r.set;
+      this.table = split.set;
       this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})`;
-      this.notes = [];
+      this.notes = split.notes;
       return true;
     } catch (e) {
       this.error = `${name}: ${(e as Error).message}`;
@@ -521,12 +538,34 @@ class Channels {
     }
   }
 
-  /** The import into the table: by number over what is there, or replacing every channel. */
-  applyImport(replace: boolean) {
+  /** The import into the table: by number over what is there, or replacing every channel. `split`: zones the import
+   *  takes past 256 channels (CHAN-35) are split over new zones (" 2", " 3"), said in the notes. */
+  applyImport(replace: boolean, split = true) {
     const imp = this.imported;
     if (!imp) return;
     this.remember();
-    const byNum = new Map((replace ? [] : this.table.channels).map((c) => [c.number, c]));
+    this.table.channels = this.merged(replace);
+    this.source = `${imp.channels.length} channels imported from ${imp.file}${replace ? " (replacing all)" : ""}`;
+    this.notes = imp.notes;
+    if (split) {
+      const r = zoneSplit($state.snapshot(this.table) as ChannelSet);
+      if (r.notes.length) {
+        this.table = r.set;
+        this.notes = [...this.notes, ...r.notes];
+      }
+    }
+    this.imported = null;
+  }
+
+  /** The table as the import would leave it (by number, or replacing every channel), before any split. */
+  importPreview(replace: boolean): ChannelSet {
+    return { zones: $state.snapshot(this.table.zones) as Zone[], channels: this.merged(replace) };
+  }
+
+  private merged(replace: boolean): Channel[] {
+    const imp = this.imported;
+    if (!imp) return this.table.channels;
+    const byNum = new Map(((replace ? [] : $state.snapshot(this.table.channels)) as Channel[]).map((c) => [c.number, c]));
     for (const c of imp.channels) {
       // Merge: what CHIRP's columns can't hold stays as the table had it (an export and import changes nothing).
       const was = byNum.get(c.number);
@@ -537,20 +576,18 @@ class Channels {
           : c,
       );
     }
-    this.table.channels = [...byNum.values()].sort((a, b) => a.number - b.number);
-    this.source = `${imp.channels.length} channels imported from ${imp.file}${replace ? " (replacing all)" : ""}`;
-    this.notes = imp.notes;
-    this.imported = null;
+    return [...byNum.values()].sort((a, b) => a.number - b.number);
   }
 
   /** The import as new channels in a new zone (the core numbered them: `chirpNewZone`). */
   applyImportNewZone(nz: ChirpNewZone) {
     const imp = this.imported;
-    if (!imp || !nz.zone || nz.room || nz.name_error) return;
+    if (!imp || !nz.zones.length || nz.room || nz.name_error) return;
     this.remember();
-    this.table.zones = [...this.table.zones, nz.zone];
+    this.table.zones = [...this.table.zones, ...nz.zones];
     this.table.channels = [...this.table.channels, ...nz.channels].sort((a, b) => a.number - b.number);
-    this.source = `${nz.channels.length} channels imported from ${imp.file} as ${nz.numbers} in new zone "${nz.zone.name}"`;
+    const where = nz.zones.length === 1 ? `new zone "${nz.zones[0].name}"` : `${nz.zones.length} new zones ("${nz.zones[0].name}" to "${nz.zones[nz.zones.length - 1].name}", ${P.limits.zoneCap} a zone)`;
+    this.source = `${nz.channels.length} channels imported from ${imp.file} as ${nz.numbers} in ${where}`;
     this.notes = imp.notes;
     this.imported = null;
   }
@@ -648,6 +685,14 @@ class Channels {
   edit<K extends keyof Channel>(number: number, k: K, v: Channel[K]) {
     const c = this.table.channels.find((x) => x.number === number);
     if (!c) return;
+    if (k === "zone" && v !== c.zone) {
+      // CHAN-35: not into a full zone.
+      const why = this.zoneFull(v as number | null, [number]);
+      if (why) {
+        this.error = why;
+        return;
+      }
+    }
     const next = { ...($state.snapshot(c) as Channel), [k]: v };
     let out = next;
     try {
@@ -673,8 +718,23 @@ class Channels {
   }
 
   /** One change to several channels (the bulk bar), each through the core's normalising as a row edit is; one undo. */
-  setMany(numbers: Iterable<number>, patch: Partial<Channel>) {
-    const want = new Set(numbers);
+  setMany(numbers: Iterable<number>, patch: Partial<Channel>): string {
+    let want = new Set(numbers);
+    let note = "";
+    if (patch.zone !== undefined && patch.zone !== null) {
+      // CHAN-35: as many as the zone has room for, in number order; the rest stay where they are.
+      const z = patch.zone;
+      const there = this.table.channels.filter((c) => c.zone === z).length;
+      const entering = this.table.channels.filter((c) => want.has(c.number) && c.zone !== z).map((c) => c.number);
+      const room = Math.max(0, P.limits.zoneCap - there);
+      if (entering.length > room) {
+        const keep = new Set(entering.slice(0, room));
+        want = new Set([...want].filter((n) => keep.has(n) || this.table.channels.some((c) => c.number === n && c.zone === z)));
+        note = `${this.zoneLabel(z)} is full (${P.limits.zoneCap} channels at most): moved ${room} of ${entering.length}.`;
+        this.error = note;
+        if (!room) return note;
+      }
+    }
     this.remember();
     this.table.channels = this.table.channels.map((c) => {
       if (!want.has(c.number)) return c;
@@ -685,13 +745,36 @@ class Channels {
         return next; // kept as set: the row's marker says what is wrong
       }
     });
+    return note;
+  }
+
+  /** A zone's name as the refusals say it: "Zone 3 Repeaters". */
+  private zoneLabel(z: number) {
+    const v = this.table.zones[z];
+    return `Zone ${z + 1}${v ? ` ${v.name}` : ""}`;
+  }
+
+  /** CHAN-35: why channels `numbers` can't go into zone `zone` (index; null: no zone, never full), or "". */
+  zoneFull(zone: number | null, numbers: number[] = []): string {
+    if (zone === null) return "";
+    const moving = new Set(numbers);
+    const there = this.table.channels.filter((c) => c.zone === zone && !moving.has(c.number)).length;
+    const entering = this.table.channels.filter((c) => moving.has(c.number)).length;
+    return there + entering > P.limits.zoneCap ? `${this.zoneLabel(zone)} is full (${P.limits.zoneCap} channels at most).` : "";
+  }
+
+  /** Channels in each zone of the table, by index (the editors mark a full zone). */
+  zoneCounts(): number[] {
+    const n = this.table.zones.map(() => 0);
+    for (const c of this.table.channels) if (c.zone !== null && c.zone < n.length) n[c.zone]++;
+    return n;
   }
 
   addChannel(): number | null {
     const used = new Set(this.table.channels.map((c) => c.number));
     let n = 1;
     while (used.has(n)) n++;
-    if (n > 1000) return null;
+    if (n > P.limits.channels) return null;
     this.remember();
     this.table.channels = [...this.table.channels, newChannel(n, "146.52")].sort((a, b) => a.number - b.number);
     return n;
@@ -709,7 +792,7 @@ class Channels {
 
   /** A channel to another number (free ones only). */
   renumber(from: number, to: number): string {
-    if (!(to >= 1 && to <= 1000)) return "Channels are 1 to 1000.";
+    if (!(to >= 1 && to <= P.limits.channels)) return `Channels are 1 to ${P.limits.channels}.`;
     if (this.table.channels.some((c) => c.number === to)) return `Channel ${to} is in use.`;
     const c = this.table.channels.find((x) => x.number === from);
     if (!c) return "";
@@ -742,14 +825,15 @@ class Channels {
     this.table.channels.sort((x, y) => x.number - y.number);
   }
 
-  /** Channels into a zone (its index; null for no zone): a channel is in one zone at most, so this moves it. */
-  moveToZone(numbers: Iterable<number>, zone: number | null) {
-    this.setMany(numbers, { zone });
+  /** Channels into a zone (its index; null for no zone): a channel is in one zone at most, so this moves it. A zone
+   *  holds 256 (CHAN-35): as many as fit go, in number order; the refusal's words, or "" when all went. */
+  moveToZone(numbers: Iterable<number>, zone: number | null): string {
+    return this.setMany(numbers, { zone });
   }
 
   /** A new zone at the end (zones are numbered in order), named `name` (checked as the radio would): "" when added,
    *  else why not. */
-  addZone(name?: string, max = 254): string {
+  addZone(name?: string, max = P.limits.zones): string {
     const n = this.table.zones.length + 1;
     if (n > max) return `At most ${max} zones.`;
     let z = newZone(n, name ?? `Zone ${n}`);
@@ -790,7 +874,7 @@ class Channels {
     this.source = this.base ? "Changes discarded: the table as read" : "";
   }
 
-  // ---- unwritten edits kept across visits (IndexedDB: the table can be 1000 channels) ----
+  // ---- unwritten edits kept across visits (IndexedDB: the table can be 4000 channels) ----
 
   /** The last visit's unwritten edits back into the table, when there were any and nothing is here yet. */
   async restore() {
