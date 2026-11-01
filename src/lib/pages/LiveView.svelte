@@ -271,7 +271,9 @@
           <ReadbackScreen ui={radio.ui} />
         {:else}
           <div class="idle">
-            {#if radio.phase === "connecting"}
+            {#if radio.retrying}
+              <b>Radio lost</b><span>Reconnecting by itself…</span>
+            {:else if radio.phase === "connecting"}
               <b>Connecting…</b>
             {:else if radio.phase === "pin"}
               <b>PIN</b><span>Type the radio's PIN above.</span>

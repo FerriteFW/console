@@ -50,6 +50,8 @@ export class NativeTransport implements Transport {
   onClose: (why: string) => void = () => {};
   private closing = false;
 
+  private id = "";
+
   private constructor(readonly kind: TransportKind) {
     this.slow = kind === "bluetooth";
     if (kind === "cable") {
@@ -78,7 +80,11 @@ export class NativeTransport implements Transport {
 
   static async open(kind: TransportKind): Promise<NativeTransport> {
     if (kind !== "cable" && kind !== "bluetooth") throw new Error(`No native transport for ${kind}.`);
-    const id = await picker.pick(kind, sources[kind]);
+    return NativeTransport.openId(kind, await picker.pick(kind, sources[kind]));
+  }
+
+  /** A port by name or a radio by device ID, with no picker. */
+  private static async openId(kind: "cable" | "bluetooth", id: string): Promise<NativeTransport> {
     const { invoke, Channel } = await api();
     const t = new NativeTransport(kind);
     const events = new Channel<ArrayBuffer | string>();
@@ -88,9 +94,15 @@ export class NativeTransport implements Transport {
       } else t.onData(new Uint8Array(m));
     };
     const opened = await invoke<Opened>("transport_open", { kind, id, events });
+    t.id = id;
     t.label = opened.label;
     if (opened.baud != null) t.baud = opened.baud;
     return t;
+  }
+
+  /** The same port path, or the same radio by its device ID, again (reconnecting). */
+  reopen(): Promise<NativeTransport> {
+    return NativeTransport.openId(this.kind as "cable" | "bluetooth", this.id);
   }
 
   async write(bytes: Uint8Array) {

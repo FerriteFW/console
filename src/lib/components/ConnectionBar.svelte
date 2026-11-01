@@ -16,6 +16,7 @@
   const themeName = $derived(theme.mode === "auto" ? `Auto (${theme.shown})` : theme.mode === "light" ? "Light" : "Dark");
 
   const status = $derived.by(() => {
+    if (radio.retrying && (radio.phase === "idle" || radio.phase === "connecting")) return { dot: "busy", text: "Radio lost: reconnecting…" };
     if (radio.phase === "connecting") return { dot: "busy", text: "Connecting…" };
     if (radio.phase === "pin") return { dot: "busy", text: "The radio asks for its PIN" };
     if (radio.phase === "updating") return { dot: "busy", text: `Firmware Update holds ${radio.label}` };
@@ -42,7 +43,8 @@
 <div class="bar">
   <div class="status" role="status" aria-live="polite">
     <span class="dot {status.dot}"></span>
-    <span class="text">{status.text}</span>
+    <span class="text" title={radio.retrying ? `${radio.retrying.why} Console opens the same ${radio.label || "connection"} again by itself.` : undefined}>{status.text}</span>
+    {#if radio.retrying}<button class="link" onclick={() => radio.stopRetry()} title="Stop reconnecting">Stop</button>{/if}
     {#if radio.keyNote || radio.note}<span class="note" class:warn={!!radio.keyNote}>· {radio.keyNote || radio.note}</span>{/if}
     {#if radio.phase === "connected" && radio.info}
       <!-- The radio in one line; its full details open from Live View's Radio button. -->
@@ -125,6 +127,15 @@
   }
   .note {
     color: var(--sub);
+  }
+  .link {
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    color: var(--blue);
+    cursor: pointer;
+    text-decoration: underline;
   }
   .note.warn {
     color: var(--amber);

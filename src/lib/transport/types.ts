@@ -22,6 +22,9 @@ export interface Transport {
   setBaud?(rate: number): Promise<void>;
   /** Bluetooth only: the module's speed unlock (LINK-15.1, FF31's one allowed write). True if it was written. */
   unlock?(): Promise<boolean>;
+  /** Opens the same port or radio again with no chooser (reconnecting after the link dropped); throws while it
+   *  isn't there. Absent where that can't be done (the demo radio). */
+  reopen?(): Promise<Transport>;
 }
 
 /** Where transports come from on this platform. */

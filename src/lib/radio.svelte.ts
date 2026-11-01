@@ -19,6 +19,11 @@ const FAILS_SHOWN = 2;
 const RENEW_MS = 5000;
 /** Live View by events: no update this long (the radio sends one at least every 5 s) asks for the whole state. */
 const UI_SILENT_MS = 12_000;
+/** The cable's readbacks failing in a row before the radio counts as gone (restarted: it speaks 115200 again). */
+const LOST_AFTER = 5;
+/** Reconnecting: a try this often (the first few quicker), for this long at most. */
+const RETRY_MS = [1000, 2000, 2000, 3000, 5000];
+const RETRY_FOR_MS = 30 * 60_000;
 /** `?liveview=events` uses the updates on the cable too; `?liveview=poll` polls on Bluetooth too. */
 const LIVE_MODE = new URLSearchParams(typeof location === "undefined" ? "" : location.search).get("liveview");
 
@@ -56,6 +61,9 @@ class Radio {
     this.subWake?.();
   }
   pinError = $state("");
+  /** The link dropped and Console is picking the same radio up again by itself: why it dropped, and the tries so
+   *  far; null when not reconnecting. */
+  retrying = $state<{ why: string; tries: number } | null>(null);
   /** A transfer (channels read or written) holds the link: the Live View stops polling meanwhile. */
   busy = $state("");
 
@@ -87,6 +95,9 @@ class Radio {
   private evLog: [number, number][] = [];
   /** Disconnecting: no more subscriptions. */
   private leaving = false;
+  /** How to open this session's port or radio again with no chooser (the transport's `reopen`). */
+  private reopen: (() => Promise<Transport>) | null = null;
+  private retryGen = 0;
 
   /** The link while connected (channel programming uses it directly). */
   get connectedLink(): Link | null {
@@ -98,12 +109,68 @@ class Radio {
   }
 
   async connect(kind: TransportKind) {
+    this.stopRetry();
     return this.connectWith(() => provider.open(kind));
   }
 
   /** The development bridge (tools/bridge.py): the cable or the simulator over a local WebSocket. */
   async connectBridge(url?: string) {
+    this.stopRetry();
     return this.connectWith(() => BridgeTransport.open(url));
+  }
+
+  /** Stop reconnecting (the bar's Stop, or another connection started). */
+  stopRetry() {
+    if (!this.retrying) return;
+    this.retryGen++;
+    this.retrying = null;
+  }
+
+  /**
+   * The link dropped (cable pulled, the radio restarted, Bluetooth gone): open the same port or radio again in the
+   * background, quietly, until it answers (no chooser, no welcome). Listen stays off (LINK-13.5); Live View and the
+   * pages' event subscriptions come back by themselves (they live here, not in the link).
+   */
+  private lost(why: string) {
+    const reopen = this.reopen;
+    if (!reopen || this.leaving) {
+      this.error = why;
+      return;
+    }
+    const g = ++this.retryGen;
+    this.retrying = { why, tries: 0 };
+    this.error = "";
+    const start = performance.now();
+    void (async () => {
+      for (let i = 0; ; i++) {
+        await sleep(RETRY_MS[Math.min(i, RETRY_MS.length - 1)]);
+        if (g !== this.retryGen) return;
+        if (performance.now() - start > RETRY_FOR_MS) {
+          this.retrying = null;
+          this.error = `${why} Console stopped trying to reconnect after 30 minutes.`;
+          return;
+        }
+        if (this.phase !== "idle") continue;
+        this.retrying = { why, tries: i + 1 };
+        let t: Transport;
+        try {
+          t = await reopen();
+        } catch {
+          continue; // not back yet
+        }
+        if (g !== this.retryGen || this.phase !== "idle") {
+          await t.close().catch(() => {});
+          return;
+        }
+        await this.connectWith(async () => t, true);
+        if (g !== this.retryGen) return;
+        if (this.phase === "connected" || this.phase === "pin") {
+          this.retryGen++;
+          this.retrying = null;
+          return;
+        }
+      }
+    })();
   }
 
   /**
@@ -130,6 +197,7 @@ class Radio {
    * bootloader after a failed update. No HELLO: the bootloader doesn't speak the link.
    */
   async openForUpdate(how: "cable" | "bridge"): Promise<Transport> {
+    this.stopRetry();
     if (this.phase !== "idle") throw new Error("Disconnect first.");
     this.error = "";
     this.note = "";
@@ -143,6 +211,7 @@ class Radio {
     t.onClose = (why) => {
       if (gen === this.generation) this.drop(why);
     };
+    this.reopen = t.reopen ? () => t.reopen!() : null;
     return t;
   }
 
@@ -153,9 +222,12 @@ class Radio {
     this.link = null;
     this.phase = "idle";
     await this.connectWith(async () => t);
+    // The radio not answering yet after its update (still starting): keep trying by itself.
+    if (this.phase === "idle" && this.reopen) this.lost(this.error || "The radio didn't answer after the update.");
   }
 
-  private async connectWith(open: () => Promise<Transport>) {
+  /** `quiet`: a reconnect's try: a failure leaves no error behind (the next try comes). */
+  private async connectWith(open: () => Promise<Transport>, quiet = false) {
     if (this.phase !== "idle") return;
     this.leaving = false;
     this.error = "";
@@ -170,6 +242,7 @@ class Radio {
       this.t = t;
       this.kind = t.kind;
       this.label = t.label;
+      this.reopen = t.reopen ? () => t.reopen!() : null;
       const link = new Link(t);
       this.link = link;
       t.onClose = (why) => {
@@ -184,7 +257,7 @@ class Radio {
       }
       await this.afterAuth(gen);
     } catch (e) {
-      if (gen === this.generation) await this.fail(e);
+      if (gen === this.generation) await this.fail(e, quiet);
     }
   }
 
@@ -358,7 +431,12 @@ class Radio {
           if (gen !== this.generation) return;
           this.fails++;
           if (!(e instanceof TimeoutError) && !(e instanceof RadioError)) {
-            await this.fail(e);
+            this.drop((e as Error)?.message ?? String(e));
+            return;
+          }
+          // The cable's radio silent this long: restarted (back at 115200) or switched off: start over.
+          if (this.kind === "cable" && this.fails >= LOST_AFTER && this.reopen) {
+            this.drop("The radio stopped answering.");
             return;
           }
         }
@@ -370,6 +448,13 @@ class Radio {
       });
       this.wake = null;
     }
+  }
+
+  /** Test hook (e2e): the bridge's link drops as a pulled cable would. */
+  bridgeDrop(): boolean {
+    if (!(this.t instanceof BridgeTransport)) return false;
+    this.t.dropForTest();
+    return true;
   }
 
   /** The development bridge's simulator test hooks (tools/bridge.py): false when not on a bridge. */
@@ -424,16 +509,18 @@ class Radio {
     this.flashTimer = setTimeout(() => (this.keyNote = ""), 4000);
   }
 
-  private async fail(e: unknown) {
+  private async fail(e: unknown, quiet = false) {
     const msg = (e as Error)?.message ?? String(e);
     // The chooser closed without a pick: not an error worth a banner.
     const cancelled = (e as Error)?.name === "NotFoundError" && /cancel|no port selected|chooser/i.test(msg);
     await this.teardown();
-    this.error = cancelled ? "" : msg;
+    this.error = cancelled || quiet ? "" : msg;
   }
 
+  /** The link went away: a connected session reconnects by itself; anything else (an update) just says why. */
   private drop(why: string) {
-    void this.teardown().then(() => (this.error = why));
+    const was = this.phase === "connected";
+    void this.teardown().then(() => (was ? this.lost(why) : (this.error = why)));
   }
 
   private async teardown() {
@@ -470,6 +557,8 @@ class Radio {
 
   async disconnect() {
     // LINK-11: the cable back at 115200 first, so tools/flash.py and the terminal find the radio there.
+    this.stopRetry();
+    this.reopen = null;
     const link = this.link;
     this.leaving = true;
     if (link && this.phase === "connected" && this.subMask) {

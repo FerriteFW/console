@@ -10,7 +10,10 @@ type SerialPortLike = {
   getInfo(): { usbVendorId?: number; usbProductId?: number };
   addEventListener(t: "disconnect", f: () => void): void;
 };
-type SerialLike = { requestPort(o?: { filters: { usbVendorId: number }[] }): Promise<SerialPortLike> };
+type SerialLike = {
+  requestPort(o?: { filters: { usbVendorId: number }[] }): Promise<SerialPortLike>;
+  getPorts?(): Promise<SerialPortLike[]>;
+};
 
 /** USB-serial chips programming cables use: CH340 (the RT-950 Pro's cable), CP210x, FTDI, Prolific. */
 const FILTERS = [0x1a86, 0x10c4, 0x0403, 0x067b].map((usbVendorId) => ({ usbVendorId }));
@@ -33,7 +36,10 @@ export class WebSerialTransport implements Transport {
   static async request(): Promise<WebSerialTransport> {
     const serial = webSerial();
     if (!serial) throw new Error("This browser has no Web Serial: use Chrome, Edge or Firefox on a desktop.");
-    const port = await serial.requestPort({ filters: FILTERS });
+    return WebSerialTransport.fromPort(await serial.requestPort({ filters: FILTERS }));
+  }
+
+  private static async fromPort(port: SerialPortLike): Promise<WebSerialTransport> {
     const t = new WebSerialTransport(port);
     await t.openAt(115200);
     port.addEventListener("disconnect", () => {
@@ -42,6 +48,30 @@ export class WebSerialTransport implements Transport {
     const info = port.getInfo();
     if (info.usbVendorId === 0x1a86) t.label = "Cable (CH340)";
     return t;
+  }
+
+  /**
+   * The same cable again, from the ports this page was already granted (no chooser): the same port if it's back,
+   * else the one port of the same USB chip. Throws while it isn't plugged in.
+   */
+  async reopen(): Promise<WebSerialTransport> {
+    const ports = (await webSerial()?.getPorts?.()) ?? [];
+    const was = this.port.getInfo();
+    const same = (p: SerialPortLike) => {
+      const i = p.getInfo();
+      return i.usbVendorId === was.usbVendorId && i.usbProductId === was.usbProductId;
+    };
+    const alike = ports.filter((p) => p !== this.port && same(p));
+    const tries = [...ports.filter((p) => p === this.port), ...(alike.length === 1 ? alike : [])];
+    let last: unknown = new Error("The cable isn't back yet.");
+    for (const p of tries) {
+      try {
+        return await WebSerialTransport.fromPort(p);
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw last;
   }
 
   private async openAt(rate: number) {

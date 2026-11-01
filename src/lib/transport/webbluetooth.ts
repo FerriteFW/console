@@ -66,8 +66,21 @@ export class WebBluetoothTransport implements Transport {
     const bt = webBluetooth();
     if (!bt) throw new Error("This browser has no Web Bluetooth: use Chrome or Edge, from https or localhost.");
     // The BT513 advertises FFE0 (as tools/webble does it); the chooser lists it as "walkie-talkie".
-    const device = await bt.requestDevice({ filters: [{ services: [SERVICE] }] });
-    const server = await device.gatt.connect();
+    return WebBluetoothTransport.fromDevice(await bt.requestDevice({ filters: [{ services: [SERVICE] }] }));
+  }
+
+  /** The same radio again (reconnecting): the device this page was given, if it's in range. */
+  reopen(): Promise<WebBluetoothTransport> {
+    return WebBluetoothTransport.fromDevice(this.device);
+  }
+
+  private static async fromDevice(device: Device): Promise<WebBluetoothTransport> {
+    const server = await Promise.race([
+      device.gatt.connect(),
+      sleep(15_000).then(() => {
+        throw new Error("The radio didn't answer the Bluetooth connection.");
+      }),
+    ]);
     const service = await server.getPrimaryService(SERVICE);
     const ch = await service.getCharacteristic(DATA);
     const t = new WebBluetoothTransport(device, ch, service);

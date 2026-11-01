@@ -37,12 +37,25 @@ export class BridgeTransport implements Transport {
   private closing = false;
   private waitBaud: ((m: Control) => void) | null = null;
 
-  private constructor(private ws: WebSocket) {}
+  private constructor(
+    private ws: WebSocket,
+    private url: string,
+  ) {}
+
+  /** The same bridge again (reconnecting). */
+  reopen(): Promise<BridgeTransport> {
+    return BridgeTransport.open(this.url);
+  }
+
+  /** Test hook (e2e): the WebSocket closes as if the cable were pulled. */
+  dropForTest() {
+    this.ws.close();
+  }
 
   static async open(url = bridgeUrl()): Promise<BridgeTransport> {
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
-    const t = new BridgeTransport(ws);
+    const t = new BridgeTransport(ws, url);
     const hello = await new Promise<Hello>((ok, fail) => {
       const timer = setTimeout(() => fail(new Error(`The bridge at ${url} didn't answer.`)), 4000);
       ws.onerror = () => {
