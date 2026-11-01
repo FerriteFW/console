@@ -3,13 +3,11 @@
   // radio (its GPS fix, else its fixed position), or this computer's location ("Use my location": asked only on that
   // click, never on load). The desktop app on macOS has no location in its webview (wry doesn't pass WebKit's
   // geolocation through yet), so the button isn't there.
-  import { library } from "../../library.svelte";
+  import { canLocate, library } from "../../library.svelte";
   import { radio } from "../../radio.svelte";
-  import { isTauri } from "../../transport/native";
 
   const connected = $derived(radio.phase === "connected");
   const place = $derived(library.place);
-  const canLocate = typeof navigator !== "undefined" && !!navigator.geolocation && !(isTauri() && /Mac/.test(navigator.userAgent));
   /** The radius choices, plus the map's own (dragged or slid) when it isn't one. */
   const radii = $derived([...new Set([10, 25, 50, 100, 200, 400, library.radius])].sort((a, b) => a - b));
 </script>

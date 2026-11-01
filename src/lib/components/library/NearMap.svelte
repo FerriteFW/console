@@ -8,8 +8,9 @@
   // Sites outside the circle fade until they do. The Picked column lists the picks (shared with the lists:
   // nearby.svelte.ts) with the zone target and Add. With `ontune` (Live View's Tune from map) a popup's frequency is a
   // button that tunes the radio, and there is no Picked column.
-  import { untrack } from "svelte";
-  import { library } from "../../library.svelte";
+  import { tick, untrack } from "svelte";
+  import { canLocate, library } from "../../library.svelte";
+  import { radio } from "../../radio.svelte";
   import { airportSites, repeaterSites, sites, sourceName } from "../../sites.svelte";
   import { MOBILE, mhz, modeLabel, nearby, offsetLabel, repeaterMode, toneLabel } from "../../nearby.svelte";
   import { toneWord, type Tune } from "../../tune";
@@ -208,6 +209,22 @@
     }
   });
 
+  // The locate button: the place from the radio (else this computer), then the view on it, even when the place
+  // didn't change and the map was only panned away.
+  let locating = $state(false);
+  const canFind = $derived(radio.phase === "connected" || canLocate);
+  async function locate() {
+    if (locating) return;
+    locating = true;
+    try {
+      await library.locate();
+      await tick();
+      if (map && circle) map.fitBounds(circle.getBounds(), { padding: [16, 16] });
+    } finally {
+      locating = false;
+    }
+  }
+
   const CELL = 44;
 
   // The markers: again when the sites, picks, radius or zoom change. Clusters below the zoom where they split.
@@ -323,6 +340,17 @@
     </div>
     <div class="wrap" bind:this={wrap}>
       <div class="map" bind:this={el} data-map={L ? "ready" : "loading"} data-sites={shownSites.length} aria-label="Map of sites near the place"></div>
+      {#if L}
+        <button
+          class="locate"
+          disabled={locating || (!canFind && !library.place)}
+          onclick={locate}
+          title={radio.phase === "connected" ? "Centre on me: the radio's GPS fix, else its fixed position" : canLocate ? "Centre on me: this computer's location" : library.place ? "Centre on the place" : "Connect a radio to centre on its position"}
+          aria-label="Centre the map on my position"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="2" /><circle cx="12" cy="12" r="2.5" fill="currentColor" /><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+        </button>
+      {/if}
       {#if mapError}<div class="over">{mapError}</div>{/if}
       {#if NO_TILES}<div class="notiles">No map background when Console is opened from a file (OpenStreetMap's tile policy). The markers still work; for the full map use <a href="https://console.ferritefw.dev" target="_blank" rel="noreferrer">console.ferritefw.dev</a> or the desktop app.</div>{/if}
       <div class="legend" aria-hidden="true">
@@ -488,6 +516,30 @@
     inset: 0;
     isolation: isolate;
     background: var(--surface);
+  }
+  .locate {
+    position: absolute;
+    top: 82px;
+    left: 10px;
+    z-index: 1;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    background: var(--surface);
+    color: var(--text);
+    border: 2px solid rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    background-clip: padding-box;
+    cursor: pointer;
+  }
+  .locate:hover:not(:disabled) {
+    color: var(--blue);
+  }
+  .locate:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .over {
     position: absolute;

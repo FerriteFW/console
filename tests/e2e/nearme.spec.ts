@@ -289,3 +289,24 @@ test("map: Use my location refused: says so calmly, the place left alone", async
   await expect(d.locator(".banner")).toHaveCount(0);
   await close();
 });
+
+test("map: the locate button centres on this computer's location, again after panning away", async ({ browser }, info) => {
+  const { p, d, close } = await open(browser, { geolocation: { latitude: 45.32, longitude: -75.67 }, permissions: ["geolocation"] });
+  await onlyKinds(d, "Business & public", "Airports");
+  const locate = d.getByRole("button", { name: "Centre the map on my position" });
+  await locate.click();
+  await expect(d.getByLabel("Place: latitude, longitude or grid square")).toHaveValue("45.3200, -75.6700");
+  const cyow = marker(d, "CYOW").first();
+  await expect(cyow).toBeInViewport({ timeout: 20_000 });
+  // Panned well away: the same place, so only the button brings the view back.
+  const box = (await d.locator(".map").boundingBox())!;
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await p.mouse.down();
+  await p.mouse.move(box.x + box.width / 2 + 600, box.y + box.height / 2 + 300, { steps: 8 });
+  await p.mouse.up();
+  await expect(cyow).not.toBeInViewport();
+  await locate.click();
+  await expect(cyow).toBeInViewport();
+  await shot(p, info, "45-nearme-locate");
+  await close();
+});

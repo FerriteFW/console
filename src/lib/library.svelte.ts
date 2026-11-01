@@ -6,6 +6,7 @@ import { libraryAdd, parsePlace, type LibraryAdded, type LibraryItem, type Place
 import { channels } from "./channels.svelte";
 import { radio } from "./radio.svelte";
 import { appFetch } from "./appfetch";
+import { isTauri } from "./transport/native";
 import { activeSlot, slotLine, tuneSummary, type Tune } from "./tune";
 
 export type FixedFreq = { number: number; name: string; rx: number; tx: number; notes?: string; ctcss?: number; dcs?: number };
@@ -191,6 +192,22 @@ class Library {
     }
   }
 
+  /**
+   * The maps' locate button: the radio's GPS fix (else its fixed position) when one is connected, else this
+   * computer's location where the webview has one. True when a place came.
+   */
+  async locate(): Promise<boolean> {
+    const was = this.placeText;
+    if (radio.phase === "connected") {
+      await this.placeFromRadio();
+      if (this.placeText !== was || this.placeFrom.startsWith("From the radio")) return true;
+    }
+    if (!canLocate) return !!this.place;
+    this.error = "";
+    await this.placeFromBrowser();
+    return this.placeText !== was || this.placeFrom === "From this computer's location";
+  }
+
   /** Entries into the table (through the core's checks). The table's new rows show green until written. */
   add(items: LibraryItem[], what: string): LibraryAdded {
     const t = $state.snapshot(channels.table);
@@ -199,5 +216,9 @@ class Library {
     return a;
   }
 }
+
+/** This computer's location is there to ask for (the desktop app on macOS has none: wry doesn't pass WebKit's
+ * geolocation through yet). */
+export const canLocate = typeof navigator !== "undefined" && !!navigator.geolocation && !(isTauri() && /Mac/.test(navigator.userAgent));
 
 export const library = new Library();
