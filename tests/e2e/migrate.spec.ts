@@ -121,17 +121,49 @@ test("cut off while writing: nothing lost; Finish the update starts again from C
   await page.evaluate(() => (window as any).ferrite.radio.disconnect());
   await expect(dialog.getByRole("alert", { name: "Finish the update error" })).toContainText("Nothing is lost", { timeout: 20_000 });
   await page.keyboard.press("Escape");
-  // Connected again (the radio didn't restart: LINK-61 says 3 and 3 now), the banner is still there, and the next try
+  // Connected again (the radio didn't restart: it says 3 and 255, half moved, now), the banner is still there, and the next try
   // starts from Console's copy, never from the half-written chip.
   if (await page.getByRole("button", { name: "Bridge", exact: true }).isVisible()) await page.getByRole("button", { name: "Bridge", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Connected: Bridge", { timeout: 30_000 });
   await expect(banner(page)).toBeVisible({ timeout: 10_000 });
+  expect(await page.evaluate(() => (window as any).ferrite.radio.hello.layouts)).toEqual({ firmware: 3, chip: 255 });
   await banner(page).getByRole("button", { name: "Finish the update…" }).click();
   await expect(dialog.locator('[data-k="kept"]')).toContainText("Console has this radio's backup");
   await dialog.getByRole("button", { name: "Finish the update", exact: true }).click();
   await expect(dialog.getByRole("region", { name: "Update finished" })).toBeVisible({ timeout: 200_000 });
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(page.getByRole("status")).toContainText("Connected: Bridge", { timeout: 30_000 });
+  const got = await readBack(page);
+  expect(got.channels.length).toBe(1000);
+  expect(got.zones).toContain("Repeaters 2");
+});
+
+test("a power cut right after the stamp's answer: nothing lost; Try again finishes", async ({ page }) => {
+  // Decision 339: the simulator queues the store's writes as the radio does, and its restart after the stamp is a
+  // power cut (`--cut-restart`): the stamp the radio answered was never written. On Nov 1, 2026 that formatted clear.
+  b.stop();
+  b = await startBridge(undefined, ["--flash", layout2Image(), "--cut-restart"]);
+  await connectWaiting(page, "live");
+  await banner(page).getByRole("button", { name: "Finish the update…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Finish the update" });
+  await dialog.getByRole("checkbox").uncheck();
+  await dialog.getByRole("button", { name: "Finish the update", exact: true }).click();
+  // The radio comes back waiting (half moved, never formatted): Console says so and keeps its copy.
+  await expect(dialog.getByRole("alert", { name: "Finish the update error" })).toContainText("before its stamp was written", { timeout: 200_000 });
+  await expect(dialog.getByRole("alert", { name: "Finish the update error" })).toContainText("Console has the backup");
+  await page.keyboard.press("Escape");
+  if (await page.getByRole("button", { name: "Bridge", exact: true }).isVisible()) await page.getByRole("button", { name: "Bridge", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Connected: Bridge", { timeout: 30_000 });
+  await expect(banner(page)).toBeVisible({ timeout: 10_000 });
+  expect(await page.evaluate(() => (window as any).ferrite.radio.hello.layouts)).toEqual({ firmware: 3, chip: 255 });
+  // Try again: from Console's copy (the simulator's restarts are plain ones from now on).
+  await banner(page).getByRole("button", { name: "Finish the update…" }).click();
+  await expect(dialog.locator('[data-k="kept"]')).toContainText("Console has this radio's backup");
+  await dialog.getByRole("button", { name: "Finish the update", exact: true }).click();
+  await expect(dialog.getByRole("region", { name: "Update finished" })).toBeVisible({ timeout: 200_000 });
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("status")).toContainText("Connected: Bridge", { timeout: 30_000 });
+  expect(await page.evaluate(() => (window as any).ferrite.radio.hello.layouts)).toEqual({ firmware: 3, chip: 3 });
   const got = await readBack(page);
   expect(got.channels.length).toBe(1000);
   expect(got.zones).toContain("Repeaters 2");

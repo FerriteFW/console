@@ -2,7 +2,7 @@
   // Finish the update (UPD-16, LINK-62) as a focused modal: the radio's firmware stores a new layout and its data
   // waits in the old one (the radio shows D25). Confirm → back up → move → the radio restarts → done. The flow is
   // migrate.svelte.ts; it can't be closed while it runs.
-  import { migrate } from "../migrate.svelte";
+  import { LAYOUT_MOVING, migrate } from "../migrate.svelte";
   import { radio } from "../radio.svelte";
   import MigrateProgress from "./MigrateProgress.svelte";
 
@@ -43,10 +43,17 @@
     </ol>
 
     {#if step === 1}
-      <p>
-        The radio runs Ferrite {radio.info?.firmware ?? ""}, which keeps its data in a new layout{l ? ` (layout ${l.firmware})` : ""}. Your channels, zones, settings
-        and lists are still in the old one{l && l.chip !== l.firmware ? ` (layout ${l.chip})` : ""}, untouched: the radio waits on its "Finish the update" page.
-      </p>
+      {#if l?.chip === LAYOUT_MOVING}
+        <p>
+          The radio's data is part way through a move from an earlier try (stopped before its last step), and the radio waits on its "Finish the update" page.
+          Console finishes it from the backup made when that try began: this computer's copy, or the backup file.
+        </p>
+      {:else}
+        <p>
+          The radio runs Ferrite {radio.info?.firmware ?? ""}, which keeps its data in a new layout{l ? ` (layout ${l.firmware})` : ""}. Your channels, zones, settings
+          and lists are still in the old one{l && l.chip !== l.firmware ? ` (layout ${l.chip})` : ""}, untouched: the radio waits on its "Finish the update" page.
+        </p>
+      {/if}
       <ul class="notes">
         <li>Console backs everything up first, then moves it and restarts the radio. About a minute.</li>
         <li>A zone holds 256 channels now: a longer one is split ("Repeaters 2" takes the rest).</li>

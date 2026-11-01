@@ -91,7 +91,7 @@
   /** Finish the update's dialog (UPD-16). */
   let finishing = $state(false);
   // Each connection: whether Console holds a copy of this radio's old data from a try that was cut after writing
-  // (the radio then says the layouts are the same until it restarts, LINK-61: the banner still shows).
+  // (the radio says 255, half moved, until the stamp: decision 339; the banner shows).
   $effect(() => {
     if (radio.phase === "connected" && !migrate.running) void migrate.lookKept();
   });

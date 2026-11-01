@@ -6,8 +6,10 @@
 //      kept in Console's own data (IndexedDB) and offered as a file, before anything is written;
 //   3. translated on the PC (the Rust core: core/src/migrate.rs);
 //   4. written region by region (DATA_WRITE: erase, program, read back by CRC), the sector that holds the old header
-//      last, so until then a restart still finds the old layout and waits;
-//   5. the header stamped: the radio restarts on the new layout, and Console connects again.
+//      last; before the first write the radio puts down a migration mark and the new header itself (decision 339),
+//      so a restart at any point waits for Console (HELLO says the chip is 255, half moved), never formats;
+//   5. the header stamped (the radio takes it once everything before it is written, `busy` until then, and only
+//      clears the mark): the radio restarts on the new layout, and Console connects again and checks it says so.
 // Started again after an interruption, it begins at 3 from the kept copy (never reading the half-written chip).
 // Firmware Update runs it as part of an update whose new firmware stores another layout (firmware.svelte.ts).
 import { saveBlob } from "./codeplug.svelte";
@@ -34,6 +36,10 @@ type Kept = {
    *  "done": stamped and the radio came back on the new layout (kept as the backup). */
   state: "copied" | "writing" | "done";
 };
+
+/** LINK-62 (decision 339): the chip's layout while its data is half moved (a raw write this power-on, or a move cut
+ *  before its stamp): only a copy of the old data can finish it. */
+export const LAYOUT_MOVING = 255;
 
 /** After the stamp: the radio restarts and mounts the new layout; Console asks for HELLO until this runs out. */
 const RESTART_WAIT_MS = 40_000;
@@ -68,8 +74,8 @@ class Migrate {
     return this.total ? Math.floor((this.done * 100) / this.total) : 0;
   }
 
-  /** The connected radio waits for its data to be moved (or a try of ours was cut with writes made: LINK-61 says 3
-   *  and 3 then, until the radio restarts). */
+  /** The connected radio waits for its data to be moved (the layouts differ: 2, or 255 while half moved), or a try of
+   *  ours was cut with writes made this session. */
   get needed(): boolean {
     const l = radio.hello?.layouts;
     if (!l) return false;
@@ -80,22 +86,19 @@ class Migrate {
   cutOff = $state(false);
 
   /** Console's kept copy for the connected radio, from a try cut after writing: its date for the card ("" when none).
-   *  The radio says the layouts are the same until it restarts (LINK-61), so the chip's header tells whether that
-   *  try got as far as the stamp (then it is done, and the copy is only the backup). */
+   *  A radio whose layouts agree got as far as the stamp (decision 339: until it, the radio says 255, half moved), so
+   *  that try is done and the copy is only the backup. */
   async lookKept() {
     const uid = radio.info?.uid_text ?? "";
     const k = await kept.get(uid).catch(() => undefined);
     const l = radio.hello?.layouts;
     let writing = k?.state === "writing";
     if (writing && l && l.firmware === l.chip) {
-      const link = radio.connectedLink;
-      if (link && (await stamped(link, l.firmware).catch(() => false))) {
-        await kept.state(uid, "done").catch(() => {});
-        writing = false;
-      }
+      await kept.state(uid, "done").catch(() => {});
+      writing = false;
     }
     this.keptFrom = writing ? k!.saved : "";
-    this.cutOff = writing && !!l && l.firmware === l.chip;
+    this.cutOff = false;
   }
 
   /** A backup file chosen to start from (another computer's, or Console's own data cleared). */
@@ -157,7 +160,7 @@ class Migrate {
       const uid = info.uid_text ?? "";
       const k = await kept.get(uid).catch(() => undefined);
       const pending = !!l && l.firmware !== l.chip;
-      // A try of ours cut after writing: the radio says 3 and 3 until it restarts (LINK-61); only the copy counts.
+      // A try of ours cut after writing (the radio says 255, half moved, until the stamp): only the copy counts.
       const resume = k && k.state === "writing" && (!uid || k.uid === uid) ? k : undefined;
       if (!pending && !resume && !this.picked) throw new Error("The radio's data is already in its firmware's layout: nothing to finish.");
       if (!(link.caps2 & P.caps2.DATA)) throw new Error("This firmware can't move data over the link: update it first.");
@@ -167,6 +170,11 @@ class Migrate {
         c.free();
         return v;
       };
+      if (l?.chip === LAYOUT_MOVING && !resume && !this.picked) {
+        throw new Error(
+          "The radio's data was cut part way through a move, and this computer holds no copy of it. Choose Use a saved backup… (the file saved when the update began, or from the computer that started it) to finish it.",
+        );
+      }
       const from = resume ? resume.from : this.picked ? fromFile() : l!.chip;
       const to = l?.firmware ?? 3;
       if (!migrateRegions(from)) throw new Error(`Console doesn't know layout ${from}: update Ferrite Console.`);
@@ -177,7 +185,7 @@ class Migrate {
         await kept.put({ uid, from: copy.layout(), to, file: copy.to_file(), saved: new Date().toISOString(), state: "copied" }).catch(() => {});
       } else if (resume) {
         // Step 3 again from Console's copy: a try cut after writing (the chip is half written: never read again).
-        if (!pending && (await stamped(link, to).catch(() => false))) {
+        if (!pending) {
           await kept.state(uid, "done").catch(() => {});
           throw new Error("That update got as far as the stamp: the radio's data is in its new layout already.");
         }
@@ -216,10 +224,12 @@ class Migrate {
         const kind = plan.kind(i);
         this.message = kind === "stamp" ? "Stamping the new layout: the radio restarts…" : `Writing ${plan.region(i)}`;
         if (kind === "stamp") {
+          // Taken once the radio has written everything before it (`busy` until then, asked again); the restart
+          // waits for it to be written. Its answer may not get out before the restart; HELLO afterwards says.
           try {
             await link.data(P.msg.DATA_WRITE, plan.payload(i), 3000);
           } catch (e) {
-            if (!(e instanceof TimeoutError)) throw e; // its answer may not get out before the restart
+            if (!(e instanceof TimeoutError)) throw e;
           }
           break;
         }
@@ -303,6 +313,7 @@ class Migrate {
         const h = await probe.hello();
         probe.close();
         if (h.layouts && h.layouts.chip === to) return;
+        if (h.layouts?.chip === LAYOUT_MOVING) throw new Error("The radio restarted before its stamp was written (it waits for the update again). Try again: Console has the backup.");
         throw new Error(`The radio restarted still on layout ${h.layouts?.chip ?? "?"}. Try again: Console has the backup.`);
       } catch (e) {
         probe.close();
@@ -331,16 +342,6 @@ class Migrate {
     this.message = "";
     this.summary = null;
   }
-}
-
-/** The chip holds a good layout `v` header at 0x000000 (magic "FRRT", the version, CRC-32 of bytes 0-15 with the
- *  installer's 6-9 as 0xFF; Appendix G): the stamp, the move's last write, is done. */
-async function stamped(link: Link, v: number): Promise<boolean> {
-  const h = await link.dataRead(0, 20);
-  const body = h.slice(0, 16);
-  body.fill(0xff, 6, 10);
-  const d = new DataView(h.buffer, h.byteOffset);
-  return d.getUint32(0, true) === 0x54525246 && d.getUint16(4, true) === v && d.getUint32(16, true) === dataCrc32(body) >>> 0;
 }
 
 /** "20261101-1412", local time. */

@@ -51,7 +51,9 @@ export class TimeoutError extends Error {}
 export class LayoutPending extends Error {
   constructor(readonly layouts: Layouts) {
     super(
-      `The radio's channels and settings are waiting in the old layout (layout ${layouts.chip}): finish the update first (the banner at the top, or Update Ferrite).`,
+      layouts.chip === 255
+        ? "The radio's channels and settings are part way through a move: finish the update first (the banner at the top)."
+        : `The radio's channels and settings are waiting in the old layout (layout ${layouts.chip}): finish the update first (the banner at the top, or Update Ferrite).`,
     );
   }
 }

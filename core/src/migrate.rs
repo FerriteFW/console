@@ -3,7 +3,10 @@
 //! `DATA_READ` and keeps them on the PC ([`Copy`], saved as a file before anything is written), translates them here
 //! ([`translate`]: layout 2 to 3 is the only one so far), and writes the new layout region by region over
 //! `DATA_WRITE` ([`write_plan`]), the sector that held the old header last and the header stamp after it, so an
-//! interruption at any point loses nothing: started again, Console begins from its copy.
+//! interruption at any point loses nothing: started again, Console begins from its copy. The radio makes that so
+//! (decision 339): before the first raw write it puts a migration mark down and this layout's header, a restart
+//! before the stamp finds the mark and waits for Console (`HELLO` says the chip is 255, half moved), and the stamp
+//! only clears the mark, once everything before it is written.
 //!
 //! The records are the firmware's own (ferrite-store's `records`, `logs`, `scratch` and `store`), so a channel, a
 //! zone or a ring record is judged and rebuilt here exactly as the radio judges and builds it.
@@ -516,7 +519,8 @@ pub struct Step {
 }
 
 /// The write (LINK-62's steps 4 and 5): each region's sectors erased, its bytes that aren't erased programmed 64 at
-/// a time (never across a 256-byte page), the region read back by CRC; the header stamped last.
+/// a time (never across a 256-byte page), the region read back by CRC; the header stamped last. Never the layout
+/// header or the migration mark (the radio's own, refused: decision 339).
 pub fn write_plan(t: &Translated) -> Vec<Step> {
     let mut out = Vec::new();
     for r in &t.regions {
@@ -849,6 +853,9 @@ mod tests {
             }
         }
         assert_eq!(p.last().unwrap().kind, "stamp");
+        // Decision 339: the layout header and the migration mark are the radio's own
+        use ferrite_core::layout::{LAYOUT_HEADER, MIGRATE_MARK};
+        assert!(p.iter().filter(|s| s.kind != "stamp").all(|s| !LAYOUT_HEADER.contains(&s.addr) && !MIGRATE_MARK.contains(&s.addr)));
         let first_hdr = p.iter().position(|s| s.kind != "stamp" && (V2_HEADER.start..V2_HEADER.end).contains(&s.addr)).unwrap();
         assert!(p[..first_hdr].iter().all(|s| !(V2_HEADER.start..V2_HEADER.end).contains(&s.addr)));
         assert!(p[first_hdr..p.len() - 1].iter().all(|s| (V2_HEADER.start..V2_HEADER.end).contains(&s.addr)));
@@ -892,6 +899,96 @@ mod tests {
             assert_eq!(records::zone_count(&r), Some(st.zone_len(z)), "zone {z}'s record count");
         }
         assert!(t.notes.iter().any(|n| n.contains("no copy of layout 2's scratch ring")));
+    }
+
+    /// The plan's step as the radio's link hands it to the store (LINK-60).
+    fn as_write(s: &Step) -> Option<ferrite_app::data::DataWrite> {
+        use ferrite_app::data::DataWrite;
+        Some(match s.kind {
+            "erase" => DataWrite::Erase(s.addr),
+            "program" => {
+                let mut bytes = [0xFF; data::PROGRAM_MAX];
+                bytes[..s.len as usize].copy_from_slice(&s.payload[5..]);
+                DataWrite::Program { addr: s.addr, len: s.len as u8, bytes }
+            }
+            "stamp" => DataWrite::Stamp,
+            _ => return None,
+        })
+    }
+
+    /// The radio's Storage task: the queued writes done.
+    fn drain(st: &Store) {
+        while let Some(j) = st.next_job() {
+            block(st.run(j));
+        }
+    }
+
+    /// Steps `from..to` of the plan sent as Console sends them to a radio (its store queuing writes as on the radio:
+    /// `busy` sent again once the Storage task has had its turn; each region's CRC read back once nothing is
+    /// queued), stopping right after step `to - 1`'s answer: what is still queued then is lost (a reset).
+    fn send(st: &Store, plan: &[Step], to: usize) {
+        for s in &plan[..to] {
+            send_one(st, s);
+        }
+    }
+
+    fn send_one(st: &Store, s: &Step) {
+        st.set_deferred(true);
+        match as_write(s) {
+            Some(w) => {
+                let mut tries = 0;
+                while !st.data_write(w) {
+                    drain(st);
+                    tries += 1;
+                    assert!(tries < 3, "{} at {:#x}: busy", s.kind, s.addr);
+                }
+            }
+            None => {
+                while st.busy() {
+                    drain(st); // LINK-59: `busy` until the writes before it are done
+                }
+                assert_eq!(st.data_crc(s.addr, s.len), s.expect, "{}", s.region);
+            }
+        }
+    }
+
+    /// Decision 339, LINK-62: the real plan for a realistic layout 2 chip, with a reset right after every step's
+    /// answer (what the radio had queued then never written; after the last step that is the stamp, as on clear on
+    /// Nov 1, 2026): every mount waits for Console (layout 2, or half moved) or holds everything, never formats; and
+    /// Finish the update started again from Console's copy always ends on layout 3 with all the data.
+    #[test]
+    fn a_reset_after_any_step_loses_nothing() {
+        use ferrite_core::layout::LAYOUT_MOVING;
+        let b = build();
+        let mut chip = SimFlash::new();
+        let low = &b.copy.regions[0].1;
+        chip.mem[SimFlash::at(V2_REGIONS[0].0)..][..low.len()].copy_from_slice(low);
+        let t = translate(&b.copy).unwrap();
+        let plan = write_plan(&t);
+        let want = Store::mount(written(&t), NoData);
+        let want_ch: Vec<_> = (0..1000).map(|n| want.get(n)).collect();
+        let n = plan.len();
+        assert!(n > 1500, "{n} steps");
+        let live = Store::mount(chip, NoData);
+        assert_eq!(live.mounted(), Mounted::Update(2));
+        for k in 0..=n {
+            if k > 0 {
+                send_one(&live, &plan[k - 1]);
+            }
+            // The reset: the flash as it is now; what is still queued is gone with the RAM.
+            let st = Store::mount(live.nor().clone(), NoData);
+            let m = st.mounted();
+            assert!(m == Mounted::Update(2) || m == Mounted::Update(LAYOUT_MOVING), "reset after step {k} of {n}: {m:?}");
+            // Started again from the copy (after every one of the first and last steps, every 64th between).
+            if k < 8 || k + 8 > n || k % 64 == 0 {
+                send(&st, &plan, n);
+                drain(&st);
+                let st = Store::mount(st.into_parts().0, NoData);
+                assert_eq!(st.mounted(), Mounted::Ok, "reset after step {k}: finished again");
+                assert_eq!(st.count(), 1000);
+                assert!((0..1000).all(|c| st.get(c) == want_ch[c as usize]), "reset after step {k}: the channels");
+            }
+        }
     }
 
     /// The simulator's layout 2 chip for Console's end-to-end test of Finish the update (`tests/e2e/fixtures/
