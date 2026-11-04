@@ -808,11 +808,11 @@ mod tests {
         assert_eq!(a.channels[1].step, "8.33 kHz");
     }
 
-    /// Ferrite's refusals: a frequency it can't tune is skipped with its words; a WFM-like mode too.
+    /// Ferrite's refusals: a frequency it can't tune is skipped with its words; a mode it hasn't (DV) too.
     #[test]
     fn refusals() {
         let a =
-            add(&[item("Too high", 700.0, None, "FM", ""), item("Bad mode", 146.5, None, "WFM", "")], &Set::default(), true);
+            add(&[item("Too high", 700.0, None, "FM", ""), item("Bad mode", 146.5, None, "DV", "")], &Set::default(), true);
         assert_eq!((a.channels.len(), a.skipped), (0, 2));
         assert!(a.notes[0].contains("Too high") && a.notes[0].contains("rx"), "{:?}", a.notes);
         assert!(a.notes[1].contains("mode"), "{:?}", a.notes);

@@ -890,7 +890,7 @@ mod tests {
         s.duplex = "split".into();
         s.offset = "147.54".into();
         assert_eq!(ChanView::of(&s.channel().unwrap()).offset, "147.54000");
-        for bad in [("rx", "abc"), ("mode", "WFM"), ("rx_tone", "D029N"), ("squelch", "12"), ("power", "5W")] {
+        for bad in [("rx", "abc"), ("mode", "DV"), ("rx_tone", "D029N"), ("squelch", "12"), ("power", "5W")] {
             let mut b = v.clone();
             match bad.0 {
                 "rx" => b.rx = bad.1.into(),

@@ -10,7 +10,7 @@
 //!   both ways; `TSQL-R` and `DTCS-R` (reverse squelch) have no Ferrite equivalent and import without tones.
 //! - Skip `S` is skip, `P` priority. Power is High, Mid or Low (a watt figure: 4 W and up High, 1.5 W up Mid).
 //! - Comment carries the zone's name: exported, and on import a Comment that names a zone puts the channel in it.
-//! - Modes FM, NFM, AM, USB, LSB, CW; others (WFM, DV, DMR ...) are skipped with a note.
+//! - Modes FM, NFM, AM, WFM (BCR-33), USB, LSB, CW; others (DV, DMR ...) are skipped with a note.
 //! - Latitude and Longitude (or Lat, Long, Lon, Lng), as some RepeaterBook exports have, are the channel's position
 //!   (LINK-53); CHIRP has no such column, so an export leaves positions out.
 //!
@@ -284,7 +284,7 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
         let mode = get(r, "Mode");
         let mode = if mode.is_empty() { "FM".to_string() } else { mode };
         let Some(m) = MODES.iter().find(|m| m.eq_ignore_ascii_case(&mode)) else {
-            note(format!("mode {mode}: Ferrite has FM, NFM, AM, USB, LSB and CW: skipped"));
+            note(format!("mode {mode}: Ferrite has FM, NFM, AM, WFM, USB, LSB and CW: skipped"));
             out.skipped += 1;
             continue;
         };
@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn imports_chirps_columns() {
         let i = import(FILE, &zones()).unwrap();
-        assert_eq!(i.skipped, 1, "{:?}", i.notes); // WFM
+        assert_eq!(i.skipped, 0, "{:?}", i.notes); // WFM imports (BCR-33)
         let by = |n: u16| i.channels.iter().find(|c| c.number == n).unwrap();
         // Location 0 is moved up: CHIRP's 0 is channel 1.
         assert_eq!(
@@ -565,7 +565,7 @@ mod tests {
         assert!(by(7).rx_only);
         let l = by(9);
         assert_eq!((l.name.as_str(), l.rx_tone.as_str(), l.step.as_str()), ("A very long chan", "off", "12.5 kHz"));
-        assert!(i.notes.iter().any(|n| n.contains("WFM")) && i.notes.iter().any(|n| n.contains("reverse squelch")));
+        assert!(i.notes.iter().any(|n| n.contains("reverse squelch")));
     }
 
     /// Export then import gives the same channels (zones by name in Comment, tones in CHIRP's columns).
@@ -617,16 +617,16 @@ mod tests {
     const REPEATERBOOK: &str = include_str!("../../tests/e2e/fixtures/repeaterbook-bc.csv");
 
     /// A CHIRP "Export to CSV" from a radio (tests/e2e/fixtures/chirp-radio-export.csv): Location from 0, every
-    /// column, power in watts; the WFM and DV rows skipped with their notes.
+    /// column, power in watts; the DV row skipped with its note (WFM imports: BCR-33).
     #[test]
     fn chirp_radio_export() {
         let i = import(RADIO, &zones()).unwrap();
-        assert_eq!((i.channels.len(), i.skipped), (10, 2), "{:?}", i.notes);
-        assert_eq!(i.notes.len(), 2);
-        assert!(i.notes[0].starts_with("line 10: mode WFM") && i.notes[0].ends_with("skipped"), "{:?}", i.notes);
-        assert!(i.notes[1].starts_with("line 11: mode DV") && i.notes[1].ends_with("skipped"), "{:?}", i.notes);
+        assert_eq!((i.channels.len(), i.skipped), (11, 1), "{:?}", i.notes);
+        assert_eq!(i.notes.len(), 1);
+        assert!(i.notes[0].starts_with("line 11: mode DV") && i.notes[0].ends_with("skipped"), "{:?}", i.notes);
         let nums: Vec<u16> = i.channels.iter().map(|c| c.number).collect();
-        assert_eq!(nums, [1, 2, 3, 4, 5, 6, 7, 8, 11, 12]);
+        assert_eq!(nums, [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12]);
+        assert_eq!(i.channels.iter().find(|c| c.number == 9).unwrap().mode, "WFM");
         let by = |n: &str| i.channels.iter().find(|c| c.name == n).unwrap();
         let t =
             |c: &ChanView| (c.duplex.clone(), c.offset.clone(), c.tx_tone.clone(), c.rx_tone.clone(), c.mode.clone());
@@ -716,7 +716,7 @@ mod tests {
         assert!(i.channels.iter().any(|c| c.zone == Some(1))); // "Repeaters" by Comment
         let t = table([1, 2, 3, 500], &["Local", "Repeaters"]);
         let z = into_new_zone(&i.channels, &t, "My file");
-        assert_eq!((z.room.as_str(), z.name_error.as_str(), z.numbers.as_str()), ("", "", "501-508"));
+        assert_eq!((z.room.as_str(), z.name_error.as_str(), z.numbers.as_str()), ("", "", "501-509"));
         assert_eq!(z.zones.iter().map(|z| (z.number, z.name.as_str())).collect::<Vec<_>>(), [(3, "My file")]);
         assert!(z.channels.iter().all(|c| c.zone == Some(2)));
         let names: Vec<&str> = z.channels.iter().map(|c| c.name.as_str()).collect();
@@ -725,15 +725,15 @@ mod tests {
         for c in &z.channels {
             assert_eq!(crate::plan::check_channel(c, 3), None);
         }
-        // No room after 3995: the first free run that holds 8.
+        // No room after 3995: the first free run that holds 9.
         let t = table((1..=5).chain([3995]), &[]);
-        assert_eq!(into_new_zone(&i.channels, &t, "x").numbers, "6-13");
-        // No run of 8: the free numbers from 1.
+        assert_eq!(into_new_zone(&i.channels, &t, "x").numbers, "6-14");
+        // No run of 9: the free numbers from 1.
         let t = table((1..=4000).filter(|n| n % 4 != 0), &[]);
-        assert_eq!(into_new_zone(&i.channels, &t, "x").numbers, "4, 8, 12, 16, 20, 24, 28, 32");
+        assert_eq!(into_new_zone(&i.channels, &t, "x").numbers, "4, 8, 12, 16, 20, 24, 28, 32, 36");
         // Too few free numbers, or no zone left: the option is off.
         let t = table(1..=3995, &[]);
-        assert_eq!(into_new_zone(&i.channels, &t, "x").room, "8 channels, but only 5 channel numbers are free");
+        assert_eq!(into_new_zone(&i.channels, &t, "x").room, "9 channels, but only 5 channel numbers are free");
         let full: Vec<String> = (1..=512).map(|k| format!("Z{k}")).collect();
         let t = table([1], &full.iter().map(|s| s.as_str()).collect::<Vec<_>>());
         assert!(into_new_zone(&i.channels, &t, "x").room.contains("512 zones"));

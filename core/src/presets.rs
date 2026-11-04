@@ -16,7 +16,7 @@ use crate::radioside::RadioSide;
 use crate::records::{begin_payload, delete_payload, write_payloads};
 use ferrite_app::data::RangePreset;
 use ferrite_app::persist::{Persist, Sink, Source};
-use ferrite_app::slot::{MODES, SLOT_MODES, STEPS, STEP_12K5};
+use ferrite_app::slot::{MODES, STEPS, STEP_12K5};
 use ferrite_core::freq::mhz;
 use ferrite_core::link::{msg, what, PRESET_SKIPS_MAX};
 use ferrite_ui::text::Buf;
@@ -151,7 +151,7 @@ fn step_words() -> Vec<String> {
 }
 
 fn mode_words() -> Vec<String> {
-    MODES[..SLOT_MODES].iter().map(|s| s.to_string()).collect()
+    MODES[..3].iter().map(|s| s.to_string()).collect() // a range preset: FM, NFM or AM
 }
 
 impl PresetView {
