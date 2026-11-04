@@ -1014,7 +1014,7 @@ pub fn view(rec: &[u8], ex: &Extras) -> View {
                 path: id,
                 name: name.into(),
                 sub: sub.into(),
-                help: help.into(),
+                help,
                 value: got.value,
                 changed: got.changed,
                 kind,

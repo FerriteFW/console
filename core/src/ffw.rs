@@ -88,7 +88,7 @@ pub fn target_problem(name: &str, addr: u32, size: u64, max: u64) -> Option<Stri
             return Some(format!("{name}: aimed at {what} (0x{addr:06X}-0x{:06X}): refused whatever the manifest says", end - 1));
         }
     }
-    if addr % data::SECTOR != 0 {
+    if !addr.is_multiple_of(data::SECTOR) {
         return Some(format!("{name}: 0x{addr:06X} is not on a 4 KB sector"));
     }
     if PART_REGIONS.iter().any(|r| addr >= r.start && end <= r.end as u64) {

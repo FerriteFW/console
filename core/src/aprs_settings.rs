@@ -165,7 +165,7 @@ pub fn view(settings_rec: &[u8], rec: &[u8], ex: &Extras) -> View {
                 path: id,
                 name: name.into(),
                 sub: sub.into(),
-                help: help.into(),
+                help,
                 value: got.value,
                 changed: got.changed,
                 kind,
