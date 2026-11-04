@@ -600,6 +600,18 @@ export const MigrateCopy = wasm.MigrateCopy;
 export type MigrateCopy = wasm.MigrateCopy;
 export const MigratePlan = wasm.MigratePlan;
 export type MigratePlan = wasm.MigratePlan;
+/** A checked update file, `.ffw` (core/src/ffw.rs; ferrite decision 335): its image and its SPI parts' writes. */
+export const FfwFile = wasm.FfwFile;
+export type FfwFile = wasm.FfwFile;
+export type FfwSummary = {
+  version: string;
+  build: string;
+  kind: string;
+  layout: number;
+  /** The release's trusted comment; null for an unsigned file (the developer option). */
+  signed: string | null;
+  parts: { file: string; addr: number; size: number }[];
+};
 export type MigrateSummary = {
   notes: string[];
   summary: {

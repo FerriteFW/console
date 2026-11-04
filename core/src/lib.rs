@@ -44,6 +44,7 @@ pub mod crossband;
 #[cfg(test)]
 mod codeplug_example;
 pub mod demo;
+pub mod ffw;
 pub mod firmware;
 pub mod install;
 pub mod keys;

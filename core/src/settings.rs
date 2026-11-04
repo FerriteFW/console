@@ -292,18 +292,23 @@ fn items(g: u8, sub: u8) -> &'static [ferrite_app::screens::groups::Entry] {
     Group { g, sub, row: 0 }.items()
 }
 
+/// A menu item's help line: in ferrite's text pack (ferrite UPD-22), which this host build of ferrite-app carries.
+fn help_text(e: &ferrite_app::screens::groups::Entry) -> String {
+    e.help().map(|t| ferrite_app::text::load(t).as_str().to_string()).unwrap_or_default()
+}
+
 /// The menu's leaves (settings and pages), in menu order: path, name, help, and the third-level list's name.
-pub(crate) fn leaves() -> Vec<(Vec<u8>, &'static str, &'static str, &'static str)> {
+pub(crate) fn leaves() -> Vec<(Vec<u8>, &'static str, String, &'static str)> {
     let mut out = Vec::new();
     for g in 1..=9u8 {
         for (i, e) in items(g, 0).iter().enumerate() {
             let m = i as u8 + 1;
             let sub = items(g, m);
             if sub.is_empty() {
-                out.push((vec![g, m], e.name(), e.help(), ""));
+                out.push((vec![g, m], e.name(), help_text(e), ""));
             } else {
                 for (j, s) in sub.iter().enumerate() {
-                    out.push((vec![g, m, j as u8 + 1], s.name(), s.help(), e.name()));
+                    out.push((vec![g, m, j as u8 + 1], s.name(), help_text(s), e.name()));
                 }
             }
         }
@@ -982,7 +987,7 @@ pub fn view(rec: &[u8], ex: &Extras) -> View {
                 if p[0] == 5 {
                     on_aprs.push(name);
                 } else {
-                    groups[g].items.push(term_item(sc, &s, t, ex, sub, help));
+                    groups[g].items.push(term_item(sc, &s, t, ex, sub, &help));
                 }
                 continue;
             }

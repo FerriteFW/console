@@ -146,7 +146,7 @@ pub fn view(settings_rec: &[u8], rec: &[u8], ex: &Extras) -> View {
         let mut items = Vec::new();
         for (p, name, help, sub) in leaves() {
             if let Some(t) = term.iter().find(|t| t.path == p && p[0] == 5) {
-                items.push(term_item(sc, &s, t, ex, sub, help));
+                items.push(term_item(sc, &s, t, ex, sub, &help));
                 continue;
             }
             let Some((_, first)) = paths.iter().find(|x| x.0 == p) else { continue };

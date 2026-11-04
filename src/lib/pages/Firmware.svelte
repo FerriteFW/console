@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Tools › Firmware Update: a Ferrite .btf into a radio already on Ferrite, over the cable. The checks and the
+  // Tools › Firmware Update: a Ferrite update file (.ffw, ferrite decision 335) or a bare .btf into a radio already on
+  // Ferrite, over the cable. The checks and the
   // bootloader's frames are the core's (tools/btf.py and tools/flash.py, ported); the flow is firmware.svelte.ts.
   import { firmware } from "../firmware.svelte";
   import { radio } from "../radio.svelte";
@@ -59,16 +60,17 @@
   </section>
 
   <details class="card" aria-label="Advanced" open={chosen || undefined}>
-    <summary>Advanced: install a .btf file</summary>
+    <summary>Advanced: install a file (.ffw or .btf)</summary>
     <div class="row">
-      <button class="btn" disabled={firmware.running} onclick={() => fileInput.click()}>Choose .btf…</button>
-      <input bind:this={fileInput} type="file" accept=".btf,.BTF,.minisig" multiple hidden aria-label="Firmware file" onchange={pick} />
+      <button class="btn" disabled={firmware.running} onclick={() => fileInput.click()}>Choose a file…</button>
+      <input bind:this={fileInput} type="file" accept=".ffw,.FFW,.btf,.BTF,.minisig" multiple hidden aria-label="Firmware file" onchange={pick} />
       {#if firmware.fileName}<span class="fname">{firmware.fileName}</span>{/if}
       {#if firmware.bundled}
         <button class="btn quiet" disabled={firmware.running} onclick={() => firmware.useBundled()}>Back to the bundled release</button>
       {/if}
     </div>
-    <p class="sub hint">Pick its .minisig with the .btf: Console checks Ferrite's signature. Update then installs this file.</p>
+    <p class="sub hint">A .ffw (a release: the firmware and its SPI parts, signed inside) installs whole. A bare .btf: pick its .minisig with it. Update then installs this file.</p>
+    <label class="opt"><input type="checkbox" checked={firmware.devUnsigned} disabled={firmware.running} onchange={(e) => firmware.setDevUnsigned((e.currentTarget as HTMLInputElement).checked)} aria-label="Allow unsigned files" /> Allow unsigned files (developer: your own builds of Ferrite)</label>
     {#if check}
       <dl class="facts" aria-label="File checks">
         <dt>Version</dt>
@@ -84,6 +86,10 @@
           <dd data-k="signature" class:signed={firmware.signature.kind === "signed"} class:bad={firmware.signature.kind === "bad"}>
             {firmware.signature.kind === "bad" ? "Doesn't verify" : signatureText(firmware.signature)}
           </dd>
+        {/if}
+        {#if firmware.ffwSummary}
+          <dt>SPI parts</dt>
+          <dd data-k="parts">{firmware.ffwSummary.parts.map((p) => `${p.file.replace(/^spi\//, "")} (${kb(p.size)})`).join(", ") || "none"}</dd>
         {/if}
         {#if check.describe}
           <dt>Image</dt>
@@ -142,6 +148,13 @@
     align-items: center;
     flex-wrap: wrap;
     margin-top: 8px;
+  }
+  .opt {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 8px;
+    color: var(--sub);
   }
   .fname {
     font-family: var(--mono, monospace);

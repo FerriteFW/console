@@ -64,6 +64,9 @@
             <li>Your channels and settings stay. Calibration is never touched.</li>
             <li>About {Math.max(30, Math.ceil(check.blocks / 8))} s. Keep the cable in and don't transmit.</li>
             <li>A firmware that stores your data in a new layout gets it moved as part of the update: Console backs it up first.</li>
+            {#if firmware.ffwSummary?.parts.length}
+              <li>Then its SPI parts ({firmware.ffwSummary.parts.map((p) => p.file.replace(/^spi\//, "")).join(", ")}) go in, and the radio restarts once more.</li>
+            {/if}
           </ul>
           <label class="opt"><input type="checkbox" bind:checked={migrate.saveFile} /> If the data moves, save its backup to a file too (Console keeps a copy either way)</label>
         {:else}
@@ -90,6 +93,8 @@
         <p class="sub">{firmware.pct}%{etaText(left)}</p>
       {:else if firmware.stage === "migrating"}
         <MigrateProgress />
+      {:else if firmware.stage === "parts"}
+        <progress max={firmware.partsTotal} value={firmware.partsDone} aria-label="SPI parts"></progress>
       {/if}
       {#if firmware.running}
         <p class="warn">Keep the cable in until this says done.</p>

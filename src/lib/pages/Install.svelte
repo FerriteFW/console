@@ -3,6 +3,7 @@
   // (InstallWizard.svelte), the flow install.svelte.ts; here only the start and the images under Advanced.
   // `#install` (focus) opens the wizard at once. Back to stock is its own tab (Restore.svelte).
   import { install as I } from "../install.svelte";
+  import { devOpts } from "../devopts.svelte";
   import { signatureText } from "../signature";
   import InstallWizard from "../components/InstallWizard.svelte";
 
@@ -47,10 +48,11 @@
     <div class="adv">
       <div>
         <h3>Ferrite image</h3>
-        <p class="sub">Use a file instead of the release included with Console. Pick its .minisig with it to check Ferrite's signature.</p>
-        <label class="btn">Use a file…<input type="file" accept=".btf,.BTF,.minisig" multiple hidden aria-label="Ferrite file" onchange={(e) => picked("ferrite", e)} /></label>
+        <p class="sub">Use a file instead of the release included with Console: a .ffw (the firmware and its SPI parts, signed inside), or a .btf with its .minisig.</p>
+        <label class="btn">Use a file…<input type="file" accept=".ffw,.FFW,.btf,.BTF,.minisig" multiple hidden aria-label="Ferrite file" onchange={(e) => picked("ferrite", e)} /></label>
+        <label class="sub opt"><input type="checkbox" checked={devOpts.allowUnsigned} onchange={(e) => { devOpts.allowUnsigned = (e.currentTarget as HTMLInputElement).checked; I.recheckFerrite(); }} aria-label="Allow unsigned files" /> Allow unsigned files (developer: your own builds of Ferrite)</label>
         {#if I.ferrite && I.ferriteCheck}
-          <p class="sub" data-k="release">Ferrite {I.ferriteCheck.version ?? "(no version)"} ({I.ferriteSource === "bundled" ? "included" : I.ferrite.name}){#if I.ferriteSignature && I.ferriteSignature.kind !== "bad"}. {signatureText(I.ferriteSignature)}{/if}</p>
+          <p class="sub" data-k="release">Ferrite {I.ferriteCheck.version ?? "(no version)"} ({I.ferriteSource === "bundled" ? "included" : I.ferrite.name}){#if I.ferriteSignature && I.ferriteSignature.kind !== "bad"}. {signatureText(I.ferriteSignature)}{/if}{#if I.ferriteFfw?.parts.length}. SPI parts: {I.ferriteFfw.parts.map((p) => p.file.replace(/^spi\//, "")).join(", ")}{/if}</p>
         {:else if I.releaseError}
           <p class="warn">{I.releaseError}</p>
         {/if}
@@ -68,6 +70,12 @@
 </div>
 
 <style>
+  .opt {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 8px;
+  }
   .page {
     display: flex;
     flex-direction: column;

@@ -32,7 +32,7 @@ if [ "$(cat node_modules/.ferrite-lock 2>/dev/null)" != "$lock" ]; then
   echo "$lock" > node_modules/.ferrite-lock
 fi
 log=$(mktemp)
-npm run -s build >"$log" 2>&1 || { cat "$log"; exit 1; }
+npm run -s build:dev >"$log" 2>&1 || { cat "$log"; exit 1; } # the developer build: the e2e tests connect through the bridge
 start=$(date +%s%N)
 set +e
 if [ "$full" = 1 ]; then npx playwright test "$@"; else npx playwright test "$@" >"$log" 2>&1; fi

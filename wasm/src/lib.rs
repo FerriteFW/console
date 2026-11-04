@@ -1,7 +1,7 @@
 //! The core for the browser. Structures cross as JSON strings (the UI parses them); bytes as `Uint8Array`.
 
 use ferrite_console_core::{
-    answers, aprs, aprs_settings, channels, chirp, demo, firmware, install, keys, library, lists, liveview, log, plan,
+    answers, aprs, aprs_settings, channels, chirp, demo, ffw, firmware, install, keys, library, lists, liveview, log, plan,
     migrate, records, sats, session, settings, signature, timing, ui, uid, wmm, zonecap,
 };
 use wasm_bindgen::prelude::*;
@@ -732,6 +732,60 @@ impl FirmwareUpdate {
         install::ferrite_update(btf, patch.as_deref())
             .map(|(u, _)| FirmwareUpdate(u))
             .map_err(|p| JsError::new(&p.join("; ")))
+    }
+}
+
+// The update file, `.ffw` (`ferrite_console_core::ffw`, ferrite decision 335).
+
+/// A checked `.ffw`: its image, and the raw writes that put its SPI parts on the radio after the MCU flash.
+#[wasm_bindgen]
+pub struct FfwFile {
+    f: ffw::Ffw,
+    steps: Vec<migrate::Step>,
+}
+
+#[wasm_bindgen]
+impl FfwFile {
+    /// Throws every problem, one a line, when the file isn't one to install (UPD-21, UPD-24); `dev_unsigned`: the
+    /// developer option that takes an unsigned file.
+    #[wasm_bindgen(constructor)]
+    pub fn new(b: &[u8], dev_unsigned: bool) -> Result<FfwFile, JsError> {
+        let f = ffw::read(b, dev_unsigned).map_err(|p| JsError::new(&p.join("\n")))?;
+        let steps = ffw::write_plan(&f.parts).map_err(|e| JsError::new(&e))?;
+        Ok(FfwFile { f, steps })
+    }
+    /// `{version, build, kind, layout, signed, parts: [{file, addr, size}]}`.
+    pub fn summary(&self) -> String {
+        let m = &self.f.manifest;
+        let parts: Vec<_> = self.f.parts.iter().map(|p| serde_json::json!({ "file": p.file, "addr": p.addr, "size": p.data.len() })).collect();
+        json(&serde_json::json!({ "version": m.version, "build": m.build, "kind": m.kind, "layout": m.layout, "signed": self.f.signed, "parts": parts }))
+    }
+    /// The MCU image (`firmware.btf`), for the usual checks and the bootloader.
+    pub fn btf(&self) -> Vec<u8> {
+        self.f.btf.clone()
+    }
+    /// The parts' raw writes: their number; then each one's kind ("erase", "program", "crc", "stamp"), message,
+    /// payload, a CRC's expected answer (-1 for the others) and the part it belongs to.
+    pub fn len(&self) -> usize {
+        self.steps.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.f.parts.is_empty()
+    }
+    pub fn kind(&self, i: usize) -> String {
+        self.steps[i].kind.into()
+    }
+    pub fn msg(&self, i: usize) -> u8 {
+        self.steps[i].msg
+    }
+    pub fn payload(&self, i: usize) -> Vec<u8> {
+        self.steps[i].payload.clone()
+    }
+    pub fn expect(&self, i: usize) -> f64 {
+        self.steps[i].expect.map_or(-1.0, |c| c as f64)
+    }
+    pub fn region(&self, i: usize) -> String {
+        self.steps[i].region.clone()
     }
 }
 

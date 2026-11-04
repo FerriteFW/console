@@ -1,12 +1,14 @@
-// Firmware Update: a Ferrite image into a radio that already runs Ferrite, over the cable, as ferrite's
-// tools/flash.py does it: link REBOOT (LINK-24), the port back at 115200, probes until the stock bootloader answers,
+// Firmware Update: a Ferrite update file (.ffw: the image and its SPI parts, ferrite decision 335) or a bare .btf
+// into a radio that already runs Ferrite, over the cable, as ferrite's tools/flash.py does it: link REBOOT (LINK-24), the port back at 115200, probes until the stock bootloader answers,
 // then hello, model, count, every 1 KB block and end; then the radio restarts and Console connects again.
 // The frames come from the Rust core (core/src/firmware.rs), only from a file its checks passed: the bootloader
 // only ever gets the image's own blocks.
 import { askRestart, BootPort } from "./bootflash";
 import {
+  FfwFile,
   FirmwareUpdate,
   P,
+  type FfwSummary,
   bootProbe,
   bootResultText,
   firmwareCheck,
@@ -22,6 +24,8 @@ import { signatureOf, signatureText, splitPicked, type Signed } from "./signatur
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
 import { migrate } from "./migrate.svelte";
+import { writeParts } from "./parts";
+import { devOpts } from "./devopts.svelte";
 
 const CMD_PROBE = 0x42;
 const ACK = 0x06;
@@ -38,7 +42,8 @@ const PROBE_GAP_MS = 15;
 const RESTART_WAIT_MS = 40_000;
 
 /** "migrating": the new firmware stores another layout than the chip's data: Finish the update runs as part of it. */
-export type Stage = "pick" | "ready" | "rebooting" | "probing" | "sending" | "restarting" | "migrating" | "done" | "failed";
+/** "parts": the .ffw's SPI parts going in over the raw writes, once the new firmware runs (UPD-21). */
+export type Stage = "pick" | "ready" | "rebooting" | "probing" | "sending" | "restarting" | "migrating" | "parts" | "done" | "failed";
 
 export const STAY_IN_BOOTLOADER = "The radio stays in the bootloader: start again (Resume).";
 
@@ -57,6 +62,16 @@ class Firmware {
   error = $state("");
   done = $state(0);
   blocks = $state(0);
+  /** A .ffw's contents (its parts written after the MCU flash); null for a bare .btf. */
+  ffwSummary = $state<FfwSummary | null>(null);
+  /** The developer option (devopts.svelte.ts): an unsigned .ffw (a local build) is taken (UPD-21). Off: only
+   *  Ferrite's signed releases. */
+  get devUnsigned() {
+    return devOpts.allowUnsigned;
+  }
+  /** The parts written so far (the "parts" stage). */
+  partsDone = $state(0);
+  partsTotal = $state(0);
   /** The radio before the update (INFO), and after. */
   before = $state<Firmware_ | null>(null);
   after = $state<Firmware_ | null>(null);
@@ -64,13 +79,16 @@ class Firmware {
   canResume = $state(false);
 
   private bytes: Uint8Array | null = null;
+  private ffw: FfwFile | null = null;
+  /** The files last picked, checked again when the developer option changes. */
+  private picked: File[] = [];
   private t: Transport | null = null;
   /** The radio answered HELLO as Ferrite this session (start), not just a cable opened as it is (openAndResume). */
   private trusted = false;
 
   /** Steps running now: the bar's Disconnect waits. */
   get running() {
-    return ["rebooting", "probing", "sending", "restarting", "migrating"].includes(this.stage);
+    return ["rebooting", "probing", "sending", "restarting", "migrating", "parts"].includes(this.stage);
   }
 
   get pct() {
@@ -105,6 +123,7 @@ class Firmware {
       await loadCore();
       if (sha256Hex(b) !== r.sha256.toLowerCase()) throw new Error(`${r.file} doesn't match its checksum: Console won't use it`);
       const files = [new File([b as BlobPart], r.file)];
+      // A .ffw carries its signature inside; a bare .btf's comes from the manifest.
       if (r.minisig) files.push(new File([r.minisig], `${r.file}.minisig`));
       await this.pick(files);
     } catch (e) {
@@ -112,12 +131,24 @@ class Firmware {
     }
   }
 
-  /** The picked files (the .btf, and its .minisig when there is one), checked by the core. */
+  /** The developer option changed: the last picked file is checked again under it. */
+  async setDevUnsigned(on: boolean) {
+    devOpts.allowUnsigned = on;
+    if (this.picked.length && !this.running) await this.pick(this.picked);
+  }
+
+  /** The picked files (a .ffw; or a .btf, and its .minisig when there is one), checked by the core. */
   async pick(picked: FileList | File[]) {
     if (this.running) return;
     const files = Array.from(picked);
     if (!files.length) return;
+    this.picked = files;
     await loadCore();
+    this.ffw?.free();
+    this.ffw = null;
+    this.ffwSummary = null;
+    const ffwFile = files.find((f) => /\.ffw$/i.test(f.name));
+    if (ffwFile) return this.pickFfw(ffwFile);
     const { btf: file, sig } = splitPicked(files);
     this.fileName = file?.name ?? files[0].name;
     this.error = "";
@@ -127,7 +158,7 @@ class Firmware {
     if (!file) {
       this.check = null;
       this.bytes = null;
-      this.error = `${files[0].name} is not a .btf file. Build one with tools/mkbtf.sh.`;
+      this.error = `${files[0].name} is not a .ffw or .btf file. Build one with tools/mkbtf.sh.`;
       this.stage = "pick";
       return;
     }
@@ -143,8 +174,42 @@ class Firmware {
     if (this.stage !== "failed") this.stage = c.problems.length ? "pick" : "ready";
   }
 
+  /** UPD-21, UPD-24: a .ffw checked whole by the core (its signature, every hash, each part's target); then its
+   *  image as a picked .btf. */
+  private async pickFfw(file: File) {
+    this.fileName = file.name;
+    this.error = "";
+    this.after = null;
+    this.done = 0;
+    this.signature = null;
+    let f: FfwFile;
+    try {
+      f = new FfwFile(new Uint8Array(await file.arrayBuffer()), this.devUnsigned);
+    } catch (e) {
+      this.check = null;
+      this.bytes = null;
+      this.error = `Console won't install ${file.name}: ${(e as Error).message}`;
+      if (this.stage !== "failed") this.stage = "pick";
+      return;
+    }
+    const summary = JSON.parse(f.summary()) as FfwSummary;
+    const btf = f.btf();
+    const c = firmwareCheck(btf);
+    this.signature = summary.signed !== null ? { kind: "signed", comment: summary.signed } : { kind: "unsigned" };
+    this.ffw = f;
+    this.ffwSummary = summary;
+    this.check = c;
+    this.bytes = c.problems.length ? null : btf;
+    this.blocks = c.blocks;
+    if (this.stage !== "failed") this.stage = c.problems.length ? "pick" : "ready";
+  }
+
   clearFile() {
     if (this.running) return;
+    this.ffw?.free();
+    this.ffw = null;
+    this.ffwSummary = null;
+    this.picked = [];
     this.check = null;
     this.signature = null;
     this.bytes = null;
@@ -369,10 +434,34 @@ class Firmware {
       }
       this.message = "";
     }
+    if (this.ffw && !this.ffw.is_empty()) await this.parts(this.ffw);
     this.after = { firmware: radio.info?.firmware ?? radio.hello?.firmware ?? "?", build: radio.info?.build?.name ?? "" };
     this.t = null;
     this.stage = "done";
     this.message = "";
+  }
+
+  /** UPD-21: the .ffw's SPI parts over the cable's raw writes, then the radio restarts with them. A failure here
+   *  leaves the new firmware running with its fallbacks (short messages, the plain terminal, no logo). */
+  private async parts(ffw: FfwFile) {
+    this.stage = "parts";
+    this.message = "Writing the update's SPI parts (text, logo, terminal pages)…";
+    const got = radio.takeForUpdate();
+    if (!got) throw new Error("The radio isn't connected: its SPI parts weren't written. Connect it and install the same file again.");
+    try {
+      await writeParts(got.t, got.link, ffw, (m, d, n) => {
+        this.message = m;
+        this.partsDone = d;
+        this.partsTotal = n;
+      }, () => {
+        if (!radio.holds(got.t)) throw new Abort("The cable went away (unplugged or disconnected) while the SPI parts were written: install the same file again.");
+      });
+    } catch (e) {
+      throw new Error(`The firmware is updated, but its SPI parts didn't go in (${(e as Error).message}). It runs with short messages until they do: install the same file again.`);
+    } finally {
+      await radio.handBack(got.t);
+    }
+    if (radio.phase !== "connected") throw new Error(radio.error || "Connecting again failed after the SPI parts.");
   }
 
   private fail(e: unknown, resumable: boolean) {

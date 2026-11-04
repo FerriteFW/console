@@ -16,6 +16,7 @@ import {
   backupCheck,
   backupName,
   bootProbe,
+  FfwFile,
   firmwareCheck,
   FirmwareUpdate,
   Fdump,
@@ -37,12 +38,15 @@ import {
   statusText,
   type BackupCheck,
   type FdStep,
+  type FfwSummary,
   type FirmwareCheck,
   type ImageCheck,
   type RestoreSummary,
   type SsbFound,
 } from "./core";
 import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
+import { writeParts } from "./parts";
+import { devOpts } from "./devopts.svelte";
 import { Link, TimeoutError } from "./link";
 import { radio } from "./radio.svelte";
 import { sleep, type Transport } from "./transport/types";
@@ -278,6 +282,11 @@ class Install {
   ferriteSource = $state<"bundled" | "file" | "">("");
   /** The images' minisig signatures (signature.ts): a bad one is also a problem in the image's check. */
   ferriteSignature = $state<Signed | null>(null);
+  /** A .ffw's contents (ferrite decision 335): its SPI parts go in once Ferrite runs. Null for a bare .btf. */
+  ferriteFfw = $state<FfwSummary | null>(null);
+  /** The Ferrite file as picked or bundled (a .ffw is checked again when the developer option changes). */
+  private ferriteOrig: { p: Picked; source: "bundled" | "file"; minisig: string | null } | null = null;
+  private ffw: FfwFile | null = null;
   readerFile = $state<Picked | null>(null);
   readerCheck = $state<ImageCheck | null>(null);
   readerSource = $state<"bundled" | "file" | "">("");
@@ -368,8 +377,35 @@ class Install {
     }
   }
 
-  /** A signature that doesn't verify refuses the image like a failed check. */
+  /** A signature that doesn't verify refuses the image like a failed check. A .ffw (UPD-21, UPD-24) is checked
+   *  whole by the core first (its signature, every hash, each part's target); its image then as a .btf. */
   setFerrite(p: Picked, source: "bundled" | "file", minisig: string | null) {
+    this.ferriteOrig = { p, source, minisig };
+    this.ffw?.free();
+    this.ffw = null;
+    this.ferriteFfw = null;
+    if (/\.ffw$/i.test(p.name)) {
+      let f: FfwFile;
+      try {
+        f = new FfwFile(p.bytes, devOpts.allowUnsigned);
+      } catch (e) {
+        const c = firmwareCheck(new Uint8Array(0));
+        c.problems = (e as Error).message.split("\n");
+        this.ferrite = p;
+        this.ferriteCheck = c;
+        this.ferriteSignature = null;
+        this.ferriteSource = source;
+        return;
+      }
+      const summary = JSON.parse(f.summary()) as FfwSummary;
+      this.ffw = f;
+      this.ferriteFfw = summary;
+      this.ferrite = { name: p.name, bytes: f.btf() };
+      this.ferriteCheck = firmwareCheck(this.ferrite.bytes);
+      this.ferriteSignature = summary.signed !== null ? { kind: "signed", comment: summary.signed } : { kind: "unsigned" };
+      this.ferriteSource = source;
+      return;
+    }
     const sig = signatureOf(p.bytes, minisig);
     const c = firmwareCheck(p.bytes);
     if (sig.kind === "bad") c.problems.push(signatureText(sig));
@@ -389,9 +425,21 @@ class Install {
     this.readerSource = source;
   }
 
-  /** Ferrite and the reader take a .btf with its .minisig (signature.ts); stock and backup the first file. */
+  /** The developer option changed: the Ferrite file is checked again under it. */
+  recheckFerrite() {
+    const o = this.ferriteOrig;
+    if (o && !this.running) this.setFerrite(o.p, o.source, o.minisig);
+  }
+
+  /** Ferrite takes a .ffw, or a .btf with its .minisig (signature.ts), as the reader does; stock and backup the
+   *  first file. */
   async pickFile(kind: "ferrite" | "reader" | "stock" | "backup", files: File[]) {
     await loadCore();
+    const ffwFile = kind === "ferrite" ? files.find((f) => /\.ffw$/i.test(f.name)) : undefined;
+    if (ffwFile) {
+      this.setFerrite({ name: ffwFile.name, bytes: new Uint8Array(await ffwFile.arrayBuffer()) }, "file", null);
+      return;
+    }
     if (kind === "ferrite" || kind === "reader") {
       const { btf, sig } = splitPicked(files);
       // No .btf among them: the image's own check refuses whatever came first, as before.
@@ -880,6 +928,7 @@ class Install {
       await this.flash(update, "Ferrite");
       this.message = "Sent. Ferrite starts, sets up its storage and opens its first-run setup…";
       this.installed = (await this.hello(FIRST_BOOT_MS)) ?? "";
+      if (this.ffw && !this.ffw.is_empty()) await this.parts(this.ffw);
       this.installStep = "done";
       this.resetRestore();
       this.message = "";
@@ -891,6 +940,24 @@ class Install {
       if (t) await radio.handBack(t).catch(() => {});
     } catch (e) {
       this.fail("install", e);
+    }
+  }
+
+  /** UPD-21: the .ffw's SPI parts over the cable once Ferrite runs (the text pack, the logo, the terminal's pages);
+   *  then the radio restarts with them. Without them Ferrite runs with its fallbacks. */
+  private async parts(f: FfwFile) {
+    const t = this.t!;
+    this.message = "Writing Ferrite's SPI parts (text, logo, terminal pages)…";
+    const link = new Link(t);
+    try {
+      await link.open();
+      await link.hello();
+      await writeParts(t, link, f, (m) => (this.message = m), () => this.held());
+    } catch (e) {
+      throw new Error(`Ferrite is installed, but its SPI parts didn't go in (${(e as Error).message}). It runs with short messages until they do: install the same file again from Update.`);
+    } finally {
+      link.close();
+      this.wire?.attach();
     }
   }
 

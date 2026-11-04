@@ -1,10 +1,12 @@
-// The Install page's bundled files: the Ferrite release and the reader image, copied into public/firmware/ with a
-// manifest of their SHA-256s (UPD-15), which the page checks before using either. Never committed: the release
-// build runs this, from the checkouts next to this one.
-// A release image signed by Ferrite's CI has <image>.minisig beside it: copied too, and its text goes in the
-// manifest entry as `minisig`, which Console checks against Ferrite's public key (core/src/signature.rs).
-//   node scripts/bundle-firmware.mjs [ferrite.btf] [reader.btf]
-// Defaults: ../ferrite/target/ferrite-tx.btf (tools/mkbtf.sh tx) and ../ferrite/target/ferrite-reader.btf
+// The Install and Update pages' bundled files: the Ferrite release and the reader image, copied into
+// public/firmware/ with a manifest of their SHA-256s (UPD-15), which the pages check before using either. Never
+// committed: the release build runs this, from the checkouts next to this one.
+// The Ferrite release is its update file, .ffw (ferrite decision 335: the image and its SPI parts; a CI release's
+// signature is inside it, checked by core/src/ffw.rs). A local build's .ffw is unsigned: Console takes it only with
+// "Allow unsigned files" on. A bare image signed by Ferrite's CI (the reader) has <image>.minisig beside it: copied
+// too, and its text goes in the manifest entry as `minisig` (core/src/signature.rs).
+//   node scripts/bundle-firmware.mjs [ferrite.ffw] [reader.btf]
+// Defaults: ../ferrite/target/ferrite-tx.ffw (tools/mkbtf.sh tx) and ../ferrite/target/ferrite-reader.btf
 // (tools/mkbtf.sh reader: Ferrite's read-only reader, ferrite decision 264). The old C reader still works:
 //   node scripts/bundle-firmware.mjs ../ferrite/target/ferrite-tx.btf ../fw/build/target/hwtest.btf
 import { createHash } from "node:crypto";
@@ -13,7 +15,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const [ferrite = join(root, "../ferrite/target/ferrite-tx.btf"), reader = join(root, "../ferrite/target/ferrite-reader.btf")] = process.argv.slice(2);
+const [ferrite = join(root, "../ferrite/target/ferrite-tx.ffw"), reader = join(root, "../ferrite/target/ferrite-reader.btf")] = process.argv.slice(2);
 const out = join(root, "public/firmware");
 // Only what the manifest lists: older runs' leftovers (bench or test images) never ride along.
 rmSync(out, { recursive: true, force: true });
@@ -30,12 +32,19 @@ function entry(path) {
   return e;
 }
 
-// The version Ferrite carries ("v0.1.0"), read from its workspace (the image itself is encrypted in the .btf).
+// The version Ferrite carries ("v0.1.0"): a .ffw's manifest says it; else read from its workspace (the image itself
+// is encrypted in the .btf).
 const cargo = readFileSync(join(root, "../ferrite/Cargo.toml"), "utf8");
-const version = `v${cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? "?"}`;
+let version = `v${cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? "?"}`;
+if (ferrite.endsWith(".ffw")) {
+  // manifest.json is the zip's first entry, stored: its bytes follow the 30-byte local header and the name.
+  const z = readFileSync(ferrite);
+  const at = 30 + z.readUInt16LE(26) + z.readUInt16LE(28);
+  version = `v${JSON.parse(z.subarray(at, at + z.readUInt32LE(18)).toString("utf8")).version}`;
+}
 // The reader's version: Ferrite's for its own reader (built from the same workspace), "hwtest" for the C one.
 const readerVersion = basename(reader).startsWith("ferrite-reader") ? `ferrite-reader ${version}` : "hwtest";
 const manifest = { ferrite: { version, ...entry(ferrite) }, reader: { version: readerVersion, ...entry(reader) } };
 writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 1) + "\n");
-const signed = (e) => (e.minisig ? " (signed)" : "");
+const signed = (e) => (e.minisig || e.file.endsWith(".ffw") ? (e.file.endsWith(".ffw") ? " (its signature inside, if a release)" : " (signed)") : "");
 console.log(`public/firmware: ${manifest.ferrite.file} (${version})${signed(manifest.ferrite)}, ${manifest.reader.file}${signed(manifest.reader)}`);
