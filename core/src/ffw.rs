@@ -13,7 +13,7 @@
 
 use crate::firmware::crc32;
 use crate::migrate::Step;
-use ferrite_core::layout::{CALIBRATION, FONTS, LANGUAGES, LAYOUT_HEADER, LAYOUT_VERSION, MIGRATE_MARK, SCREENS, TEXT_PACK, UPDATE_AREA};
+use ferrite_core::layout::{CALIBRATION, DICTIONARY, FONTS, LANGUAGES, LAYOUT_HEADER, LAYOUT_VERSION, MIGRATE_MARK, SCREENS, TEXT_PACK, UPDATE_AREA};
 use ferrite_core::link::{data, msg};
 use ferrite_core::sha256::sha256;
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,7 @@ const PART_HEADER: usize = ferrite_core::part::HEADER;
 const FORBIDDEN: [(&str, Range<u32>); 4] =
     [("calibration", CALIBRATION), ("the update area", UPDATE_AREA), ("the layout header", LAYOUT_HEADER), ("the migration mark", MIGRATE_MARK)];
 /// The layout 3 regions parts may go in.
-const PART_REGIONS: [Range<u32>; 4] = [TEXT_PACK, LANGUAGES, SCREENS, FONTS];
+const PART_REGIONS: [Range<u32>; 5] = [TEXT_PACK, DICTIONARY, LANGUAGES, SCREENS, FONTS];
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FileEntry {
