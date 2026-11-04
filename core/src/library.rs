@@ -680,6 +680,53 @@ pub fn org_groups(names: &[String], min: usize) -> Vec<String> {
     orgs.iter().map(|o| group[&o.to_lowercase()].clone()).collect()
 }
 
+/// A tone as Console writes it ("100.0", "D023N", "D023I", "" or "off") as CHAN-3's tone word: tenths of a hertz
+/// for CTCSS (60.0-260.0), the octal code with the DCS flags for DCS.
+pub fn tone_word(t: &str) -> Result<u16, String> {
+    use ferrite_app::screens::tones::{CTCSS_MAX, CTCSS_MIN};
+    use ferrite_app::slot::{DCS_FLAG, DCS_INV};
+    let t = t.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("off") {
+        return Ok(0);
+    }
+    if let Some(d) = t.strip_prefix(['D', 'd']) {
+        let (code, inv) = match d.as_bytes().last() {
+            Some(b'N' | b'n') => (&d[..d.len() - 1], false),
+            Some(b'I' | b'i') => (&d[..d.len() - 1], true),
+            _ => (d, false),
+        };
+        let c = u16::from_str_radix(code, 8).ok().filter(|_| code.len() == 3).ok_or(format!("{t}: not a DCS code"))?;
+        return Ok(DCS_FLAG | if inv { DCS_INV } else { 0 } | c);
+    }
+    let v: f64 = t.parse().map_err(|_| format!("{t}: not a tone"))?;
+    let w = (v * 10.0).round() as u16;
+    if !(CTCSS_MIN..=CTCSS_MAX).contains(&w) {
+        return Err(format!("{t}: outside 60.0 to 260.0 Hz"));
+    }
+    Ok(w)
+}
+
+/// `SLOT`'s payload (LINK-33, decision 347) that tunes slot `slot` (0-2) to a VFO as the library's Tune does:
+/// frequency, mode, both tones and the shift, every time, so nothing of the slot's last frequency lingers.
+pub fn slot_tune(slot: u8, hz: u64, mode: &str, tx_tone: &str, rx_tone: &str, shift_hz: i64) -> Result<Vec<u8>, String> {
+    use ferrite_core::link::slot as f;
+    let m = match mode.to_ascii_uppercase().as_str() {
+        "FM" => 0u8,
+        "NFM" => 1,
+        "AM" => 2,
+        _ => return Err(format!("{mode}: FM, NFM or AM")),
+    };
+    let f10 = u32::try_from(hz / 10).map_err(|_| "frequency out of range".to_string())?;
+    let mut p = vec![slot, f::FREQ | f::MODE | f::RX_TONE | f::TX_TONE | f::VFO | f::OFFSET];
+    p.extend_from_slice(&f10.to_le_bytes());
+    p.push(m);
+    p.extend_from_slice(&tone_word(rx_tone)?.to_le_bytes());
+    p.extend_from_slice(&tone_word(tx_tone)?.to_le_bytes());
+    p.extend_from_slice(&((shift_hz / 10) as i32).to_le_bytes());
+    p.push(0);
+    Ok(p)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1001,5 +1048,23 @@ mod tests {
         // Shared words beyond the first: one licensee's entries under its whole name.
         let n: Vec<String> = ["bc hydro north", "bc hydro south"].iter().map(|s| s.to_string()).collect();
         assert_eq!(org_groups(&n, 2), ["bc hydro", "bc hydro"]);
+    }
+
+    /// LINK-33 (decision 347): the library's tune as `SLOT`'s payload, run by ferrite's link session: the slot's
+    /// VFO at the frequency, mode, tones and shift asked for.
+    #[test]
+    fn slot_tune_payload() {
+        assert_eq!(tone_word("100.0"), Ok(1000));
+        assert_eq!(tone_word("D023N"), Ok(ferrite_app::slot::DCS_FLAG | 0o23));
+        assert_eq!(tone_word("D754I"), Ok(ferrite_app::slot::DCS_FLAG | ferrite_app::slot::DCS_INV | 0o754));
+        assert_eq!((tone_word(""), tone_word("off")), (Ok(0), Ok(0)));
+        assert!(tone_word("300.0").is_err() && tone_word("D089N").is_err());
+        let p = slot_tune(1, 146_940_000, "FM", "100.0", "", -600_000).unwrap();
+        let mut rs = crate::radioside::RadioSide::new();
+        let (st, a) = rs.ask(ferrite_core::link::msg::SLOT, &p);
+        assert_eq!(st, 0, "{a:?}");
+        // The answer is the slot as it is after: its VFO at 146.940 MHz.
+        assert!(a.windows(4).any(|w| w == 14_694_000u32.to_le_bytes()), "{a:?}");
+        assert!(slot_tune(0, 146_520_000, "USB", "", "", 0).is_err());
     }
 }

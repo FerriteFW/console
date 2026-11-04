@@ -89,6 +89,14 @@ pub fn home_channel(rec: &[u8]) -> Option<u16> {
     settings_of(rec).home_ch.map(|n| n + 1)
 }
 
+/// CHAN-17 (decision 347): the record with its home channel set (1-1000 as people see it, or none), for the
+/// settings write that replaces the terminal's `home` line.
+pub fn with_home(rec: &[u8], home: Option<u16>) -> Vec<u8> {
+    let mut s = settings_of(rec);
+    s.home_ch = home.filter(|n| *n >= 1).map(|n| n - 1);
+    record_of(&s)
+}
+
 /// The record's length in this Console's ferrite (the radio's INFO says its own: LINK-21, version-tied).
 pub fn record_len() -> usize {
     record_of(&Settings::DEFAULT).len()
@@ -490,6 +498,54 @@ pub(crate) fn term_set(
     sc.set(&t.path, value)?;
     let now = sc.dump_values();
     Ok(ex.iter().map(|(k, v)| (k.clone(), now.get(k).cloned().unwrap_or_else(|| v.clone()))).collect())
+}
+
+/// LINK-66 (decision 347): Watch (0 1 1), Battery Save (0 7 7 1) and the message sound (0 7 5 5), the settings the
+/// settings record doesn't hold, as the radio record carries them: their values as the menu names them.
+const WATCH_NAMES: [&str; 3] = ["Off", "A+B", "A+B+C"];
+const WATCH_ID: &str = "0 1 1";
+const BSAVE_ID: &str = "0 7 7 1";
+const SOUND_ID: &str = "0 7 5 5";
+
+fn bsave_name(v: u8) -> String {
+    if v == 0 { "Off".into() } else { format!("Level {v}") }
+}
+
+fn bsave_value(t: &str) -> Option<u8> {
+    if t == "Off" {
+        return Some(0);
+    }
+    t.strip_prefix("Level ")?.parse().ok().filter(|v| (1..=3).contains(v))
+}
+
+/// The terminal-backed settings' values from the radio record the radio sent (LINK-66).
+pub fn extras_from_radio(rec: &[u8]) -> Extras {
+    let mut e = Extras::new();
+    if let [w, b, _, sound, ..] = *rec {
+        if let Some(n) = WATCH_NAMES.get(w as usize) {
+            e.insert(WATCH_ID.into(), (*n).into());
+        }
+        if b <= 3 {
+            e.insert(BSAVE_ID.into(), bsave_name(b));
+        }
+        if let Some(n) = ferrite_core::tonegen::CHIME_NAMES.get(sound as usize) {
+            e.insert(SOUND_ID.into(), (*n).into());
+        }
+    }
+    e
+}
+
+/// The radio record's write (its first four bytes) that takes a radio from `base` to `want`, if any value differs;
+/// a value not in `want` keeps `base`'s.
+pub(crate) fn radio_write(base: &Extras, want: &Extras) -> Option<Vec<u8>> {
+    let pick = |id: &str| want.get(id).or_else(|| base.get(id));
+    if [WATCH_ID, BSAVE_ID, SOUND_ID].iter().all(|id| want.get(*id).is_none_or(|v| base.get(*id) == Some(v))) {
+        return None;
+    }
+    let w = WATCH_NAMES.iter().position(|n| Some(&n.to_string()) == pick(WATCH_ID))?;
+    let b = bsave_value(pick(BSAVE_ID)?)?;
+    let s = ferrite_core::tonegen::CHIME_NAMES.iter().position(|n| Some(&n.to_string()) == pick(SOUND_ID))?;
+    Some(vec![w as u8, b, 0, s as u8])
 }
 
 /// The `set` lines that take a radio from `base` to `want` (the terminal-backed settings that differ).
@@ -1165,7 +1221,6 @@ pub fn plan(base: &[u8], base_ex: &Extras, want: &[u8], want_ex: &Extras) -> Pla
     let changes = diff(base, base_ex, want, want_ex);
     let mut problems = Vec::new();
     let mut ops = Vec::new();
-    let mut cmds = Vec::new();
     let problem = |e: String| Problem { what: "settings".into(), number: 0, error: e };
     if base.len() != record_len() || want.len() != record_len() {
         problems.push(problem(format!(
@@ -1186,7 +1241,11 @@ pub fn plan(base: &[u8], base_ex: &Extras, want: &[u8], want_ex: &Extras) -> Pla
         let page: Vec<String> =
             term_items().iter().filter(|t| t.path[0] != 5).map(|t| path_text(&t.path)).collect();
         let only = |e: &Extras| -> Extras { e.iter().filter(|(k, _)| page.contains(k)).map(|(k, v)| (k.clone(), v.clone())).collect() };
-        cmds = term_cmds(&only(base_ex), &only(want_ex));
+        // Checked here with `set` lines on the scratch radio; the radio itself gets the radio record (decision 347).
+        let cmds = term_cmds(&only(base_ex), &only(want_ex));
+        if let Some(r) = radio_write(&only(base_ex), &only(want_ex)) {
+            ops.push(Op { kind: "write", what: "radio", number: 0, msg: msg::WRITE, payloads: write_payloads(what::RADIO, 0, &r) });
+        }
         let term = term_items();
         let run = linkside(|l| {
             l.term = Some((term, base_ex.clone()));
@@ -1219,7 +1278,7 @@ pub fn plan(base: &[u8], base_ex: &Extras, want: &[u8], want_ex: &Extras) -> Pla
             }
         }
     }
-    Plan { changes, begin: begin_payload(ops.len() as u16), ops, cmds, problems }
+    Plan { changes, begin: begin_payload(ops.len() as u16), ops, cmds: Vec::new(), problems }
 }
 
 /// The backup file: Console's own JSON, the record as the link carries it (hex), the terminal-backed settings'
@@ -1319,19 +1378,10 @@ pub fn restore(text: &str) -> Result<(Vec<u8>, Backup), String> {
 /// settings end.
 #[cfg(test)]
 pub(crate) fn read_extras(r: &mut RadioSide) -> Extras {
-    let (s, mut rest) = r.ask(msg::CMD, b"dump");
+    // As Console reads them since decision 347: the radio record (LINK-66), not the dump.
+    let (s, rest) = r.ask(msg::READ, &[what::RADIO, 0, 0, 0, 0, 200]);
     assert_eq!(s, 0, "{}", status_text(s, &rest));
-    let mut text = String::new();
-    loop {
-        text.push_str(&String::from_utf8_lossy(&rest[1..]));
-        if rest[0] == 0 || text.contains(DUMP_SETTINGS_END) {
-            break;
-        }
-        let (s, r2) = r.ask(msg::MORE, &[]);
-        assert_eq!(s, 0);
-        rest = r2;
-    }
-    extras_from_dump(&text)
+    extras_from_radio(&rest[2..])
 }
 
 #[cfg(test)]
@@ -1597,8 +1647,9 @@ mod tests {
         assert!(!plan(&rec, &want).problems.is_empty());
     }
 
-    /// A setting no record carries (Battery Save): changed as the terminal's `set`, written as the `set` line over
-    /// the link (`CMD`), read back with the dump; the record isn't written for it.
+    /// A setting the settings record doesn't carry (Battery Save): changed as the terminal's `set` on the scratch
+    /// radio, written as the radio record (LINK-66, decision 347), read back from it; the settings record isn't
+    /// written for it.
     #[test]
     fn term_setting_write_and_read_back() {
         let s = changed_radio();
@@ -1612,12 +1663,14 @@ mod tests {
         assert!(super::set(&base, &bex, "0 7 7 1", "Level 9").is_err());
         let p = super::plan(&base, &bex, &want, &wex);
         assert!(p.problems.is_empty(), "{:?}", p.problems);
-        assert!(p.ops.is_empty(), "no record write for it");
-        assert_eq!(p.cmds, ["set 0 7 7 1 Level 3"]);
+        assert_eq!(p.ops.iter().map(|o| o.what).collect::<Vec<_>>(), ["radio"], "the radio record alone (decision 347)");
+        assert!(p.cmds.is_empty());
         assert_eq!(p.changes.len(), 1);
-        for c in &p.cmds {
-            let (st, rest) = radio.ask(msg::CMD, c.as_bytes());
-            assert_eq!(st, 0, "{c}: {}", status_text(st, &rest));
+        for op in &p.ops {
+            for pl in &op.payloads {
+                let (st, rest) = radio.ask(op.msg, pl);
+                assert_eq!(st, 0, "{}", status_text(st, &rest));
+            }
         }
         assert_eq!(read_extras(&mut radio), wex);
         assert_eq!(read_over_link(&mut radio), want);
@@ -1626,7 +1679,7 @@ mod tests {
         let (w2, x2) = super::set(&w2, &x2, "0 1 1", "Off").unwrap();
         let p = super::plan(&want, &wex, &w2, &x2);
         assert!(p.problems.is_empty(), "{:?}", p.problems);
-        assert_eq!((p.ops.len(), p.cmds.len(), p.changes.len()), (1, 1, 2));
+        assert_eq!((p.ops.len(), p.cmds.len(), p.changes.len()), (2, 0, 2), "the settings record and the radio record");
         // The backup keeps the values; a file without them (before them) restores the record alone.
         let text = super::backup(&w2, &x2, "2026-10-27T12:00:00Z", BTreeMap::new());
         let (r, b) = restore(&text).unwrap();

@@ -103,11 +103,11 @@ test("write: backup first, the diff, then the read back; the backup restores", a
   expect(await value("0 5 6 3")).not.toBe(after);
 });
 
-test("no record carries them: telemetry, Mic-E and the comment, written as set lines, read back, restored", async ({}, info) => {
+test("in the record since decision 347: telemetry, Mic-E and the comment, written with it, read back, restored", async ({}, info) => {
   const was = { tel: await value("0 5 6 4"), mice: await value("0 5 5 7"), comment: await value("0 5 5 3") };
   const telTo = was.tel === "On" ? "Off" : "On";
   const comment = page.getByLabel("0 5 5 3 Comment", { exact: true });
-  const commentTo = was.comment === "Ferrite e2e, 73" ? "None" : "Ferrite e2e, 73";
+  const commentTo = was.comment === "Ferrite e2e, 73" ? "Ferrite e2e, 88" : "Ferrite e2e, 73";
   await page.getByLabel("0 5 6 4 Telemetry", { exact: true }).selectOption(telTo);
   const up = was.mice !== "Priority";
   await page.getByRole("button", { name: `0 5 5 7 Mic-E ${up ? "up" : "down"}` }).click();
@@ -116,8 +116,8 @@ test("no record carries them: telemetry, Mic-E and the comment, written as set l
   await comment.fill(commentTo);
   await comment.press("Enter");
   await expect.poll(() => value("0 5 5 3")).toBe(commentTo);
-  // a # would end the radio's command line: refused here
-  await comment.fill("no # here");
+  // longer than the radio's 40 characters: refused here
+  await comment.fill("x".repeat(41));
   await comment.press("Enter");
   await expect(page.locator('[data-id="0 5 5 3"] .err')).toBeVisible();
   expect(await value("0 5 5 3")).toBe(commentTo);
@@ -128,10 +128,10 @@ test("no record carries them: telemetry, Mic-E and the comment, written as set l
   await expect(items).toHaveCount(3);
   await expect(items.filter({ hasText: "0 5 6 4" }).locator("b")).toHaveText(telTo);
   await expect(items.filter({ hasText: "0 5 5 3" }).locator("b")).toHaveText(commentTo);
-  await expect(dialog()).toContainText("3 go as the radio's own set command");
+  await expect(dialog()).not.toContainText("set command");
   await shot(page, info, "aprs-settings-05-term-diff");
   await commitWrite(3);
-  // read back from the radio: the record and the dump
+  // read back from the radio: the record
   await page.getByRole("button", { name: "Read from radio" }).click();
   await expect(page.getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
   expect([await value("0 5 6 4"), await value("0 5 5 7"), await value("0 5 5 3")]).toEqual([telTo, miceTo, commentTo]);

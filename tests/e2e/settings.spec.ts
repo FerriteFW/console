@@ -151,7 +151,7 @@ test("read back: the radio holds both; then the backup restores them", async ({}
   await shot(page, info, "24-settings-restored");
 });
 
-test("a setting no record carries (Battery Save) with one the record does (Shared VHF): the set line after the write, read back, restored", async ({}, info) => {
+test("a setting the settings record doesn't carry (Battery Save) with one it does (Shared VHF): both records written, read back, restored", async ({}, info) => {
   await readRadio();
   const v = await values();
   const bs = page.getByLabel("0 7 7 1 Battery Save", { exact: true });
@@ -169,7 +169,8 @@ test("a setting no record carries (Battery Save) with one the record does (Share
   await expect(items).toHaveCount(2);
   await expect(items.filter({ hasText: "0 7 7 1" }).locator("b")).toHaveText(bsTo);
   await expect(items.filter({ hasText: "0 5 9 7" }).locator("b")).toHaveText(vhfTo);
-  await expect(dialog()).toContainText("One goes as the radio's own set command");
+  // Decision 347: Battery Save goes in the radio record (LINK-66), not as a set command.
+  await expect(dialog()).not.toContainText("set command");
   await shot(page, info, "25-settings-term-diff");
   backup = path;
   await commitWrite(2);

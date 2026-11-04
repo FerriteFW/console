@@ -29,6 +29,8 @@ import {
   presetsRestore,
   restoreFile,
   settingsHome,
+  settingsPlan,
+  settingsWithHome,
   writePlan,
   zoneSplit,
   type Channel,
@@ -487,9 +489,13 @@ class Channels {
           throw new Error(`skipped frequencies: ${(e as Error).message}`);
         }
       }
-      // After the records: `home N` needs channel N on the radio.
+      // After the records (home N needs channel N on the radio): the settings record with it (decision 347).
       if (home) {
-        await link.cmd(`home ${home.to ?? "none"}`);
+        const rec = await link.readRecord(P.what.SETTINGS, 0);
+        if (!rec) throw new Error("home channel: the radio has no settings record");
+        const p = settingsPlan(rec, {}, settingsWithHome(rec, home.to ?? null), {});
+        if (p.problems.length) throw new Error(`home channel: ${p.problems[0].error}`);
+        if (p.ops.length) await link.writeSession(new Uint8Array(p.begin), p.ops, () => {});
         this.write = { step: "writing", plan, home, canPos, done: writeCount(w), presets };
       }
     } catch (e) {

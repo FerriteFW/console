@@ -75,11 +75,11 @@ export type Protocol = {
   msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK", number>;
   /** LINK-59: `DATA_READ`'s ops and its most bytes, and the erase unit. */
   data: { READ: number; CRC: number; READ_MAX: number; SECTOR: number };
-  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS" | "SAT" | "SAT_INFO", number>;
+  what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS" | "SAT" | "SAT_INFO" | "RADIO", number>;
   /** LINK-35.2: HELLO's caps bits the UI asks about by name (link.ts has the transport ones). */
   caps: Record<"POSITION" | "LISTS", number>;
   /** LINK-35.2: the second caps byte's bits. */
-  caps2: Record<"PRESET_SKIPS" | "DATA" | "SATS", number>;
+  caps2: Record<"PRESET_SKIPS" | "DATA" | "SATS" | "RADIO" | "LINE_CMDS", number>;
   /** What the radio holds (layout 3, decision 333): 4,000 channels, 512 zones, 256 channels a zone, 1,016 contacts,
    *  2,032 waypoints. */
   limits: { channels: number; zones: number; zoneCap: number; contacts: number; waypoints: number; sats: number };
@@ -423,6 +423,8 @@ export type Restored = { record: number[]; extras: Extras; saved: string; radio:
 
 /** CHAN-17: the home channel the settings record names (1-1000), or null. */
 export const settingsHome = (record: Uint8Array): number | null => wasm.settings_home(record) ?? null;
+/** CHAN-17 (decision 347): `record` with its home channel set (1-1000, or null for none). */
+export const settingsWithHome = (record: Uint8Array, home: number | null): Uint8Array => wasm.settings_with_home(record, home ?? undefined);
 export const settingsView = (record: Uint8Array, extras: Extras): SettingsView => JSON.parse(wasm.settings_view(record, js(extras)));
 /** The record and values with one setting changed, or throws the radio's reason. */
 export const settingsSet = (record: Uint8Array, extras: Extras, id: string, value: string): Edited =>
@@ -440,6 +442,11 @@ export const settingsKeepPin = (record: Uint8Array, from: Uint8Array): Uint8Arra
 export const settingsRestore = (text: string): Restored => JSON.parse(wasm.settings_restore(text));
 /** The terminal-backed values from a `dump`'s text. */
 export const extrasFromDump = (text: string): Extras => JSON.parse(wasm.settings_extras_from_dump(text));
+/** LINK-66 (decision 347): Watch and Battery Save from the radio record. */
+export const extrasFromRadio = (rec: Uint8Array): Extras => JSON.parse(wasm.settings_extras_from_radio(rec));
+/** LINK-33 (decision 347): the library's tune as `SLOT`'s payload; throws the reason when it can't be one. */
+export const slotTune = (slot: number, hz: number, mode: string, txTone: string, rxTone: string, shiftHz: number): Uint8Array =>
+  wasm.library_slot_tune(slot, hz, mode, txTone, rxTone, shiftHz);
 /** Where the dump's settings end (a line starting with it). */
 export const dumpSettingsEnd = (): string => wasm.settings_dump_end();
 

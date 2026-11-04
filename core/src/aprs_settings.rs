@@ -45,12 +45,19 @@ fn scratch<R>(f: impl FnOnce(&mut Scratch) -> R) -> R {
 
 /// Two records differing in every field (both valid): a setting whose value differs between them follows the record.
 fn probes() -> [Vec<u8>; 2] {
-    let a = vec![0u8; RECORD_LEN];
+    // Past FX.25 (decision 347): message sound, symbol, TX delay, TX level, the comment, ambiguity, Mic-E, telemetry.
+    const V2: usize = 25;
+    const END: usize = V2 + 4 + ferrite_app::aprs::COMMENT_LEN;
+    let mut a = vec![0u8; RECORD_LEN];
+    a[V2 + 2] = ferrite_app::aprs::TXDELAY_MIN; // the lowest TX delay (0 isn't one)
     let mut b = vec![0u8; RECORD_LEN];
     b[..2].copy_from_slice(&28_960u16.to_le_bytes()); // 144.800 MHz
     b[2..8].copy_from_slice(&[4, 2, 3, 0x33, 1, 9]); // every 5 min, high, custom path, digi on + my call + 3 s, after voice, SSID 9
     b[8..15].copy_from_slice(b"WIDE2-2");
     b[24] = 32; // FX.25 on TX, 32 check bytes (APRS-45)
+    b[V2..V2 + 4].copy_from_slice(&[2, 3, 50, 2]);
+    b[V2 + 4..V2 + 9].copy_from_slice(b"probe");
+    b[END..END + 3].copy_from_slice(&[2, 3, 1]);
     [a, b]
 }
 
@@ -63,6 +70,8 @@ fn in_record(sc: &mut Scratch, s: &Settings) -> Vec<Leaf> {
     let [a, b] = probes();
     let mut out = Vec::new();
     let s = with_call(*s);
+    // MENU 0 5 (the record also holds the message sound, 0 7 5 5, but Radio Settings shows it, from the radio
+    // record: decision 347).
     for (p, name, _, _) in leaves().into_iter().filter(|l| l.0[0] == 5) {
         sc.aprs = Some(a.clone());
         sc.load(&s);
@@ -488,8 +497,8 @@ mod tests {
         assert!(restore("{}").is_err());
     }
 
-    /// MENU 0 5's settings no record carries (telemetry, the comment, Mic-E, ...): on this page in menu order, changed
-    /// with the terminal's `set`, written as `set` lines over the link with the record's write, read back with the
+    /// MENU 0 5's settings the record carries since decision 347 (telemetry, the comment, Mic-E, ...): on this page in
+    /// menu order, changed on the scratch radio, written with the record alone (no `set` lines), read back with the
     /// dump; kept in the backup file.
     #[test]
     fn term_settings_write_and_read_back() {
@@ -510,22 +519,22 @@ mod tests {
         let tel = item(&v, "0 5 6 4");
         assert_eq!((tel.kind, tel.value.as_str(), tel.choices.clone()), (Kind::Pick, "Off", vec!["Off".to_string(), "On".into()]));
         assert_eq!(item(&v, "0 5 5 3").kind, Kind::Text);
-        assert!(item(&v, "0 5 5 3").hint.contains("40"), "{}", item(&v, "0 5 5 3").hint);
-        // Changes: telemetry, a comment, Mic-E, and the record's power.
+        // Changes: telemetry, a comment, Mic-E and power, all the record's since decision 347: no `set` lines.
         let (r, x) = super::set(&srec, &rec, &ex, "0 5 6 4", "On").unwrap();
         let (r, x) = super::set(&srec, &r, &x, "0 5 5 3", "Ferrite test, 73").unwrap();
         let (r, x) = super::set(&srec, &r, &x, "0 5 5 7", "En route").unwrap();
         let (r, x) = super::set(&srec, &r, &x, "0 5 6 3", "High").unwrap();
         assert!(super::set(&srec, &r, &x, "0 5 5 3", &"x".repeat(41)).is_err());
-        assert!(super::set(&srec, &r, &x, "0 5 5 3", "no # here").is_err());
+        // A '#' is fine in the record (only a dump line's note forbade it).
+        assert!(super::set(&srec, &r, &x, "0 5 5 3", "a # here").is_ok());
         let v2 = super::view(&srec, &r, &x);
         assert_eq!(item(&v2, "0 5 5 3").value, "Ferrite test, 73", "the whole comment, not the row's start");
         let p = super::plan(&srec, &rec, &ex, &r, &x);
         assert!(p.problems.is_empty(), "{:?}", p.problems);
         assert_eq!(p.changes.len(), 4, "{:?}", p.changes);
         assert_eq!(p.ops.len(), 1);
-        assert_eq!(p.cmds, ["set 0 5 5 3 Ferrite test, 73", "set 0 5 5 7 En route", "set 0 5 6 4 On"]);
-        // Sent as Console sends it: the record's write, then each line.
+        assert!(p.cmds.is_empty(), "{:?}", p.cmds);
+        // Sent as Console sends it: the record's write.
         assert_eq!(rs.ask(msg::BEGIN, &p.begin).0, 0);
         for op in &p.ops {
             for pl in &op.payloads {
@@ -533,20 +542,15 @@ mod tests {
             }
         }
         rs.ask(msg::END, &[]);
-        for c in &p.cmds {
-            assert_eq!(rs.ask(msg::CMD, c.as_bytes()).0, 0, "{c}");
-        }
         assert_eq!(ask_read(&mut rs), r);
-        assert_eq!(read_extras(&mut rs), x);
-        assert!(rs.app.aprs_cfg().telemetry);
-        // The backup keeps them (MENU 0 5's only).
+        let c = rs.app.aprs_cfg();
+        assert!(c.telemetry && c.mic_e == 2 && &c.comment[..16] == b"Ferrite test, 73", "{c:?}");
+        // The backup keeps them, in its record.
         let t = super::backup(&srec, &r, &x, "2026-10-27T12:00:00Z", BTreeMap::new());
-        let (_, b) = restore(&t).unwrap();
-        assert_eq!(b.extras.get("0 5 6 4").map(String::as_str), Some("On"));
-        assert!(b.extras.keys().all(|k| k.starts_with("0 5 ")));
-        // Back: the plan from what the radio holds now to the first read.
+        let (back, _) = restore(&t).unwrap();
+        assert_eq!(back, r);
+        // Back: the plan from what the radio holds now to the first read, the record alone.
         let p = super::plan(&srec, &r, &x, &rec, &ex);
-        assert!(p.problems.is_empty(), "{:?}", p.problems);
-        assert!(p.cmds.contains(&"set 0 5 5 3 None".to_string()), "{:?}", p.cmds);
+        assert!(p.problems.is_empty() && p.cmds.is_empty(), "{:?} {:?}", p.problems, p.cmds);
     }
 }

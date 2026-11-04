@@ -3,6 +3,7 @@
 // own position for distances (its GPS fix, else its fixed position). Ages become times when they arrive.
 import { parsePlace, type AprsEvent, type Message, type Station } from "./core";
 import { RadioError } from "./link";
+import { radioPlace } from "./radioplace";
 import { radio } from "./radio.svelte";
 
 export type HeardRow = Station & { at: number | null };
@@ -122,20 +123,11 @@ class Aprs {
   async position() {
     const link = radio.connectedLink;
     if (!link) return;
-    for (const [cmd, from] of [
-      ["gps", "GPS"],
-      ["get 0 5 5 5", "APRS fixed position"],
-      ["get 0 6 9", "fixed position"],
-    ] as const) {
-      try {
-        const p = parsePlace(await link.cmd(cmd));
-        if (p) {
-          this.me = { lat: p.lat, lon: p.lon, from };
-          return;
-        }
-      } catch {
-        /* the next */
-      }
+    try {
+      const r = await radioPlace(link);
+      if (r) this.me = { lat: r.place.lat, lon: r.place.lon, from: r.gps ? "GPS" : "fixed position" };
+    } catch {
+      /* none */
     }
   }
 

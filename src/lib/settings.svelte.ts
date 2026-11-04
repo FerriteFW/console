@@ -1,12 +1,11 @@
-// Radio Settings as Svelte state: the record read from the radio (`base`) with the values of the settings no record
-// carries (`baseExtras`: read with the terminal's `dump`), the record and values being edited, and the view of them
-// (the radio's menu: numbers, names, values, choices). Read, write (a fresh read saved as a backup file first, then
-// the diff, then the write on confirm: the record's write session and the `set` lines, then a read back), backup
+// Radio Settings as Svelte state: the record read from the radio (`base`) with the values of the settings it doesn't
+// carry (`baseExtras`: Watch and Battery Save, read from the radio record), the record and values being edited, and
+// the view of them (the radio's menu: numbers, names, values, choices). Read, write (a fresh read saved as a backup
+// file first, then the diff, then the write on confirm: the records' write session, then a read back), backup
 // files out and back in. Every value, choice, check and diff is the Rust core's (ferrite's own App and link session);
 // this file moves records and lines.
 import {
-  dumpSettingsEnd,
-  extrasFromDump,
+  extrasFromRadio,
   P,
   settingsBackup,
   settingsLen,
@@ -31,13 +30,14 @@ export type SettingsWriteStep =
 
 export const same = (a: Uint8Array | null, b: Uint8Array | null) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** The settings no record carries, as the radio holds them: its `dump` (CMD, LINK-34), read up to the end of its
- * settings. A radio whose terminal won't (the demo radio) gives none: those settings then show as not read. */
+/** The settings the settings record doesn't carry (Watch, Battery Save), as the radio holds them: its radio record
+ * (LINK-66, decision 347). A radio without one (the demo radio, an older firmware) gives none: those settings then
+ * show as not read. */
 export async function readExtras(link: Link): Promise<Extras> {
-  const end = dumpSettingsEnd();
+  if (!(link.caps2 & P.caps2.RADIO)) return {};
   try {
-    const text = await link.cmd("dump", (soFar) => soFar.includes(`\n${end}`));
-    return extrasFromDump(text);
+    const rec = await link.readRecord(P.what.RADIO, 0);
+    return rec ? extrasFromRadio(rec) : {};
   } catch (e) {
     if (e instanceof RadioError) return {};
     throw e;

@@ -24,6 +24,7 @@ import {
 } from "./core";
 import type { Link } from "./link";
 import { radio } from "./radio.svelte";
+import { radioPlace } from "./radioplace";
 import { library } from "./library.svelte";
 import { sites } from "./sites.svelte";
 
@@ -202,16 +203,11 @@ class Satellites {
    * place set in Near me. Null when none.
    */
   private async position(link: Link): Promise<{ lat: number; lon: number; from: string } | null> {
-    for (const [cmd, from] of [
-      ["gps", "the radio's GPS"],
-      ["get 0 6 9", "the radio's fixed position"],
-    ] as const) {
-      try {
-        const p = parsePlace(await link.cmd(cmd));
-        if (p) return { lat: p.lat, lon: p.lon, from };
-      } catch {
-        /* the next one */
-      }
+    try {
+      const r = await radioPlace(link);
+      if (r) return { lat: r.place.lat, lon: r.place.lon, from: r.gps ? "the radio's GPS" : "the radio's fixed position" };
+    } catch {
+      /* Near me's */
     }
     const p = library.place;
     return p ? { lat: p.lat, lon: p.lon, from: "the place set in Near me" } : null;

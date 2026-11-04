@@ -35,7 +35,7 @@
   import Satellites from "./lib/pages/Satellites.svelte";
   import { satellites } from "./lib/satellites.svelte";
   import { lists } from "./lib/lists.svelte";
-  import { loadCore } from "./lib/core";
+  import { loadCore, P } from "./lib/core";
   import { radio } from "./lib/radio.svelte";
   import { aprs } from "./lib/aprs.svelte";
   import { aprsSettings } from "./lib/aprsSettings.svelte";
@@ -88,6 +88,10 @@
     { id: "about", name: "About" },
   ];
   const all: Page[] = [...sections.flatMap((x) => x.tabs ?? [{ id: x.id, name: x.name }]), ...more];
+  // Decision 347: a user build has no line commands, so no Terminal while one is connected (caps2 LINE_CMDS).
+  const moreShown = $derived(
+    more.filter((p) => p.id !== "terminal" || !radio.connectedLink || (radio.connectedLink.caps2 & P.caps2.LINE_CMDS) !== 0),
+  );
   const sectionOf = (id: string) => sections.find((x) => x.id === id || x.tabs?.some((t) => t.id === id));
   const hrefOf = (x: Section) => `#/${x.tabs ? x.tabs[0].id : x.id}`;
 
@@ -185,7 +189,7 @@
         </a>
       {/each}
       <div class="label">More</div>
-      {#each more as p (p.id)}
+      {#each moreShown as p (p.id)}
         <a href={`#/${p.id}`} class:active={p.id === page} aria-current={p.id === page ? "page" : undefined} onclick={() => (navOpen = false)}>
           <span>{p.name}</span>
         </a>

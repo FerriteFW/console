@@ -440,6 +440,11 @@ export class Link {
     return this.text(P.msg.CMD, new TextEncoder().encode(line), enough);
   }
 
+  /** `SLOT` (LINK-33): a slot's fields changed as the keypad would (`payload` from the core); the slot as it is after. */
+  slot(payload: Uint8Array): Promise<Uint8Array> {
+    return this.exclusive(() => this.okRaw(P.msg.SLOT, payload));
+  }
+
   /** A keypad or side key (never PTT: the core has no name for one). A long press holds the link 800 ms after. */
   key(name: string, action: "short" | "long" | "down" | "up" = "short") {
     const p = keyPayload(name, action);

@@ -116,9 +116,10 @@ pub fn protocol() -> String {
                   "READ_MAX": ferrite_console_core::link::data::READ_MAX, "SECTOR": ferrite_console_core::link::data::SECTOR },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION,
                   "QUICK": what::QUICK, "WAYPOINT": what::WAYPOINT, "DTMF": what::DTMF, "PRESET_SKIPS": what::PRESET_SKIPS,
-                  "SAT": what::SAT, "SAT_INFO": what::SAT_INFO },
+                  "SAT": what::SAT, "SAT_INFO": what::SAT_INFO, "RADIO": what::RADIO },
         "caps2": { "PRESET_SKIPS": ferrite_console_core::link::caps2::PRESET_SKIPS, "DATA": ferrite_console_core::link::caps2::DATA,
-                   "SATS": ferrite_console_core::link::caps2::SATS },
+                   "SATS": ferrite_console_core::link::caps2::SATS, "RADIO": ferrite_console_core::link::caps2::RADIO,
+                   "LINE_CMDS": ferrite_console_core::link::caps2::LINE_CMDS },
         "limits": { "channels": channels::MAX_CHANNELS, "zones": ferrite_console_core::radioside::MAX_ZONES, "zoneCap": channels::ZONE_CAP,
                     "contacts": lists::CONTACT_MAX, "waypoints": lists::WAYPOINT_MAX, "sats": sats::MAX },
         "caps": { "POSITION": ferrite_console_core::link::caps::POSITION, "LISTS": ferrite_console_core::link::caps::LISTS },
@@ -604,6 +605,12 @@ pub fn settings_view(record: &[u8], ex: &str) -> Result<String, JsError> {
     Ok(json(&settings::view(record, &extras(ex)?)))
 }
 
+/// CHAN-17 (decision 347): the settings record with its home channel set (1-1000, or none).
+#[wasm_bindgen]
+pub fn settings_with_home(record: &[u8], home: Option<u16>) -> Vec<u8> {
+    settings::with_home(record, home)
+}
+
 /// CHAN-17: the home channel the settings record names (1-1000), or none.
 #[wasm_bindgen]
 pub fn settings_home(record: &[u8]) -> Option<u16> {
@@ -662,6 +669,12 @@ pub fn settings_restore(text: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn settings_extras_from_dump(text: &str) -> String {
     json(&settings::extras_from_dump(text))
+}
+
+/// LINK-66: the terminal-backed settings from the radio record (decision 347).
+#[wasm_bindgen]
+pub fn settings_extras_from_radio(rec: &[u8]) -> String {
+    json(&settings::extras_from_radio(rec))
 }
 
 /// Where the dump's settings end: Console stops reading the dump at a line starting with it.
@@ -1373,4 +1386,10 @@ pub fn clock_of(rest: &[u8]) -> Option<String> {
 #[wasm_bindgen]
 pub fn wmm_declination(lat: f64, lon: f64, unix: f64) -> i32 {
     wmm::declination_tenths(lat, lon, wmm::decimal_year(unix)) as i32
+}
+
+/// LINK-33 (decision 347): the library's tune as `SLOT`'s payload; an error's reason as a string.
+#[wasm_bindgen]
+pub fn library_slot_tune(slot: u8, hz: f64, mode: &str, tx_tone: &str, rx_tone: &str, shift_hz: f64) -> Result<Vec<u8>, String> {
+    library::slot_tune(slot, hz as u64, mode, tx_tone, rx_tone, shift_hz as i64)
 }

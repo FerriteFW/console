@@ -2,12 +2,13 @@
 // the US) and amateur repeaters near a place. Fixed sets are in public/data/ (tools/library/README.md says where they come
 // from). Airports, licensed sites and repeaters come tiled from data.ferritefw.dev (sites.svelte.ts, sitedata.ts). Turning entries into channels (numbers, zones, names,
 // ferrite's own checks) is the core's (core/src/library.rs).
-import { libraryAdd, parsePlace, type LibraryAdded, type LibraryItem, type Place } from "./core";
+import { libraryAdd, parsePlace, slotTune, type LibraryAdded, type LibraryItem, type Place } from "./core";
+import { activeSlotOf, radioPlace } from "./radioplace";
 import { channels } from "./channels.svelte";
 import { radio } from "./radio.svelte";
 import { appFetch } from "./appfetch";
 import { isTauri } from "./transport/native";
-import { activeSlot, slotLine, tuneSummary, type Tune } from "./tune";
+import { tuneSummary, type Tune } from "./tune";
 
 export type FixedFreq = { number: number; name: string; rx: number; tx: number; notes?: string; ctcss?: number; dcs?: number };
 export type FixedSet = {
@@ -110,9 +111,10 @@ class Library {
     this.tuning = true;
     this.error = "";
     try {
-      const slot = activeSlot(await link.cmd("slot"));
+      const slot = await activeSlotOf(link);
       if (!slot) throw new Error("the radio didn't say which slot is active");
-      await link.cmd(slotLine(slot, t));
+      // LINK-33 (decision 347): the binary SLOT, as the keypad would.
+      await link.slot(slotTune("ABC".indexOf(slot), t.hz, t.mode, t.txTone || "", t.rxTone || "", t.shiftHz || 0));
       this.tuned = `Tuned ${tuneSummary(slot, t)}`;
       return true;
     } catch (e) {
@@ -138,24 +140,14 @@ class Library {
     this.asking = "radio";
     const was = this.placeText;
     try {
-      for (const [cmd, what] of [
-        ["gps", "the radio's GPS"],
-        ["get 0 6 9", "the radio's fixed position"],
-      ] as const) {
-        try {
-          const text = await link.cmd(cmd);
-          const p = parsePlace(text);
-          if (p) {
-            // A place typed while the radio was asked wins.
-            if (this.placeText !== was) return;
-            this.placeText = `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
-            this.placeFrom = `From ${what}`;
-            this.locNote = "";
-            return;
-          }
-        } catch {
-          /* the next one */
-        }
+      const r = await radioPlace(link);
+      if (r) {
+        // A place typed while the radio was asked wins.
+        if (this.placeText !== was) return;
+        this.placeText = `${r.place.lat.toFixed(4)}, ${r.place.lon.toFixed(4)}`;
+        this.placeFrom = `From ${r.gps ? "the radio's GPS" : "the radio's fixed position"}`;
+        this.locNote = "";
+        return;
       }
       if (!auto) this.error = "The radio has no GPS fix and no fixed position (MENU 0 6 9). Type a place or a grid square.";
     } finally {
