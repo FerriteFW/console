@@ -56,6 +56,10 @@
         <input type="checkbox" checked={satellites.auto} onchange={(e) => (satellites.auto = e.currentTarget.checked)} />
         Keep satellites up to date
       </label>
+      <label class="check" title="On each connect, the radio's clock is set from this computer (a radio loses its clock when switched off), unless it already has GPS time">
+        <input type="checkbox" checked={satellites.setClock} onchange={(e) => (satellites.setClock = e.currentTarget.checked)} />
+        Set the radio's clock on connect
+      </label>
     </div>
   </div>
 

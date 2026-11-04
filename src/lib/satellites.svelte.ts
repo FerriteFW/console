@@ -28,9 +28,18 @@ import { library } from "./library.svelte";
 import { sites } from "./sites.svelte";
 
 const AUTO_KEY = "satsAutoSync";
+const CLOCK_KEY = "clockOnConnect";
 
 export { ISS, ageDays, ageLevel, declText } from "./satage";
 import { declText } from "./satage";
+
+function storedClock(): boolean {
+  try {
+    return localStorage.getItem(CLOCK_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
 
 function storedAuto(): boolean {
   try {
@@ -75,6 +84,20 @@ class Satellites {
     this.#auto = v;
     try {
       localStorage.setItem(AUTO_KEY, v ? "on" : "off");
+    } catch {
+      /* not kept */
+    }
+  }
+  /** "Set the radio's clock on connect" (LINK-65), on to start: a radio that loses its clock at power-off (GPS-23)
+   * gets this computer's time at each connect, unless its clock is already from GPS. */
+  #setClock = $state(storedClock());
+  get setClock() {
+    return this.#setClock;
+  }
+  set setClock(v: boolean) {
+    this.#setClock = v;
+    try {
+      localStorage.setItem(CLOCK_KEY, v ? "on" : "off");
     } catch {
       /* not kept */
     }
@@ -245,6 +268,18 @@ class Satellites {
     let busy = false;
     try {
       await loadCore();
+      if (this.supported && this.setClock) {
+        try {
+          const c = clockOf(await link.ok(P.msg.CLOCK));
+          if (c?.source !== "GPS") {
+            const t = new Uint8Array(4);
+            new DataView(t.buffer).setUint32(0, nowS(), true);
+            await link.ok(P.msg.CLOCK, t);
+          }
+        } catch {
+          /* the radio keeps its own clock */
+        }
+      }
       if (!this.supported || !this.auto) return;
       busy = true;
       radio.busy = this.busy = "Checking the radio's satellites";
