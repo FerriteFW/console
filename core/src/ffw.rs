@@ -277,10 +277,13 @@ fn header_problem(d: &[u8], build: &str) -> Option<String> {
 /// radio restarts. Every target is checked again here.
 pub fn write_plan(parts: &[Part]) -> Result<Vec<Step>, String> {
     let mut out = Vec::new();
-    for p in parts {
+    for (k, p) in parts.iter().enumerate() {
         if let Some(e) = target_problem(&p.file, p.addr, p.data.len() as u64, p.data.len() as u64) {
             return Err(e);
         }
+        // UPD-16.2: the radio's Updating page shows "Part 2 of 4" (firmware before it answers `bad argument`)
+        let pl = vec![data::PART, k as u8 + 1, parts.len() as u8];
+        out.push(Step { kind: "part", msg: msg::DATA_WRITE, addr: p.addr, len: 0, payload: pl, expect: None, region: p.file.clone() });
         let end = p.addr + p.data.len() as u32;
         for s in (p.addr..end).step_by(data::SECTOR as usize) {
             let mut pl = vec![data::ERASE];
@@ -341,6 +344,9 @@ mod tests {
         assert_eq!(f.parts.iter().map(|p| (p.file.as_str(), p.addr)).collect::<Vec<_>>(), [("spi/text-en.bin", 0x09_0000), ("spi/logo.bin", 0x24_0000)]);
         let plan = write_plan(&f.parts).unwrap();
         assert_eq!(plan.last().unwrap().kind, "stamp");
+        let marks: Vec<_> = plan.iter().filter(|s| s.kind == "part").map(|s| s.payload.clone()).collect();
+        let n = f.parts.len() as u8;
+        assert_eq!(marks, (1..=n).map(|i| vec![data::PART, i, n]).collect::<Vec<_>>(), "UPD-16.2: one mark before each part");
         assert!(plan.iter().all(|s| s.kind != "program" || s.addr / 256 == (s.addr + s.len - 1) / 256), "never across a page");
         // Our zip writer and ffw.py's agree: the same entries, read back the same.
         assert!(read_with(key(), &rezip(&entries(GOOD)), false).is_ok());

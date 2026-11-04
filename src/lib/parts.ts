@@ -4,7 +4,7 @@
 // then asks for HELLO until the radio answers on its layout again. The plan never touches calibration, the update
 // area, the layout header or the migration mark: the core refused any part aimed there before anything was written.
 import { P, type FfwFile } from "./core";
-import { Link, TimeoutError } from "./link";
+import { Link, RadioError, TimeoutError } from "./link";
 import { sleep, type Transport } from "./transport/types";
 
 /** After the stamp: the radio restarts; HELLO until this runs out. */
@@ -31,6 +31,15 @@ export async function writeParts(t: Transport, link: Link, ffw: FfwFile, progres
         if (!(e instanceof TimeoutError)) throw e;
       }
       break;
+    }
+    if (kind === "part") {
+      // UPD-16.2: tells the radio's Updating page which part this is; a firmware before it says bad argument
+      try {
+        await link.data(ffw.msg(i), ffw.payload(i));
+      } catch (e) {
+        if (!(e instanceof RadioError)) throw e;
+      }
+      continue;
     }
     const rest = await link.data(ffw.msg(i), ffw.payload(i));
     const want = ffw.expect(i);
