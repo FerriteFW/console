@@ -1094,7 +1094,7 @@ pub fn view(rec: &[u8], ex: &Extras) -> View {
         let a = format!("On APRS Settings (Tools › APRS › APRS Settings): {}.", on_aprs.join(", "));
         *n = if n.is_empty() { a } else { format!("{a} {n}") };
     }
-    groups.push(crate::crossband::group(&s)); // not in the menu tree: its start page's (MENU 0 3 5)
+    groups.push(crate::crossband::group(&s)); // not in the menu tree: its start page's (MENU 0 3 4)
     groups.push(GroupView {
         path: "owner".into(),
         name: "Owner card".into(),

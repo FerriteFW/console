@@ -1,5 +1,5 @@
 //! The crossband repeater's settings (manual chapter 19: sides, power, timeout, hang time, tone gate, ID, speaker):
-//! `Settings::xb` in the settings record, set on the repeater's start page (MENU 0 3 5), not in the menu tree, so
+//! `Settings::xb` in the settings record, set on the repeater's start page (MENU 0 3 4), not in the menu tree, so
 //! Radio Settings shows them as a group of their own.
 //!
 //! Nothing about the rules is copied: each setting's choices are found by turning the knob on its start-page cell of
@@ -111,7 +111,7 @@ pub fn group(s: &Settings) -> GroupView {
         path: "xb".into(),
         name: "Crossband repeater".into(),
         items,
-        note: "Set here or on its start page (MENU 0 3 5); the repeater itself starts on the radio, or with xb start on the Terminal page.".into(),
+        note: "Set here or on its start page (MENU 0 3 4); the repeater itself starts on the radio, or with xb start on the Terminal page.".into(),
     }
 }
 
