@@ -1,6 +1,7 @@
 <script lang="ts">
   import Wordmark from "../components/Wordmark.svelte";
   import { isTauri } from "../transport/native";
+  import { CONSOLE_VERSION as version } from "../codeplug.svelte";
   const shell = isTauri() ? "desktop app (Tauri)" : "web";
 </script>
 
@@ -17,7 +18,7 @@
   </p>
   <dl>
     <dt>Version</dt>
-    <dd>0.1.0 ({shell})</dd>
+    <dd>{version} ({shell})</dd>
     <dt>Protocol</dt>
     <dd>Ferrite link protocol 3 (manual chapter 29), the same code as the radio's (ferrite-core, compiled to WebAssembly)</dd>
     <dt>Connections</dt>

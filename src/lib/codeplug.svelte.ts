@@ -15,7 +15,7 @@ import { settings } from "./settings.svelte";
 import { isTauri } from "./transport/native";
 
 declare const __CONSOLE_VERSION__: string;
-const CONSOLE_VERSION = typeof __CONSOLE_VERSION__ === "string" ? __CONSOLE_VERSION__ : "dev";
+export const CONSOLE_VERSION = typeof __CONSOLE_VERSION__ === "string" ? __CONSOLE_VERSION__ : "dev";
 
 /** What the radio said about itself (INFO), for the manifest and the file's name. */
 function radioMeta(): RadioMeta {

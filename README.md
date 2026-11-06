@@ -19,7 +19,7 @@ The companion app for Ferrite on the [Radtel RT-950 Pro](https://www.radtels.com
 
 - Node 20+, npm, Rust via rustup (`rust-toolchain.toml` pins it).
 - `cargo install wasm-bindgen-cli --version 0.2.129 --locked`
-- The ferrite checkout next to this one (`../ferrite`), and git access to `infamy/udigimodes`.
+- The ferrite checkout next to this one (`../ferrite`).
 - The desktop app on Linux also needs `libdbus-1-dev` and `libudev-dev` (Bluetooth, USB names).
 - `npm install`, then `npx playwright install chromium` once for the e2e tests.
 
