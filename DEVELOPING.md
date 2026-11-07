@@ -1,0 +1,70 @@
+# Developing Ferrite Console
+
+For people who want to build Console, change it or read the code. Using it: [README.md](README.md).
+
+Console is Svelte 5 (Vite) over a Rust core compiled to WebAssembly, in a Tauri 2 desktop shell. The core reuses Ferrite's own code, so Console checks edits and speaks the link protocol exactly as the radio does.
+
+## Set up
+
+- Node 20+, npm, and Rust via rustup (`rust-toolchain.toml` pins it).
+- `cargo install wasm-bindgen-cli --version 0.2.129 --locked`
+- The ferrite checkout next to this one (`../ferrite`).
+- Linux desktop builds also need `libdbus-1-dev` and `libudev-dev`.
+- `npm install`, then `npx playwright install chromium` once for the end-to-end tests.
+
+## Run
+
+```sh
+npm run dev           # http://localhost:1420 in Chrome or Edge
+npm run tauri dev     # the desktop app
+npm run build         # the web build in dist/
+```
+
+- `?demo` connects a demo radio; `?demo&press=MENU,DOWN` presses keys; `?theme=light` picks the theme.
+- The demo radio, the Bridge button and the readback harness are in dev builds only (`npm run dev`, `npm run build:dev`), never in a release.
+
+## Test
+
+```sh
+npm test            # the core's Rust tests, then the Node unit tests
+npm run e2e         # build, then end-to-end tests on headless simulators through the bridge
+npm run e2e:run     # the same without the build
+```
+
+- On a radio: `FERRITE_E2E_SERIAL=/dev/cu.usbserial-114220 FERRITE_E2E_CHANNEL=999 npm run e2e`. The write tests rename that channel and put it back.
+- `FERRITE_E2E_VERBOSE=1` shows the simulator and bridge. Screenshots land in `test-results/shots/`.
+- Checks by hand on a radio: [docs/TESTING.md](docs/TESTING.md).
+
+## Desktop builds
+
+```sh
+FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh mac     # the .app and .dmg, on a Mac
+FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh all     # Linux and Windows, in Docker on the build box
+```
+
+- `FIRMWARE` names the Ferrite release to build in (its signed `.ffw` and the signed reader, `.minisig` beside it). Without it, `../ferrite/target`'s local build goes in.
+- Out: `target/desktop/`. A release ships the `.dmg`, the `.AppImage` and the Windows portable `.exe`.
+- The builds aren't signed or notarized yet.
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| `core/` | The Rust core: link sessions, records, the write plan and its checks, CHIRP CSV, the channel library |
+| `wasm/` | The core for the browser (`npm run wasm` builds it into `src/core-wasm/`) |
+| `src/` | The UI: one Svelte file per page in `src/lib/pages/` |
+| `src-tauri/` | The desktop shell: native cable and Bluetooth; the protocol stays in the webview |
+| `public/data/` | The fixed channel sets; the rest comes from data.ferritefw.dev ([tools/library/README.md](tools/library/README.md)) |
+| `scripts/` | The wasm and font builds, and `bundle-firmware.mjs` (the Ferrite release built into the app) |
+| `tools/` | `bridge.py` (a WebSocket to a serial port or the simulator), `fakeboot.py` (a fake stock bootloader), the desktop builds |
+| `tests/` | Node unit tests and Playwright end-to-end tests |
+
+## Not done yet
+
+- Signed and notarized desktop builds, and the self-updater.
+- Channel positions and drag to reorder; a virtual table for very long channel lists.
+
+## More
+
+- [docs/DECISIONS.md](docs/DECISIONS.md): design decisions.
+- The `.ferrite` file format: `docs/dev/codeplug-format.md` in the docs repo.

@@ -40,7 +40,7 @@ git -C "$here" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite-console"
 # so it goes along from here.
 # FIRMWARE="RELEASE.ffw READER.btf" bundles a signed release (its .minisig files beside); else ../ferrite/target's.
 node "$here/scripts/bundle-firmware.mjs" ${FIRMWARE:-} >/dev/null
-tar -C "$here" -c public/firmware | $ssh "$host" "tar -x -C $dir/ferrite-console"
+tar -C "$here" -c public/firmware | $ssh "$host" "rm -rf $dir/ferrite-console/public/firmware && tar -x -C $dir/ferrite-console"
 $ssh "$host" bash -s -- "$dir" "$what" <<'REMOTE'
 set -euo pipefail
 dir=$HOME/$1 what=$2
