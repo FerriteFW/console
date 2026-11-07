@@ -22,7 +22,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 if [ "$what" = mac ]; then
   [ "$(uname)" = Darwin ] || { echo "mac: build on a Mac" >&2; exit 1; }
   cd "$here"
-  node scripts/bundle-firmware.mjs >/dev/null # the images in ../ferrite/target now, as the Docker builds take
+  node scripts/bundle-firmware.mjs ${FIRMWARE:-} >/dev/null # as the Docker builds below
   npx tauri build --bundles app,dmg 2>&1 | tail -n 8
   mkdir -p target/desktop
   rm -rf "target/desktop/Ferrite Console.app"
@@ -38,7 +38,8 @@ git -C "$here/../ferrite" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite"
 git -C "$here" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite-console"
 # The bundled firmware (the tx release and the reader: scripts/bundle-firmware.mjs) is generated, never committed,
 # so it goes along from here.
-node "$here/scripts/bundle-firmware.mjs" >/dev/null
+# FIRMWARE="RELEASE.ffw READER.btf" bundles a signed release (its .minisig files beside); else ../ferrite/target's.
+node "$here/scripts/bundle-firmware.mjs" ${FIRMWARE:-} >/dev/null
 tar -C "$here" -c public/firmware | $ssh "$host" "tar -x -C $dir/ferrite-console"
 $ssh "$host" bash -s -- "$dir" "$what" <<'REMOTE'
 set -euo pipefail
