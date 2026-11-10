@@ -57,6 +57,79 @@ pub fn list() -> Result<Vec<PortRow>, String> {
     serialport::available_ports().map(rows).map_err(|e| format!("Couldn't list the serial ports: {e}"))
 }
 
+/// Why a port didn't open, in words a user can act on: on Linux the group that may open it (dialout on Fedora,
+/// Debian and Ubuntu, uucp on Arch) by its name, read from the device itself; a port another program holds.
+pub fn open_error(name: &str, e: &serialport::Error) -> String {
+    use serialport::ErrorKind as K;
+    let denied = matches!(e.kind(), K::Io(ErrorKind::PermissionDenied))
+        || e.description.to_lowercase().contains("permission denied");
+    let busy = e.description.to_lowercase().contains("busy");
+    if denied {
+        #[cfg(target_os = "linux")]
+        {
+            let group = port_group(name).unwrap_or_else(|| "dialout".into());
+            if my_groups().iter().any(|g| *g == group) {
+                return format!(
+                    "Linux won't let Ferrite Console open {name}, though you're in the {group} group: log out and back \
+                     in (or restart) so the group takes effect. ({})",
+                    e.description
+                );
+            }
+            return format!(
+                "Linux won't let Ferrite Console open {name}: your user isn't in the {group} group, which may use \
+                 serial ports. Run this in a terminal, then log out and back in (or restart):\n\n    sudo usermod -aG {group} $USER\n\n({})",
+                e.description
+            );
+        }
+        #[allow(unreachable_code)]
+        return format!("This computer won't let Ferrite Console open {name} (permission denied): {}", e.description);
+    }
+    if busy {
+        return format!(
+            "{name} is in use by another program (another Console, CHIRP, a terminal, ModemManager or brltty): close \
+             it and try again. ({})",
+            e.description
+        );
+    }
+    if matches!(e.kind(), K::NoDevice) {
+        return format!("{name} isn't there any more: is the cable still plugged in? ({})", e.description);
+    }
+    format!("Couldn't open {name}: {e}")
+}
+
+/// The group that owns a device file (Linux), by name.
+#[cfg(target_os = "linux")]
+fn port_group(name: &str) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let gid = std::fs::metadata(name).ok()?.gid();
+    group_name(gid)
+}
+
+#[cfg(target_os = "linux")]
+fn group_name(gid: u32) -> Option<String> {
+    let groups = std::fs::read_to_string("/etc/group").ok()?;
+    groups.lines().find_map(|l| {
+        let mut f = l.split(':');
+        let name = f.next()?;
+        let _ = f.next();
+        (f.next()?.parse::<u32>().ok()? == gid).then(|| name.to_string())
+    })
+}
+
+/// This process's groups by name (Linux; empty elsewhere): what a new login would have is in /etc/group, but a
+/// running session keeps the groups it started with, which is what counts for opening a port.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn my_groups() -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+        let ids = status.lines().find_map(|l| l.strip_prefix("Groups:")).unwrap_or("");
+        return ids.split_whitespace().filter_map(|g| g.parse().ok()).filter_map(group_name).collect();
+    }
+    #[allow(unreachable_code)]
+    Vec::new()
+}
+
 /// An open cable: the port for writes and rate changes, and the reader thread.
 pub struct SerialLink {
     port: Arc<Mutex<Box<dyn SerialPort>>>,
@@ -74,7 +147,7 @@ impl SerialLink {
             .flow_control(serialport::FlowControl::None)
             .timeout(Duration::from_millis(50))
             .open()
-            .map_err(|e| format!("Couldn't open {name}: {e}"))?;
+            .map_err(|e| open_error(name, &e))?;
         let chip = list().ok().and_then(|ps| ps.into_iter().find(|p| p.name == name)).filter(|p| p.cable);
         let label = match chip {
             Some(p) => format!("Cable ({})", p.detail.trim_end_matches(" USB serial")),

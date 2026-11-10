@@ -58,12 +58,24 @@ pub struct Radios {
     adapter: OnceCell<Adapter>,
 }
 
+/// Bluetooth that can't start, with the usual fix on Linux (BlueZ's service, reached over D-Bus).
+fn unavailable(e: &dyn std::fmt::Display) -> String {
+    if cfg!(target_os = "linux") {
+        format!(
+            "Bluetooth isn't available. On Linux, Ferrite Console uses the bluetooth service (BlueZ): check it's \
+             running (systemctl status bluetooth) and that Bluetooth is turned on. ({e})"
+        )
+    } else {
+        format!("Bluetooth isn't available: {e}")
+    }
+}
+
 impl Radios {
     async fn adapter(&self) -> Result<&Adapter, String> {
         self.adapter
             .get_or_try_init(|| async {
-                let manager = Manager::new().await.map_err(|e| format!("Bluetooth isn't available: {e}"))?;
-                let adapters = manager.adapters().await.map_err(|e| format!("Bluetooth isn't available: {e}"))?;
+                let manager = Manager::new().await.map_err(|e| unavailable(&e))?;
+                let adapters = manager.adapters().await.map_err(|e| unavailable(&e))?;
                 adapters.into_iter().next().ok_or_else(|| "This computer has no Bluetooth adapter.".to_string())
             })
             .await

@@ -11,6 +11,7 @@
 //!   or null when cancelled (the Install page's backup, BACKUP-2; the .ferrite codeplug's Save as… and Back up radio).
 
 mod ble;
+mod debug;
 mod serial;
 
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -27,8 +28,16 @@ pub enum Event {
 fn sink(ch: Channel<InvokeResponseBody>) -> impl Fn(Event) + Send + Sync + 'static {
     move |e| {
         let _ = match e {
-            Event::Data(b) => ch.send(InvokeResponseBody::Raw(b)),
-            Event::Closed(why) => ch.send(InvokeResponseBody::Json(serde_json::to_string(&why).unwrap_or_default())),
+            Event::Data(b) => {
+                if debug::on() {
+                    debug::line(&format!("received {} B", b.len()));
+                }
+                ch.send(InvokeResponseBody::Raw(b))
+            }
+            Event::Closed(why) => {
+                debug::line(&format!("closed: {why}"));
+                ch.send(InvokeResponseBody::Json(serde_json::to_string(&why).unwrap_or_default()))
+            }
         };
     }
 }
@@ -64,27 +73,47 @@ struct Opened {
 
 #[tauri::command]
 async fn serial_ports() -> Result<Vec<serial::PortRow>, String> {
-    tauri::async_runtime::spawn_blocking(serial::list).await.map_err(|e| e.to_string())?
+    let r = tauri::async_runtime::spawn_blocking(serial::list).await.map_err(|e| e.to_string()).and_then(|r| r);
+    debug::result("serial_ports", &r);
+    r
 }
 
 #[tauri::command]
 async fn ble_scan_start(app: State<'_, App>) -> Result<(), String> {
-    app.central.scan_start().await
+    let r = app.central.scan_start().await;
+    debug::result("ble_scan_start", &r);
+    r
 }
 
 #[tauri::command]
 async fn ble_devices(app: State<'_, App>) -> Result<Vec<ble::BleRow>, String> {
-    app.central.devices().await
+    let r = app.central.devices().await;
+    debug::result("ble_devices", &r);
+    r
 }
 
 #[tauri::command]
 async fn ble_scan_stop(app: State<'_, App>) -> Result<(), String> {
-    app.central.scan_stop().await
+    let r = app.central.scan_stop().await;
+    debug::result("ble_scan_stop", &r);
+    r
 }
 
 #[tauri::command]
 async fn transport_open(
     app: State<'_, App>,
+    kind: String,
+    id: String,
+    events: Channel<InvokeResponseBody>,
+) -> Result<Opened, String> {
+    debug::line(&format!("transport_open {kind} {id}"));
+    let r = open_transport(&app, kind, id, events).await;
+    debug::result("transport_open", &r.as_ref().map(|o| (&o.label, o.baud)).map_err(|e| e.clone()));
+    r
+}
+
+async fn open_transport(
+    app: &State<'_, App>,
     kind: String,
     id: String,
     events: Channel<InvokeResponseBody>,
@@ -112,19 +141,25 @@ async fn transport_open(
 
 #[tauri::command]
 async fn transport_write(app: State<'_, App>, bytes: Vec<u8>) -> Result<(), String> {
-    match app.open.lock().await.as_ref() {
+    let r = match app.open.lock().await.as_ref() {
         Some(Open::Serial(s)) => s.write(&bytes),
         Some(Open::Ble(b)) => b.write(&bytes).await,
         None => Err("Not connected.".into()),
+    };
+    if debug::on() {
+        debug::result(&format!("transport_write {} B", bytes.len()), &r);
     }
+    r
 }
 
 #[tauri::command]
 async fn transport_set_baud(app: State<'_, App>, rate: u32) -> Result<(), String> {
-    match app.open.lock().await.as_ref() {
+    let r = match app.open.lock().await.as_ref() {
         Some(Open::Serial(s)) => s.set_baud(rate),
         _ => Err("Only the cable has a rate.".into()),
-    }
+    };
+    debug::result(&format!("transport_set_baud {rate}"), &r);
+    r
 }
 
 /// LINK-15.1: Bluetooth's speed unlock (FF31; only that shape is ever written: `ble::is_unlock`).
@@ -138,6 +173,7 @@ async fn transport_unlock(app: State<'_, App>, token: Vec<u8>) -> Result<(), Str
 
 #[tauri::command]
 async fn transport_close(app: State<'_, App>) -> Result<(), String> {
+    debug::line("transport_close");
     app.shut().await;
     Ok(())
 }
@@ -161,6 +197,18 @@ async fn save_file(request: tauri::ipc::Request<'_>) -> Result<Option<String>, S
     Ok(Some(path.display().to_string()))
 }
 
+/// The debug switch (debug.rs): whether it's on, and the log file, for the webview.
+#[tauri::command]
+fn debug_state() -> Option<String> {
+    debug::path()
+}
+
+/// A line from the webview into the debug log (its errors, the connect steps); nothing when debug is off.
+#[tauri::command]
+fn debug_log(line: String) {
+    debug::line(&format!("ui: {line}"));
+}
+
 /// The core's protocol version, so the shell is known to link the same core the web build runs.
 #[tauri::command]
 fn core_protocol() -> u8 {
@@ -175,7 +223,11 @@ pub fn run() {
         // 1440 wide, centred. The config's size is only the fallback.
         .setup(|app| {
             use tauri::Manager;
+            debug::header();
             if let Some(w) = app.get_webview_window("main") {
+                if debug::on() {
+                    w.open_devtools();
+                }
                 if let Ok(Some(m)) = w.current_monitor() {
                     let s = m.size().to_logical::<f64>(m.scale_factor());
                     let size = tauri::LogicalSize::new((s.width * 0.9).min(1440.0), (s.height * 0.9).min(1100.0));
@@ -196,6 +248,8 @@ pub fn run() {
             transport_set_baud,
             transport_close,
             core_protocol,
+            debug_state,
+            debug_log,
             save_file
         ])
         .run(tauri::generate_context!())

@@ -9,7 +9,6 @@ Console is Svelte 5 (Vite) over a Rust core compiled to WebAssembly, in a Tauri 
 - Node 20+, npm, and Rust via rustup (`rust-toolchain.toml` pins it).
 - `cargo install wasm-bindgen-cli --version 0.2.129 --locked`
 - The ferrite checkout next to this one (`../ferrite`).
-- Linux desktop builds also need `libdbus-1-dev` and `libudev-dev`.
 - `npm install`, then `npx playwright install chromium` once for the end-to-end tests.
 
 ## Run
@@ -37,12 +36,25 @@ npm run e2e:run     # the same without the build
 
 ## Desktop builds
 
+For your own machine:
+
 ```sh
-FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh mac     # the .app and .dmg, on a Mac
-FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh all     # Linux and Windows, in Docker on the build box
+npm run bundle-firmware   # the Ferrite build to put in the app: ../ferrite/target's (tools/mkbtf.sh tx and reader there first)
+npm run tauri build       # the app for this system, in target/release/bundle/
+```
+
+- To bundle a downloaded release instead: `npm run bundle-firmware -- ferrite-0.8.0.ffw ferrite-reader.btf` (the reader's `.minisig` beside it).
+- Linux needs Tauri's packages too: on Fedora `sudo dnf install webkit2gtk4.1-devel openssl-devel libappindicator-gtk3-devel librsvg2-devel dbus-devel systemd-devel`; on Debian and Ubuntu `sudo apt install libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libudev-dev`.
+
+The release builds, all three systems (maintainers):
+
+```sh
+FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh mac                      # the .app and .dmg, on a Mac
+FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh all --host USER@HOST     # Linux and Windows, in Docker on a Linux build box
 ```
 
 - `FIRMWARE` names the Ferrite release to build in (its signed `.ffw` and the signed reader, `.minisig` beside it). Without it, `../ferrite/target`'s local build goes in.
+- The build box is reached over ssh and needs Docker; without `--host` it's ours.
 - Out: `target/desktop/`. A release ships the `.dmg`, the `.AppImage` and the Windows portable `.exe`.
 - The builds aren't signed or notarized yet.
 

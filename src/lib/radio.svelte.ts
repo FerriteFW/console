@@ -2,6 +2,7 @@
 // when the radio asks for it, INFO, the cable's faster rate, then the screen: the UI readback polled on the cable,
 // and on Bluetooth the radio's own compact updates (LINK-47, LINK-48) through a subscription (LINK-46), which also
 // carries the APRS events the APRS pages ask for.
+import { debugLog } from "./debuglog";
 import { LiveClient, loadCore, P, parseEvent, parseUi, type AprsEvent, type Hello, type Info, type Ui } from "./core";
 import { Link, RadioError, TimeoutError } from "./link";
 import { provider, type Transport, type TransportKind } from "./transport";
@@ -233,6 +234,7 @@ class Radio {
 
   /** `quiet`: a reconnect's try: a failure leaves no error behind (the next try comes). */
   private async connectWith(open: () => Promise<Transport>, quiet = false) {
+    debugLog(`connect: phase ${this.phase}${quiet ? " (quiet)" : ""}`);
     if (this.phase !== "idle") return;
     this.leaving = false;
     this.error = "";
@@ -242,7 +244,9 @@ class Radio {
     const gen = ++this.generation;
     try {
       await loadCore();
+      debugLog("connect: core loaded, opening");
       const t = await open();
+      debugLog(`connect: opened ${t.label}`);
       this.opened = true;
       this.t = t;
       this.kind = t.kind;
@@ -262,6 +266,7 @@ class Radio {
       }
       await this.afterAuth(gen);
     } catch (e) {
+      debugLog(`connect: failed: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
       if (gen === this.generation) await this.fail(e, quiet);
     }
   }

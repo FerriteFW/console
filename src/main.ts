@@ -2,6 +2,9 @@ import { mount } from "svelte";
 import "./app.css";
 import App from "./App.svelte";
 import { DEV_TOOLS } from "./lib/devtools";
+import { debugWatch } from "./lib/debuglog";
+
+debugWatch();
 import logo from "@ferrite/assets/logo/ferrite-icon.svg?url";
 
 const icon = document.createElement("link");

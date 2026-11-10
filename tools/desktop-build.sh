@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# The release builds (DEVELOPING.md; for your own machine only, `npm run tauri build` is enough).
 # The desktop app for Linux and Windows, built in Docker on the Xeon (tools/desktop/Dockerfile): copies the last
 # commit of this repo and of ../ferrite there (what's committed, not the working tree) plus the bundled firmware
 # (scripts/bundle-firmware.mjs, from ../ferrite/target), builds, and brings the
@@ -9,6 +10,8 @@
 # using them means accepting Microsoft's licence for them. Besides the NSIS setup.exe it brings back the bare app
 # ("Ferrite Console portable.exe"), which runs without installing.
 set -euo pipefail
+# DEBUG=1: every command as it runs, and ssh's own connection log.
+[ -n "${DEBUG:-}" ] && set -x
 host=${FERRITE_XEON:-infamy@192.168.7.162}
 what=all
 while [ $# -gt 0 ]; do
@@ -31,8 +34,13 @@ if [ "$what" = mac ]; then
   exit 0
 fi
 dir=code/console-build
-ssh="ssh -o ControlMaster=auto -o ControlPath=$HOME/.ssh/cm-desk-%C -o ControlPersist=120"
+ssh="ssh ${DEBUG:+-v} -o ControlMaster=auto -o ControlPath=$HOME/.ssh/cm-desk-%C -o ControlPersist=120"
 for i in $(seq 12); do $ssh -o ConnectTimeout=5 "$host" true 2>/dev/null && break; sleep 10; done
+$ssh -o ConnectTimeout=5 "$host" true 2>/dev/null || {
+  echo "can't reach the build box $host (a Linux machine with Docker; --host USER@HOST or FERRITE_XEON picks it)." >&2
+  echo "To build for this machine only: npm run tauri build (DEVELOPING.md)." >&2
+  exit 1
+}
 $ssh "$host" "mkdir -p $dir && rm -rf $dir/ferrite $dir/ferrite-console/src $dir/ferrite-console/src-tauri/src && mkdir -p $dir/ferrite $dir/ferrite-console"
 git -C "$here/../ferrite" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite"
 git -C "$here" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite-console"
