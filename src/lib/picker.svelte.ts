@@ -1,5 +1,6 @@
 // The desktop app's own device picker (the webview has no browser chooser): a list of ports or radios in a
 // popover under the connection bar. NativeTransport.open asks `picker.pick(kind)` and waits for a click.
+import { debugLog } from "./debuglog";
 import type { TransportKind } from "./transport/types";
 
 export type PickItem = { id: string; name: string; detail: string; likely: boolean };
@@ -29,6 +30,8 @@ class Picker {
 
   /** Opens the picker; the chosen ID, or a NotFoundError (as a browser chooser's) when it is closed. */
   pick(kind: TransportKind, source: Source): Promise<string> {
+    debugLog(`picker open ${kind}: drawn ${!!document.querySelector(".pick")}`);
+    setTimeout(() => debugLog(`picker ${kind} after 1 s: drawn ${!!document.querySelector(".pick")}, ${this.items.length} items, error "${this.error}"`), 1000);
     this.close(false);
     this.kind = kind;
     this.items = [];

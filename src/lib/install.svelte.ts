@@ -11,6 +11,7 @@
 //   Back to stock: the backup written into Ferrite's own ranges over the link (STOCK_RESTORE, never calibration or
 //   the update area: core/src/install.rs), then the stock .BTF through the bootloader, padded over stock's marker
 //   sector's first page with the marker the backup read put back (BACKUP-12, ferrite decision 338).
+import { debugLog } from "./debuglog";
 import { ACK, askRestart, BootPort, bootRate, CMD_PROBE, sendAll } from "./bootflash";
 import {
   backupCheck,
@@ -505,19 +506,22 @@ class Install {
   // ---- 1. Connect ----
 
   async connect(how: "cable" | "bridge") {
+    debugLog(`install connect ${how}: running ${this.running}, radio phase ${radio.phase}`);
     if (this.running) return;
     this.error = "";
     this.errorAt = "";
     try {
       this.t = await radio.openForUpdate(how);
     } catch (e) {
-      const msg = (e as Error).message;
+      const msg = (e as Error)?.message ?? String(e);
+      debugLog(`install connect failed: ${msg}`);
       if (!/cancel|no port selected/i.test(msg)) {
         this.error = msg;
         this.errorAt = "connect";
       }
       return;
     }
+    debugLog(`install connect: opened ${this.t.label}`);
     this.wire = new Wire(this.t);
     this.linked = true;
     this.label = this.t.label || (how === "bridge" ? "Bridge" : "Cable");

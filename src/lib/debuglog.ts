@@ -38,5 +38,17 @@ export function debugWatch() {
     debugLog(`start: ${navigator.userAgent}`);
     window.addEventListener("error", (e) => debugLog(`uncaught: ${text(e.error ?? e.message)}`));
     window.addEventListener("unhandledrejection", (e) => debugLog(`unhandled rejection: ${text(e.reason)}`));
+    // Every press, with what it landed on: a disabled button gets no click, but it does get the pointer.
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        const el = e.target as HTMLElement | null;
+        const b = el?.closest("button, a, input, [role=button]") as HTMLButtonElement | null;
+        const what = b ?? el;
+        const label = (what?.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 60);
+        debugLog(`press: <${what?.tagName.toLowerCase()}> "${label}"${b?.disabled ? " DISABLED" : ""} at ${location.hash || "/"}`);
+      },
+      true,
+    );
   });
 }

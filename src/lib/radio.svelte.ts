@@ -203,6 +203,7 @@ class Radio {
     this.error = "";
     this.note = "";
     await loadCore();
+    debugLog(`openForUpdate ${how}: core loaded, opening`);
     const t = how === "bridge" ? await BridgeTransport.open() : await provider.open("cable");
     const gen = ++this.generation;
     this.t = t;
