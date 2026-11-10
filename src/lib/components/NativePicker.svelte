@@ -13,9 +13,13 @@
       : "No serial ports. Plug the cable in, then Refresh.",
   );
 
-  // Disconnect pressed while the picker is open: close it.
+  // Disconnect pressed while the picker is open: close it. Only on the change to idle: Install opens the picker with
+  // Console idle (openForUpdate), and closing it then cancelled every Connect cable… at once (0.8.0, desktop app).
+  let was = radio.phase;
   $effect(() => {
-    if (radio.phase === "idle" && picker.kind) picker.close();
+    const now = radio.phase;
+    if (now === "idle" && was !== "idle" && picker.kind) picker.close();
+    was = now;
   });
 
   function onkey(e: KeyboardEvent) {
