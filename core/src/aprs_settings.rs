@@ -58,6 +58,7 @@ fn probes() -> [Vec<u8>; 2] {
     b[V2..V2 + 4].copy_from_slice(&[2, 3, 50, 2]);
     b[V2 + 4..V2 + 9].copy_from_slice(b"probe");
     b[END..END + 3].copy_from_slice(&[2, 3, 1]);
+    b[ferrite_app::link::APRS_REPLY_AT] = 1; // auto reply on (APRS-57, 0.8.2)
     [a, b]
 }
 
@@ -183,9 +184,79 @@ pub fn view(settings_rec: &[u8], rec: &[u8], ex: &Extras) -> View {
                 note,
             });
         }
+        if rec.len() == RECORD_LEN {
+            items.extend(reply_items(rec));
+        }
         sc.aprs = None;
         sc.term = None;
         View { items, notes, elsewhere }
+    })
+}
+
+/// APRS-57: auto reply's page (MENU 0 5 9 9) beyond its on/off row: who it answers, the delay and the reply,
+/// from the record's end (0.8.2). Their ids aren't menu numbers: `reply.to`, `reply.delay`, `reply.text`.
+fn reply_items(rec: &[u8]) -> Vec<Item> {
+    use ferrite_app::aprs::{REPLY_DELAY_NAMES, REPLY_TO_LEN};
+    let at = ferrite_app::link::APRS_REPLY_AT;
+    let text = |b: &[u8]| String::from_utf8_lossy(&b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())]).into_owned();
+    let to = match text(&rec[at + 1..at + 1 + REPLY_TO_LEN]) {
+        t if t.is_empty() => "*".to_string(),
+        t => t,
+    };
+    let delay = (rec[at] >> 4) as usize % REPLY_DELAY_NAMES.len();
+    let reply = text(&rec[at + 1 + REPLY_TO_LEN..]);
+    let item = |id: &str, name: &str, help: &str, value: String, changed: bool, kind: Kind, choices: Vec<String>, hint: &str| Item {
+        id: id.into(),
+        path: "0 5 9 9".into(),
+        name: name.into(),
+        sub: "Auto reply".into(),
+        help: help.into(),
+        value,
+        changed,
+        kind,
+        choices,
+        hint: hint.into(),
+        note: String::new(),
+    };
+    vec![
+        item("reply.to", "Reply to", "Who gets the reply: * everyone, VE7* every call starting VE7, or one callsign-SSID.", to.clone(), to != "*", Kind::Text, Vec::new(), "* everyone, VE7* a prefix, or one callsign-SSID"),
+        item("reply.delay", "Delay", "How long after a message the reply goes.", REPLY_DELAY_NAMES[delay].into(), delay != 0, Kind::Pick, REPLY_DELAY_NAMES.iter().map(|n| n.to_string()).collect(), ""),
+        item("reply.text", "Message", "What is sent, once per station in 30 minutes. None is sent without one.", reply.clone(), !reply.is_empty(), Kind::Text, Vec::new(), "up to 45 characters"),
+    ]
+}
+
+/// APRS-57: one of auto reply's page values set: the record with it changed, checked by ferrite's own link session
+/// (`aprs_apply`, as the page checks it), or the radio's reason.
+fn set_reply(s: &Settings, rec: &[u8], ex: &Extras, field: &str, value: &str) -> Result<(Vec<u8>, Extras), String> {
+    use ferrite_app::aprs::{REPLY_DELAY_NAMES, REPLY_TEXT_LEN, REPLY_TO_LEN};
+    if rec.len() != RECORD_LEN {
+        return Err("auto reply needs Ferrite 0.8.2 or later on the radio".into());
+    }
+    let at = ferrite_app::link::APRS_REPLY_AT;
+    let mut r = rec.to_vec();
+    let put = |r: &mut [u8], v: &[u8], max: usize, what: &str| -> Result<(), String> {
+        if v.len() > max {
+            return Err(format!("{what}: up to {max} characters"));
+        }
+        r[..max].fill(0);
+        r[..v.len()].copy_from_slice(v);
+        Ok(())
+    };
+    match field {
+        "to" => put(&mut r[at + 1..], value.to_ascii_uppercase().as_bytes(), REPLY_TO_LEN, "Reply to")?,
+        "text" => put(&mut r[at + 1 + REPLY_TO_LEN..], value.as_bytes(), REPLY_TEXT_LEN, "Message")?,
+        "delay" => {
+            let i = REPLY_DELAY_NAMES.iter().position(|n| *n == value).ok_or_else(|| format!("Delay: one of {}", REPLY_DELAY_NAMES.join(", ")))?;
+            r[at] = r[at] & 0x0F | (i as u8) << 4;
+        }
+        _ => return Err(format!("reply.{field}: not an auto reply setting")),
+    }
+    scratch(|sc| {
+        sc.aprs = None;
+        sc.load(s);
+        sc.write_record(what::APRS, &r)?;
+        let back = sc.read_record(what::APRS)?;
+        Ok((back, ex.clone()))
     })
 }
 
@@ -193,6 +264,9 @@ pub fn view(settings_rec: &[u8], rec: &[u8], ex: &Extras) -> View {
 /// values, or the radio's reason.
 pub fn set(settings_rec: &[u8], rec: &[u8], ex: &Extras, id: &str, value: &str) -> Result<(Vec<u8>, Extras), String> {
     let s = settings_or_default(settings_rec);
+    if let Some(field) = id.strip_prefix("reply.") {
+        return set_reply(&s, rec, ex, field, value.trim()); // APRS-57
+    }
     let p = parse_path(id).filter(|p| p[0] == 5).ok_or_else(|| format!("{id}: not an APRS setting"))?;
     let name = path_name(&p).ok_or_else(|| format!("{id}: not a setting"))?;
     let value = value.trim();
@@ -377,7 +451,14 @@ pub fn restore(text: &str) -> Result<(Vec<u8>, Backup), String> {
         return Err(format!("backup version {} is newer than this Console reads", b.version));
     }
     b.extras = own(&b.extras);
-    let rec = unhex(&b.record).ok_or("its record isn't hex")?;
+    let mut rec = unhex(&b.record).ok_or("its record isn't hex")?;
+    // A backup from before auto reply (Console 0.8.1, the record ending at it): auto reply's defaults, off, everyone
+    // and no message (APRS-57), so it restores whole.
+    if rec.len() == ferrite_app::link::APRS_REPLY_AT {
+        rec.push(0);
+        rec.extend_from_slice(&ferrite_app::aprs::REPLY_TO_DEFAULT);
+        rec.extend_from_slice(&[0; ferrite_app::aprs::REPLY_TEXT_LEN]);
+    }
     Ok((rec, b))
 }
 
@@ -449,6 +530,39 @@ mod tests {
         assert_eq!(item(&v, "0 5 9 2").kind, Kind::Text);
     }
 
+    /// APRS-57, LINK-43: auto reply on this page: its on/off row (MENU 0 5 9 9, from the record) and its page's
+    /// three values; each changes through ferrite's own checks, a bad one refused with the radio's reason.
+    #[test]
+    fn auto_reply() {
+        let srec = record_of(&Settings::DEFAULT);
+        let rec = default_record();
+        let v = view(&srec, &rec);
+        assert_eq!(item(&v, "0 5 9 9").value, "Off");
+        assert_eq!((item(&v, "reply.to").value.as_str(), item(&v, "reply.delay").value.as_str(), item(&v, "reply.text").value.as_str()), ("*", "10 s", ""));
+        assert_eq!(item(&v, "reply.delay").choices, ["10 s", "30 s", "1 min", "2 min"]);
+        let r = set(&srec, &rec, "0 5 9 9", "On").unwrap();
+        let r = set(&srec, &r, "reply.to", "ve7*").unwrap();
+        let r = set(&srec, &r, "reply.delay", "1 min").unwrap();
+        let r = set(&srec, &r, "reply.text", "Away, back at 5").unwrap();
+        let v = view(&srec, &r);
+        assert_eq!(item(&v, "0 5 9 9").value, "On");
+        assert_eq!((item(&v, "reply.to").value.as_str(), item(&v, "reply.delay").value.as_str(), item(&v, "reply.text").value.as_str()), ("VE7*", "1 min", "Away, back at 5"));
+        assert!(item(&v, "reply.to").changed && item(&v, "reply.text").changed);
+        assert!(set(&srec, &r, "reply.to", "VE7/ABC").unwrap_err().contains("auto reply"), "the radio's reason");
+        assert!(set(&srec, &r, "reply.to", "VE7ABCDEFG").is_err(), "10 characters");
+        assert!(set(&srec, &r, "reply.text", &"x".repeat(46)).is_err());
+        assert!(set(&srec, &r, "reply.delay", "5 min").is_err());
+        let r2 = set(&srec, &r, "reply.to", "").unwrap();
+        assert_eq!(item(&view(&srec, &r2), "reply.to").value, "*", "empty is everyone");
+        let d = diff(&srec, &rec, &Extras::default(), &r, &Extras::default());
+        assert!(d.iter().any(|c| c.name == "Message" && c.to == "Away, back at 5"), "{d:?}");
+        assert!(set(&srec, &rec[..rec.len() - 55], "reply.text", "x").is_err(), "a 0.8.1 radio's record");
+        // a backup from before auto reply restores whole, auto reply at its defaults
+        let old = backup(&srec, &rec[..ferrite_app::link::APRS_REPLY_AT], "2026-11-09T22:00:00.000Z", BTreeMap::new());
+        let (back, _) = restore(&old).unwrap();
+        assert_eq!(back, rec, "the defaults after it");
+    }
+
     /// LINK-43: a change is the menu's; a refusal is the radio's; the plan writes through ferrite's link session and
     /// the radio's record afterwards is the one asked for.
     #[test]
@@ -512,7 +626,7 @@ mod tests {
             ids,
             [
                 "0 5 4", "0 5 5 1", "0 5 5 2", "0 5 5 3", "0 5 5 6", "0 5 5 7", "0 5 6 1", "0 5 6 2", "0 5 6 3",
-                "0 5 6 4", "0 5 7 1", "0 5 7 2", "0 5 7 3", "0 5 9 1", "0 5 9 2", "0 5 9 3", "0 5 9 4", "0 5 9 5"
+                "0 5 6 4", "0 5 7 1", "0 5 7 2", "0 5 7 3", "0 5 9 1", "0 5 9 2", "0 5 9 3", "0 5 9 4", "0 5 9 5", "0 5 9 9", "reply.to", "reply.delay", "reply.text"
             ]
         );
         assert_eq!(v.elsewhere.iter().filter(|e| e.starts_with("0 5 9 7")).count(), 1, "{:?}", v.elsewhere);
