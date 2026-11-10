@@ -79,6 +79,10 @@
     </div>
   {:else}
     {#if !cableOk}<p class="sub">{radio.available().cable}</p>{/if}
+    {#if cableOk && radio.phase !== "idle" && radio.phase !== "updating"}
+      <!-- Never a dead button: say what holds the cable. -->
+      <p class="sub">Console is still {radio.phase === "connecting" ? "connecting to the radio" : "connected"} through the top bar{radio.retrying ? " (reconnecting by itself)" : ""}. Press Disconnect at the top first, then Connect cable here.</p>
+    {/if}
     <div class="row">
       {#if cancel}<button class="btn" onclick={close}>Cancel</button>{/if}
       {#if bridge}<button class="btn" disabled={radio.phase !== "idle"} onclick={() => I.connect("bridge")}>Bridge</button>{/if}

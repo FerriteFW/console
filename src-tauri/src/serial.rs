@@ -32,6 +32,8 @@ pub fn rows(ports: Vec<serialport::SerialPortInfo>) -> Vec<PortRow> {
     let mut out: Vec<PortRow> = ports
         .into_iter()
         .filter(|p| !p.port_name.starts_with("/dev/tty."))
+        // Linux lists every built-in UART slot (/dev/ttyS0-31) whether or not one is fitted: never the cable.
+        .filter(|p| !(p.port_name.starts_with("/dev/ttyS") && matches!(p.port_type, SerialPortType::Unknown)))
         .filter(|p| {
             !["Bluetooth-Incoming-Port", "debug-console", "wlan-debug"].iter().any(|s| p.port_name.ends_with(s))
         })
