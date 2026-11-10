@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-console-app"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "btleplug",
  "ferrite-console-core",
@@ -1014,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-console-core"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "ferrite-app",
  "ferrite-core",
@@ -1027,7 +1027,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-console-wasm"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "ferrite-console-core",
  "serde",
