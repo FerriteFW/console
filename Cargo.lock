@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-app"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "ferrite-core",
  "ferrite-ui",
@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-core"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "uafsk",
  "udsc",
@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-store"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "ferrite-app",
  "ferrite-core",
@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-ui"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "ferrite-core",
  "ufmt",
