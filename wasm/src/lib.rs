@@ -111,7 +111,7 @@ pub fn protocol() -> String {
                  "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY,
                  "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP,
                  "MSG_DELETE": msg::MSG_DELETE, "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA,
-                 "DATA_READ": msg::DATA_READ, "DATA_WRITE": msg::DATA_WRITE, "CLOCK": msg::CLOCK },
+                 "DATA_READ": msg::DATA_READ, "DATA_WRITE": msg::DATA_WRITE, "CLOCK": msg::CLOCK, "STATE": msg::STATE, "TUNE": msg::TUNE },
         "data": { "READ": ferrite_console_core::link::data::READ, "CRC": ferrite_console_core::link::data::CRC,
                   "READ_MAX": ferrite_console_core::link::data::READ_MAX, "SECTOR": ferrite_console_core::link::data::SECTOR },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION,
@@ -119,13 +119,13 @@ pub fn protocol() -> String {
                   "SAT": what::SAT, "SAT_INFO": what::SAT_INFO, "RADIO": what::RADIO },
         "caps2": { "PRESET_SKIPS": ferrite_console_core::link::caps2::PRESET_SKIPS, "DATA": ferrite_console_core::link::caps2::DATA,
                    "SATS": ferrite_console_core::link::caps2::SATS, "RADIO": ferrite_console_core::link::caps2::RADIO,
-                   "LINE_CMDS": ferrite_console_core::link::caps2::LINE_CMDS },
+                   "LINE_CMDS": ferrite_console_core::link::caps2::LINE_CMDS, "STATE": ferrite_console_core::link::caps2::STATE },
         "limits": { "channels": channels::MAX_CHANNELS, "zones": ferrite_console_core::radioside::MAX_ZONES, "zoneCap": channels::ZONE_CAP,
                     "contacts": lists::CONTACT_MAX, "waypoints": lists::WAYPOINT_MAX, "sats": sats::MAX },
         "caps": { "POSITION": ferrite_console_core::link::caps::POSITION, "LISTS": ferrite_console_core::link::caps::LISTS },
         "waypointAdd": lists::WAYPOINT_ADD,
         "satAll": ferrite_console_core::link::ADD,
-        "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "SUB_LOG": event::SUB_LOG, "LOG": event::LOG, "HEARD": event::HEARD,
+        "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "SUB_LOG": event::SUB_LOG, "SUB_STATE": event::SUB_STATE, "STATE": event::STATE, "LOG": event::LOG, "HEARD": event::HEARD,
                    "MSG": event::MSG, "MSG_STATE": event::MSG_STATE, "UI": event::UI, "QUIET_MS": event::QUIET_MS, "DICT": liveview::DICT },
         "knobMax": key::KNOB_MAX,
         "keys": keys::NAMES,
@@ -1155,6 +1155,25 @@ pub fn parse_heard(rest: &[u8]) -> String {
 #[wasm_bindgen]
 pub fn parse_msgs(rest: &[u8]) -> String {
     json(&aprs::parse_msgs(rest))
+}
+
+/// LINK-67: `STATE`'s record as JSON (`RadioState`), or null when this Console can't read it.
+#[wasm_bindgen]
+pub fn state_parse(rec: &[u8]) -> String {
+    json(&ferrite_console_core::state::parse(rec))
+}
+
+/// LINK-67.1: a state event's body (after its kind) over the record kept so far (empty: none yet); the new record,
+/// or nothing when `STATE` must be asked.
+#[wasm_bindgen]
+pub fn state_merge(prev: &[u8], body: &[u8]) -> Option<Vec<u8>> {
+    ferrite_console_core::state::merge((!prev.is_empty()).then_some(prev), body)
+}
+
+/// LINK-68: `TUNE`'s payload (op "channel", "step", "group", "zone", "scan"), or why not.
+#[wasm_bindgen]
+pub fn tune_payload(slot: u8, op: &str, value: i32) -> Result<Vec<u8>, JsError> {
+    ferrite_console_core::state::tune_payload(slot, op, value).map_err(|e| JsError::new(&e))
 }
 
 /// An event's payload as JSON `{kind: "heard" | "message" | "message_state" | "ui" | "unknown", ...}`, or null.
