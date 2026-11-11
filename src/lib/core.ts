@@ -72,14 +72,14 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK" | "STATE" | "TUNE", number>;
   /** LINK-59: `DATA_READ`'s ops and its most bytes, and the erase unit. */
   data: { READ: number; CRC: number; READ_MAX: number; SECTOR: number };
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS" | "SAT" | "SAT_INFO" | "RADIO", number>;
   /** LINK-35.2: HELLO's caps bits the UI asks about by name (link.ts has the transport ones). */
   caps: Record<"POSITION" | "LISTS", number>;
   /** LINK-35.2: the second caps byte's bits. */
-  caps2: Record<"PRESET_SKIPS" | "DATA" | "SATS" | "RADIO" | "LINE_CMDS", number>;
+  caps2: Record<"PRESET_SKIPS" | "DATA" | "SATS" | "RADIO" | "LINE_CMDS" | "STATE", number>;
   /** What the radio holds (layout 3, decision 333): 4,000 channels, 512 zones, 256 channels a zone, 1,016 contacts,
    *  2,032 waypoints. */
   limits: { channels: number; zones: number; zoneCap: number; contacts: number; waypoints: number; sats: number };
@@ -87,7 +87,7 @@ export type Protocol = {
   waypointAdd: number;
   /** LINK-63: WRITE_MANY of `what::SAT` with length 0 at this index clears every satellite. */
   satAll: number;
-  event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "SUB_LOG" | "LOG" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
+  event: Record<"SUB_HEARD" | "SUB_MSGS" | "SUB_UI" | "SUB_LOG" | "SUB_STATE" | "STATE" | "LOG" | "HEARD" | "MSG" | "MSG_STATE" | "UI" | "QUIET_MS" | "DICT", number>;
   knobMax: number;
   keys: string[];
   timing: Timing;
@@ -550,6 +550,48 @@ export type AprsEvent =
 export const parseHeard = (rest: Uint8Array): { count: number; stations: Station[] } | null => JSON.parse(wasm.parse_heard(rest));
 export const parseMsgs = (rest: Uint8Array): { count: number; messages: Message[] } | null => JSON.parse(wasm.parse_msgs(rest));
 export const parseEvent = (payload: Uint8Array): AprsEvent | null => JSON.parse(wasm.parse_event(payload));
+
+/** LINK-67: the radio state, as the core decodes `STATE`'s record. */
+export type SlotNow = {
+  slot: "A" | "B" | "C";
+  on_channel: boolean;
+  scanning: boolean;
+  open: boolean;
+  transmitting: boolean;
+  aprs: boolean;
+  broadcast: boolean;
+  muted: boolean;
+  off: boolean;
+  /** As the radio shows it (1-based); null on the VFO. */
+  channel: number | null;
+  /** 0-based; -1 Local; null on a VFO. */
+  zone: number | null;
+  hz: number;
+  mode: "FM" | "NFM" | "AM" | "WFM" | "";
+  power: "Low" | "Mid" | "High" | "";
+  /** dBm while the squelch is open. */
+  dbm: number | null;
+  name: string;
+};
+export type RadioNow = {
+  active: number;
+  transmitting: boolean;
+  dry_tx: boolean;
+  locked: boolean;
+  battery_pct: number;
+  battery_mv: number;
+  battery_low: boolean;
+  gps: "off" | "searching" | "fix";
+  sats: number;
+  pos: [number, number] | null;
+  slots: SlotNow[];
+};
+export const stateParse = (rec: Uint8Array): RadioNow | null => JSON.parse(wasm.state_parse(rec));
+/** A state event's body over the record kept (empty: none); undefined: ask `STATE` again. */
+export const stateMerge = (prev: Uint8Array, body: Uint8Array): Uint8Array | undefined => wasm.state_merge(prev, body);
+/** LINK-68: `TUNE`'s payload; throws with the reason when it can't be one. */
+export type TuneOp = "channel" | "step" | "group" | "zone" | "scan";
+export const tunePayload = (slot: number, op: TuneOp, value: number): Uint8Array => wasm.tune_payload(slot, op, value);
 /** MSG_SEND's payload; throws Console's copy of the radio's rules (the radio checks again). */
 export const msgSendPayload = (to: string, text: string): Uint8Array => wasm.msg_send_payload(to, text);
 /** LINK-52: MSG_DELETE's payload for one message as MSGS listed it (its direction, station and text). */

@@ -1,10 +1,11 @@
 <script lang="ts">
   // Live View's side panel (Alex approved the mockup, Oct 30): beside the radio on a wide window, what the screen
-  // can't fit at once. Slots (the readback's cards), Heard now (the APRS card's rows, the heard list and the event
+  // can't fit at once. Slots (the radio state, LINK-67, on any screen, with the tuning commands, LINK-68; from an
+  // older radio the readback's cards, home only), Heard now (the APRS card's rows, the heard list and the event
   // log, whichever Console has already read, and the event log's new events as they happen: LINK-57), Radio (the
   // status bar and INFO), Listen. Nothing here reads the radio by itself: it shows what Console already has, and
   // what the radio sends.
-  import type { Kv } from "../core";
+  import { P, type Kv, type SlotNow } from "../core";
   import { radio } from "../radio.svelte";
   import { listen } from "../listen.svelte";
   import { aprs, ago, atKey } from "../aprs.svelte";
@@ -31,6 +32,36 @@
     else if (ui && ui.cards.length) cards = ui.cards;
   });
   const onHome = $derived(!!ui && ui.cards.length > 0);
+
+  // LINK-67: the radio state while the panel is up, from a radio that sends it; its slots on any screen.
+  $effect(() => (connected ? radio.want("live-panel", P.event.SUB_STATE) : undefined));
+  const now = $derived(connected ? radio.now : null);
+  const hzText = (hz: number) => mhz((hz / 1e6).toFixed(5));
+  function nowMain(x: SlotNow): string {
+    if (x.broadcast) return [x.name, `${(x.hz / 1e6).toFixed(1)} MHz`].filter(Boolean).join(" · ");
+    return x.name ? `${x.name} · ${hzText(x.hz)}` : hzText(x.hz);
+  }
+  function nowDetail(x: SlotNow): string {
+    if (x.aprs) return "APRS";
+    if (x.broadcast) return "Broadcast";
+    return [x.on_channel ? `Ch ${x.channel}` : "VFO", x.mode, x.power].filter(Boolean).join(" · ");
+  }
+  function nowStatus(x: SlotNow): { text: string; tone: string } {
+    if (x.transmitting) return { text: "TX", tone: "tx" };
+    if (x.off) return { text: "off", tone: "" };
+    if (x.scanning) return { text: x.open ? "scan · RX" : "scanning", tone: x.open ? "rx" : "busy" };
+    if (x.open) return { text: x.dbm !== null ? `RX ${x.dbm} dBm` : "RX", tone: "rx" };
+    if (x.broadcast) return { text: x.muted ? "muted" : "FM", tone: x.muted ? "warn" : "" };
+    if (x.muted) return { text: "muted", tone: "warn" };
+    return { text: x.aprs ? "APRS" : "idle", tone: "" };
+  }
+  // LINK-68: a channel typed per slot
+  let chanText = $state<Record<string, string>>({});
+  function goChannel(i: number, x: SlotNow, e: SubmitEvent) {
+    e.preventDefault();
+    const n = Number(chanText[x.slot]);
+    if (Number.isInteger(n) && n >= 1) void radio.tune(i, "channel", n).then((ok) => ok && (chanText[x.slot] = ""));
+  }
 
   function main(c: Kv): string {
     if (c.kind === "broadcast") return `${n(c.freq).toFixed(1)} MHz`;
@@ -114,7 +145,45 @@
 <aside class="panel" aria-label="Live View panel" data-live-panel>
   <section>
     <h4>Slots</h4>
-    {#if cards.length}
+    {#if now}
+      {#each now.slots as x, i (x.slot)}
+        {@const st = nowStatus(x)}
+        {@const fixed = x.aprs || x.transmitting || now.transmitting}
+        <div class="slot" class:active={now.active === i} data-slot={x.slot}>
+          <button
+            class="badge"
+            style:background={slotColour[x.slot]}
+            title={now.active === i ? `Slot ${x.slot} is active` : `Make slot ${x.slot} active`}
+            aria-label={`Make slot ${x.slot} active`}
+            disabled={now.active === i}
+            onclick={() => radio.makeActive(i)}>{x.slot}</button
+          >
+          <span class="what">
+            <span class="main">{nowMain(x)}</span>
+            <span class="sub">{nowDetail(x)}</span>
+          </span>
+          <span class="st {st.tone}">{st.text}</span>
+          <div class="tune" role="group" aria-label={`Tune slot ${x.slot}`}>
+            <button title="Down a step or channel (▼)" aria-label="Down" disabled={fixed || x.scanning} onclick={() => radio.tune(i, "step", -1)}>▼</button>
+            <button title="Up a step or channel (▲)" aria-label="Up" disabled={fixed || x.scanning} onclick={() => radio.tune(i, "step", 1)}>▲</button>
+            <button title={x.on_channel ? "Previous zone (◀)" : "Previous band (◀)"} aria-label={x.on_channel ? "Previous zone" : "Previous band"} disabled={fixed || x.scanning} onclick={() => radio.tune(i, "group", -1)}>◀</button>
+            <button title={x.on_channel ? "Next zone (▶)" : "Next band (▶)"} aria-label={x.on_channel ? "Next zone" : "Next band"} disabled={fixed || x.scanning} onclick={() => radio.tune(i, "group", 1)}>▶</button>
+            <button class="scan" disabled={fixed} onclick={() => radio.tune(i, "scan", x.scanning ? 0 : 1)}>{x.scanning ? "Stop scan" : "Scan"}</button>
+            <form onsubmit={(e) => goChannel(i, x, e)}>
+              <input
+                type="number"
+                min="1"
+                max="4000"
+                placeholder="Ch"
+                aria-label={`Channel number for slot ${x.slot}`}
+                disabled={fixed || x.scanning}
+                bind:value={chanText[x.slot]}
+              />
+            </form>
+          </div>
+        </div>
+      {/each}
+    {:else if cards.length}
       {#each cards as c (c.slot)}
         {@const st = status(c)}
         <div class="slot" class:active={n(c.active) === 1} data-slot={s(c.slot)}>
@@ -205,6 +274,53 @@
   }
   .slot:last-of-type {
     border-bottom: 0;
+  }
+  button.badge {
+    border: 0;
+    padding: 0;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button.badge:disabled {
+    cursor: default;
+  }
+  .tune {
+    grid-column: 2 / 4;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+  }
+  .tune button {
+    min-width: 28px;
+    height: 24px;
+    padding: 0 6px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .tune button:hover:not(:disabled) {
+    border-color: var(--blue);
+  }
+  .tune button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .tune input {
+    width: 60px;
+    height: 24px;
+    padding: 0 6px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
   }
   .badge {
     display: inline-grid;

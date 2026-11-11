@@ -3,7 +3,7 @@
 // and on Bluetooth the radio's own compact updates (LINK-47, LINK-48) through a subscription (LINK-46), which also
 // carries the APRS events the APRS pages ask for.
 import { debugLog } from "./debuglog";
-import { LiveClient, loadCore, P, parseEvent, parseUi, type AprsEvent, type Hello, type Info, type Ui } from "./core";
+import { LiveClient, loadCore, P, parseEvent, parseUi, stateMerge, stateParse, tunePayload, type AprsEvent, type Hello, type Info, type RadioNow, type TuneOp, type Ui } from "./core";
 import { Link, RadioError, TimeoutError } from "./link";
 import { provider, type Transport, type TransportKind } from "./transport";
 import { BridgeTransport } from "./transport/bridge";
@@ -42,6 +42,10 @@ class Radio {
   hello = $state<Hello | null>(null);
   info = $state<Info | null>(null);
   ui = $state<Ui | null>(null);
+  /** LINK-67: the radio state (the radio, each slot) while something wants it (`want(who, SUB_STATE)`), from a radio
+   *  that has it (caps2 STATE); null otherwise. */
+  now = $state<RadioNow | null>(null);
+  private stateRec = new Uint8Array();
   /** How long the last readback took, ms. */
   uiMs = $state(0);
   /** Readbacks failed in a row. */
@@ -332,11 +336,13 @@ class Radio {
     if (this.live && !this.busy && this.eventsForLive) m |= 4;
     // LINK-57: the event log's events only from a radio that has them (HELLO caps 128).
     if (!this.link || !(this.link.caps & P.caps.LISTS)) m &= ~8;
+    // LINK-67.1: the radio state only from a radio that has it (caps2 STATE).
+    if (!this.link || !(this.link.caps2 & P.caps2.STATE)) m &= ~P.event.SUB_STATE;
     return this.noEvents || this.leaving ? 0 : m;
   }
 
   /**
-   * Events for `who` (`mask`: 1 heard, 2 messages, 8 the event log): subscribed while any part wants them. The returned function
+   * Events for `who` (`mask`: 1 heard, 2 messages, 8 the event log, 16 the radio state): subscribed while any part wants them. The returned function
    * stops wanting them.
    */
   want(who: string, mask: number): () => void {
@@ -377,8 +383,62 @@ class Radio {
       }
       return;
     }
+    if (p[0] === P.event.STATE) {
+      // LINK-67.1: the parts that changed, over the record kept; a gap or a part that can't be placed reads it whole
+      const rec = gap ? undefined : stateMerge(this.stateRec, p.subarray(1));
+      if (rec) this.takeState(rec);
+      else void this.readState();
+      return;
+    }
     const ev = parseEvent(p);
     for (const f of this.listeners) f(ev, gap);
+  }
+
+  private takeState(rec: Uint8Array) {
+    this.stateRec = rec;
+    this.now = stateParse(rec);
+  }
+
+  /** LINK-67: the whole state by `STATE`. */
+  private async readState() {
+    const link = this.link;
+    if (!link || !(link.caps2 & P.caps2.STATE)) return;
+    try {
+      this.takeState(await link.ok(P.msg.STATE));
+    } catch {
+      /* the next event tries again */
+    }
+  }
+
+  /**
+   * LINK-68: tunes slot `slot` (0-2) as home's keys would: a channel by number, ▲▼ steps, ◀▶ zones or bands, a zone,
+   * the scan. True when the radio took it; a refusal shows its reason in the bar.
+   */
+  async tune(slot: number, op: TuneOp, value: number): Promise<boolean> {
+    const link = this.link;
+    if (!link || this.phase !== "connected" || !(link.caps2 & P.caps2.STATE)) return false;
+    try {
+      await link.ok(P.msg.TUNE, tunePayload(slot, op, value));
+      this.refresh();
+      return true;
+    } catch (e) {
+      this.flash(e, "Tune");
+      return false;
+    }
+  }
+
+  /** LINK-33: makes slot `slot` the active one, as the SLOT key. */
+  async makeActive(slot: number): Promise<boolean> {
+    const link = this.link;
+    if (!link || this.phase !== "connected") return false;
+    try {
+      await link.ok(P.msg.SLOT, new Uint8Array([slot, 64]));
+      this.refresh();
+      return true;
+    } catch (e) {
+      this.flash(e, "Slot");
+      return false;
+    }
   }
 
   /**
@@ -514,8 +574,8 @@ class Radio {
 
   private flashTimer: ReturnType<typeof setTimeout> | undefined;
   /** A key's refusal, shown a few seconds in the bar. */
-  private flash(e: unknown) {
-    this.keyNote = `Key: ${(e as Error).message}`;
+  private flash(e: unknown, what = "Key") {
+    this.keyNote = `${what}: ${(e as Error).message}`;
     clearTimeout(this.flashTimer);
     this.flashTimer = setTimeout(() => (this.keyNote = ""), 4000);
   }
@@ -543,6 +603,8 @@ class Radio {
     this.t = null;
     this.phase = "idle";
     this.ui = null;
+    this.now = null;
+    this.stateRec = new Uint8Array();
     this.hello = null;
     this.info = null;
     this.baud = null;

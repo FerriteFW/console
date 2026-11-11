@@ -61,6 +61,7 @@ pub mod sats;
 pub mod session;
 pub mod settings;
 pub mod signature;
+pub mod state;
 pub mod timing;
 pub mod ui;
 pub mod uid;
