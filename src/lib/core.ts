@@ -72,14 +72,14 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK" | "STATE" | "TUNE", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK" | "STATE" | "TUNE" | "BEACON", number>;
   /** LINK-59: `DATA_READ`'s ops and its most bytes, and the erase unit. */
   data: { READ: number; CRC: number; READ_MAX: number; SECTOR: number };
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS" | "SAT" | "SAT_INFO" | "RADIO", number>;
   /** LINK-35.2: HELLO's caps bits the UI asks about by name (link.ts has the transport ones). */
   caps: Record<"POSITION" | "LISTS", number>;
   /** LINK-35.2: the second caps byte's bits. */
-  caps2: Record<"PRESET_SKIPS" | "DATA" | "SATS" | "RADIO" | "LINE_CMDS" | "STATE", number>;
+  caps2: Record<"PRESET_SKIPS" | "DATA" | "SATS" | "RADIO" | "LINE_CMDS" | "STATE" | "BEACON", number>;
   /** What the radio holds (layout 3, decision 333): 4,000 channels, 512 zones, 256 channels a zone, 1,016 contacts,
    *  2,032 waypoints. */
   limits: { channels: number; zones: number; zoneCap: number; contacts: number; waypoints: number; sats: number };

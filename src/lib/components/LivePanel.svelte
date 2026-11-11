@@ -202,7 +202,12 @@
   </section>
 
   <section>
-    <h4>Heard now</h4>
+    <h4>
+      Heard now
+      {#if connected && (radio.connectedLink?.caps2 ?? 0) & P.caps2.BEACON}
+        <button class="beacon" title="Send a position beacon now (as the radio's Beacon now)" onclick={() => radio.beaconNow()}>Beacon now</button>
+      {/if}
+    </h4>
     {#if heard.length}
       <div class="heard">
         {#each heard as h (h.who)}
@@ -284,6 +289,23 @@
   }
   button.badge:disabled {
     cursor: default;
+  }
+  h4 .beacon {
+    float: right;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+    cursor: pointer;
+  }
+  h4 .beacon:hover {
+    border-color: var(--blue);
   }
   .tune {
     grid-column: 2 / 4;
