@@ -33,6 +33,10 @@ Console never keys the radio and never writes its calibration.
 
 Building, testing and the code's layout: [DEVELOPING.md](DEVELOPING.md).
 
+## Contributing
+
+Issues are what help most: bugs, ideas, design suggestions and fixes. We'd rather have an issue than an AI-generated pull request: [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Licence
 
 [PolyForm Noncommercial 1.0.0](LICENSE.md), copyright 2026 Alex Harvey: free for any noncommercial use.
