@@ -427,6 +427,22 @@ class Radio {
     }
   }
 
+  /** LINK-69: a beacon now, as the radio's own Beacon now; a refusal (APRS off, KISS, no callsign) shows its reason. */
+  async beaconNow(): Promise<boolean> {
+    const link = this.link;
+    if (!link || this.phase !== "connected" || !(link.caps2 & P.caps2.BEACON)) return false;
+    try {
+      await link.ok(P.msg.BEACON);
+      this.keyNote = "Beacon sent";
+      clearTimeout(this.flashTimer);
+      this.flashTimer = setTimeout(() => (this.keyNote = ""), 4000);
+      return true;
+    } catch (e) {
+      this.flash(e, "Beacon");
+      return false;
+    }
+  }
+
   /** LINK-33: makes slot `slot` the active one, as the SLOT key. */
   async makeActive(slot: number): Promise<boolean> {
     const link = this.link;
