@@ -46,6 +46,9 @@ class Radio {
    *  that has it (caps2 STATE); null otherwise. */
   now = $state<RadioNow | null>(null);
   private stateRec = new Uint8Array();
+  /** LINK-67: a whole-state read in flight, and the STATE events taken meanwhile (with the link's frame count). */
+  private stateReading = false;
+  private stateQueued: [number, Uint8Array][] = [];
   /** How long the last readback took, ms. */
   uiMs = $state(0);
   /** Readbacks failed in a row. */
@@ -385,6 +388,11 @@ class Radio {
     }
     if (p[0] === P.event.STATE) {
       // LINK-67.1: the parts that changed, over the record kept; a gap or a part that can't be placed reads it whole
+      if (this.stateReading) {
+        // a read is out: these parts go over its answer when they came after it (LINK-67)
+        if (!gap) this.stateQueued.push([this.link?.frames ?? 0, p.slice(1)]);
+        return;
+      }
       const rec = gap ? undefined : stateMerge(this.stateRec, p.subarray(1));
       if (rec) this.takeState(rec);
       else void this.readState();
@@ -402,11 +410,20 @@ class Radio {
   /** LINK-67: the whole state by `STATE`. */
   private async readState() {
     const link = this.link;
-    if (!link || !(link.caps2 & P.caps2.STATE)) return;
+    if (!link || !(link.caps2 & P.caps2.STATE) || this.stateReading) return;
+    this.stateReading = true;
+    this.stateQueued = [];
     try {
-      this.takeState(await link.ok(P.msg.STATE));
+      let rec: Uint8Array | undefined = await link.ok(P.msg.STATE);
+      // the answer is handled after the whole read it came in: the events after it in that read are newer
+      const at = link.answeredAt.get(P.msg.STATE) ?? 0;
+      for (const [n, parts] of this.stateQueued) if (n > at && rec) rec = stateMerge(rec, parts);
+      if (rec) this.takeState(rec);
     } catch {
       /* the next event tries again */
+    } finally {
+      this.stateReading = false;
+      this.stateQueued = [];
     }
   }
 
