@@ -101,6 +101,10 @@ export class Link {
   private closed = false;
   /** Answers that matched nothing (late ones after a time-out), for the debug line. */
   stray = 0;
+  /** Frames taken from the radio so far, and the frame each answer type last resolved at (LINK-67: Console's
+   * STATE read tells which events came after its answer). */
+  frames = 0;
+  answeredAt = new Map<number, number>();
   /** Events (LINK-46): frames the radio sends unasked, never matched to a request: the frame's seq (the session's
    * event counter) and the payload (the kind, then its bytes). */
   onEvent: (seq: number, payload: Uint8Array) => void = () => {};
@@ -116,6 +120,7 @@ export class Link {
       }
       const answers: Answer[] = JSON.parse(this.session.feed(bytes));
       for (const a of answers) {
+        this.frames++;
         if (a.event && a.ty === P.msg.AUDIO_DATA) {
           this.onAudio(new Uint8Array(a.rest));
           continue;
@@ -145,6 +150,7 @@ export class Link {
         const w = this.waiters.get(a.seq);
         if (w && a.ty === (w.ty | 0x80)) {
           this.waiters.delete(a.seq);
+          this.answeredAt.set(w.ty, this.frames);
           w.resolve(a);
         } else this.stray++;
       }
