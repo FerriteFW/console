@@ -3,6 +3,17 @@
   import { isTauri } from "../transport/native";
   import { CONSOLE_VERSION as version } from "../codeplug.svelte";
   const shell = isTauri() ? "desktop app (Tauri)" : "web";
+  // The third-party notices (tools/thirdparty.py, about 500 KB), fetched only when opened.
+  let notices = $state("");
+  async function openNotices(e: Event) {
+    if (!(e.currentTarget as HTMLDetailsElement).open || notices) return;
+    try {
+      const r = await fetch("THIRD-PARTY-LICENSES.md");
+      notices = r.ok ? await r.text() : "The notices didn't load.";
+    } catch {
+      notices = "The notices didn't load.";
+    }
+  }
 </script>
 
 <div class="card about">
@@ -26,6 +37,15 @@
     <dt>Never</dt>
     <dd>Keys the radio itself (APRS messages you send are queued for the radio to send), writes calibration, or touches the Bluetooth module's own settings</dd>
   </dl>
+  <details ontoggle={openNotices}>
+    <summary>Third-party licences</summary>
+    <p class="sub">
+      Console is under the PolyForm Noncommercial licence. It includes the work of others: Rust crates, the Tauri and
+      Leaflet packages, the JetBrains Mono and Barlow fonts, and on Linux the system libraries the AppImage carries.
+      Their licences, in full:
+    </p>
+    <pre class="notices">{notices || "Loading..."}</pre>
+  </details>
 </div>
 
 <style>
@@ -49,6 +69,23 @@
   }
   dd {
     margin: 0;
+  }
+  summary {
+    cursor: pointer;
+    color: var(--sub);
+  }
+  details[open] summary {
+    margin-bottom: 8px;
+  }
+  .notices {
+    max-height: 420px;
+    overflow: auto;
+    font-size: 11px;
+    white-space: pre-wrap;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px;
+    margin: 8px 0 0;
   }
   .sub {
     color: var(--sub);
