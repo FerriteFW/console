@@ -6,7 +6,7 @@
   import { library } from "../library.svelte";
   import { ATTRIBUTION, loadLeaflet, NO_TILES, TILES, type Leaflet, type LLayer, type LMap } from "../leaflet";
 
-  let { sat }: { sat: SatRow } = $props();
+  let { sat, choices = [], onpick }: { sat: SatRow; choices?: SatRow[]; onpick?: (id: number) => void } = $props();
 
   let el: HTMLDivElement;
   let map: LMap | null = $state(null);
@@ -90,7 +90,13 @@
 
 <div class="satmap">
   <div class="caption" data-k="satmap">
-    <strong>{sat.short}</strong>
+    {#if choices.length > 1 && onpick}
+      <select aria-label="Satellite on the map" value={sat.id} onchange={(e) => onpick(Number(e.currentTarget.value))}>
+        {#each choices as c (c.id)}<option value={c.id}>{c.short}</option>{/each}
+      </select>
+    {:else}
+      <strong>{sat.short}</strong>
+    {/if}
     {#if where.m}
       <span>over {where.m.now.lat.toFixed(1)}°, {where.m.now.lon.toFixed(1)}° · {Math.round(where.m.alt_km)} km up · heard within {Math.round(where.m.footprint_km)} km</span>
       <span class="sub" data-k="pass">{pass}</span>
@@ -113,6 +119,15 @@
     flex-wrap: wrap;
     gap: 4px 12px;
     align-items: baseline;
+  }
+  select {
+    font: inherit;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 6px;
   }
   .map {
     height: 340px;

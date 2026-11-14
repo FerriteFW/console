@@ -27,9 +27,22 @@
   const max = $derived(coreUp ? P.limits.sats : 32);
   const file = $derived(satellites.file);
   const picked = $derived(new Set(satellites.picks));
-  // SAT-23: the satellite shown on the map (a row's name clicked; the first picked, else the first, to start)
+  // SAT-23: the satellite shown on the map: picked in the map's menu or by a click on its row in either table; to
+  // start, the radio's first, else the list's first picked, else its first
   let shown = $state(0);
-  const onMap = $derived(file?.sats.find((s) => s.id === shown) ?? file?.sats.find((s) => picked.has(s.id)) ?? file?.sats[0] ?? null);
+  const choices = $derived.by(() => {
+    const seen = new Set<number>();
+    const out: SatRow[] = [];
+    for (const s of [...(satellites.held ?? []), ...(file?.sats ?? [])]) if (!seen.has(s.id) && seen.add(s.id)) out.push(s);
+    return out;
+  });
+  const onMap = $derived(
+    choices.find((s) => s.id === shown) ?? satellites.held?.[0] ?? file?.sats.find((s) => picked.has(s.id)) ?? file?.sats[0] ?? null,
+  );
+  const show = (id: number) => {
+    shown = id;
+    document.querySelector('[aria-label="On the map"]')?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
 
   const mhz = (hz: number) => (hz / 1e6).toFixed(3);
   const tpText = (t: SatTp) =>
@@ -100,7 +113,7 @@
             <thead><tr><th>#</th><th>Name</th><th>NORAD</th><th>Elements</th><th>Transponders</th></tr></thead>
             <tbody>
               {#each satellites.held as s, i (s.id)}
-                <tr>
+                <tr class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={() => show(s.id)}>
                   <td class="num">{i + 1}</td>
                   <td class="nm">{s.short}</td>
                   <td class="num">{s.id}</td>
@@ -120,7 +133,7 @@
   {#if onMap && coreUp}
     <section aria-label="On the map">
       <h2>On the map</h2>
-      <SatMap sat={onMap} />
+      <SatMap sat={onMap} {choices} onpick={(id) => (shown = id)} />
     </section>
   {/if}
 
@@ -132,7 +145,7 @@
           <thead><tr><th></th><th>Name</th><th>NORAD</th><th>Status</th><th>Elements</th><th>Transponders</th></tr></thead>
           <tbody>
             {#each file.sats as s (s.id)}
-              <tr class:off={!picked.has(s.id)}>
+              <tr class:off={!picked.has(s.id)} class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={(e) => (e.target as HTMLElement).closest("input") || show(s.id)}>
                 <td>
                   <input
                     type="checkbox"
@@ -142,7 +155,7 @@
                     onchange={() => satellites.toggle(s.id)}
                   />
                 </td>
-                <td><button class="link nm" class:on={onMap?.id === s.id} title="Show on the map" onclick={() => (shown = s.id)}>{s.short}</button>{#if s.name !== s.short}<span class="full sub small">{s.name}</span>{/if}</td>
+                <td><span class="nm">{s.short}</span>{#if s.name !== s.short}<span class="full sub small">{s.name}</span>{/if}</td>
                 <td class="num">{s.id}</td>
                 <td>{s.status}</td>
                 <td class="nowrap"><span class={`tag ${ageTag(s)}`} title="The elements' age: amber past 7 days (3 for the ISS), red past 30">{ageDays(s.epoch, now)} d</span></td>
@@ -184,19 +197,17 @@
   .nm {
     white-space: nowrap;
   }
-  button.nm {
-    font: inherit;
-    color: inherit;
-    background: none;
-    border: 0;
-    padding: 0;
+  tr.pickable {
     cursor: pointer;
-    text-align: left;
   }
-  button.nm:hover,
-  button.nm.on {
+  tr.pickable:hover td {
+    background: var(--raised);
+  }
+  tr.shown td {
+    box-shadow: inset 0 -1px 0 var(--blue);
+  }
+  tr.shown .nm {
     color: var(--blue);
-    text-decoration: underline;
   }
   .full {
     display: block;
