@@ -4,6 +4,7 @@
   // so the map and the radio agree. Moves every 15 s.
   import { satMap, type SatMap, type SatRow } from "../core";
   import { library } from "../library.svelte";
+  import { canLocate, here } from "../here";
   import { ATTRIBUTION, loadLeaflet, NO_TILES, TILES, type Leaflet, type LLayer, type LMap } from "../leaflet";
 
   let { sat, choices = [], onpick }: { sat: SatRow; choices?: SatRow[]; onpick?: (id: number) => void } = $props();
@@ -38,7 +39,17 @@
     };
   });
 
-  const place = $derived(library.place);
+  // the next pass over the Near me place, else over this computer (decision 398: the Mac app's location too)
+  let mine = $state<{ lat: number; lon: number } | null>(null);
+  let locNote = $state("");
+  $effect(() => {
+    if (!library.place && !mine && !locNote && canLocate)
+      here().then(
+        (p) => (mine = p),
+        (e) => (locNote = (e as Error).message),
+      );
+  });
+  const place = $derived(library.place ?? mine);
   const where = $derived.by((): { m: SatMap | null; error: string } => {
     try {
       return { m: satMap(Uint8Array.from(sat.record), now, place), error: "" };
@@ -65,7 +76,7 @@
         .bindTooltip(`${sat.short} now, ${Math.round(w.alt_km)} km up`)
         .addTo(m),
     );
-    if (place) layers.push(l.circleMarker([place.lat, place.lon], { radius: 5, color: "#1f8a3a", weight: 2, fillColor: "#5cd97a", fillOpacity: 1 }).bindTooltip("Near me").addTo(m));
+    if (place) layers.push(l.circleMarker([place.lat, place.lon], { radius: 5, color: "#1f8a3a", weight: 2, fillColor: "#5cd97a", fillOpacity: 1 }).bindTooltip(library.place ? "Near me" : "You (this computer)").addTo(m));
     // a new satellite: centre on it, the whole world in view
     if (fittedFor !== sat.id) {
       fittedFor = sat.id;
@@ -81,7 +92,10 @@
   };
   const pass = $derived.by(() => {
     const n = where.m?.next;
-    if (!place) return "Set a place in Near me (Channels › Add channels) for the next pass over it.";
+    if (!place)
+      return canLocate && !locNote
+        ? "Finding where you are…"
+        : `${locNote ? `${locNote} ` : ""}Set a place in Near me (Channels › Add channels) for the next pass over it.`;
     if (!n) return "No pass over the place in the next two days.";
     const up = n.aos <= now;
     return `${up ? "Up now" : `Next pass ${day(n.aos)} ${hm(n.aos)}`}–${hm(n.los)}, highest ${Math.round(n.max_el)}° (${Math.round((n.los - n.aos) / 60)} min)`;

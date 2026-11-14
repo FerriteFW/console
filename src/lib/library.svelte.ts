@@ -2,12 +2,12 @@
 // the US) and amateur repeaters near a place. Fixed sets are in public/data/ (tools/library/README.md says where they come
 // from). Airports, licensed sites and repeaters come tiled from data.ferritefw.dev (sites.svelte.ts, sitedata.ts). Turning entries into channels (numbers, zones, names,
 // ferrite's own checks) is the core's (core/src/library.rs).
+import { canLocate, here } from "./here";
 import { libraryAdd, parsePlace, slotTune, type LibraryAdded, type LibraryItem, type Place } from "./core";
 import { activeSlotOf, radioPlace } from "./radioplace";
 import { channels } from "./channels.svelte";
 import { radio } from "./radio.svelte";
 import { appFetch } from "./appfetch";
-import { isTauri } from "./transport/native";
 import { tuneSummary, type Tune } from "./tune";
 
 export type FixedFreq = { number: number; name: string; rx: number; tx: number; notes?: string; ctcss?: number; dcs?: number };
@@ -156,29 +156,20 @@ class Library {
   }
 
   /**
-   * This computer's location (the browser's), asked only when the person clicks "Use my location". Refused or
+   * This computer's location (here.ts: Core Location in the Mac app, else the browser's), asked only when the person clicks "Use my location". Refused or
    * unavailable: a calm note, the place left as it was.
    */
   async placeFromBrowser() {
     this.locNote = "";
-    const geo = typeof navigator !== "undefined" ? navigator.geolocation : undefined;
-    if (!geo) {
-      this.locNote = "This browser can't tell its location. Type a place or a grid square.";
-      return;
-    }
     this.asking = "browser";
     const was = this.placeText;
     try {
-      const p = await new Promise<GeolocationPosition>((ok, no) => geo.getCurrentPosition(ok, no, { timeout: 15_000, maximumAge: 600_000 }));
+      const p = await here();
       if (this.placeText !== was) return; // a place typed meanwhile wins
-      this.placeText = `${p.coords.latitude.toFixed(4)}, ${p.coords.longitude.toFixed(4)}`;
+      this.placeText = `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
       this.placeFrom = "From this computer's location";
     } catch (e) {
-      const code = (e as GeolocationPositionError).code;
-      this.locNote =
-        code === 1
-          ? "Location is off for Console (the browser asked and it was refused). Allow it in the browser's site settings, or type a place."
-          : "Your location isn't available right now. Type a place or a grid square.";
+      this.locNote = (e as Error).message;
     } finally {
       this.asking = "";
     }
@@ -210,8 +201,6 @@ class Library {
   }
 }
 
-/** This computer's location is there to ask for (the desktop app on macOS has none: wry doesn't pass WebKit's
- * geolocation through yet). */
-export const canLocate = typeof navigator !== "undefined" && !!navigator.geolocation && !(isTauri() && /Mac/.test(navigator.userAgent));
+export { canLocate };
 
 export const library = new Library();
