@@ -44,6 +44,7 @@ export type Leaflet = {
   tileLayer(url: string, o: object): LLayer;
   circleMarker(c: LatLng, o: object): LLayer;
   circle(c: LatLng, o: object): LCircle;
+  polyline(c: LatLng[], o: object): LLayer;
   marker(c: LatLng, o?: object): LMarker;
   layerGroup(): LGroup;
   divIcon(o: object): unknown;

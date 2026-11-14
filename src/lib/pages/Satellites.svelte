@@ -5,6 +5,7 @@
   import { satellites, ageDays, ageLevel, declText } from "../satellites.svelte";
   import { radio } from "../radio.svelte";
   import { loadCore, P, type SatRow, type SatTp } from "../core";
+  import SatMap from "../components/SatMap.svelte";
 
   let coreUp = $state(false);
   void loadCore().then(() => {
@@ -26,6 +27,9 @@
   const max = $derived(coreUp ? P.limits.sats : 32);
   const file = $derived(satellites.file);
   const picked = $derived(new Set(satellites.picks));
+  // SAT-23: the satellite shown on the map (a row's name clicked; the first picked, else the first, to start)
+  let shown = $state(0);
+  const onMap = $derived(file?.sats.find((s) => s.id === shown) ?? file?.sats.find((s) => picked.has(s.id)) ?? file?.sats[0] ?? null);
 
   const mhz = (hz: number) => (hz / 1e6).toFixed(3);
   const tpText = (t: SatTp) =>
@@ -113,6 +117,13 @@
     {/if}
   </section>
 
+  {#if onMap && coreUp}
+    <section aria-label="On the map">
+      <h2>On the map</h2>
+      <SatMap sat={onMap} />
+    </section>
+  {/if}
+
   <section aria-label="Satellite list">
     <h2>Satellite list</h2>
     {#if file}
@@ -131,7 +142,7 @@
                     onchange={() => satellites.toggle(s.id)}
                   />
                 </td>
-                <td><span class="nm">{s.short}</span>{#if s.name !== s.short}<span class="full sub small">{s.name}</span>{/if}</td>
+                <td><button class="link nm" class:on={onMap?.id === s.id} title="Show on the map" onclick={() => (shown = s.id)}>{s.short}</button>{#if s.name !== s.short}<span class="full sub small">{s.name}</span>{/if}</td>
                 <td class="num">{s.id}</td>
                 <td>{s.status}</td>
                 <td class="nowrap"><span class={`tag ${ageTag(s)}`} title="The elements' age: amber past 7 days (3 for the ISS), red past 30">{ageDays(s.epoch, now)} d</span></td>
@@ -172,6 +183,20 @@
   }
   .nm {
     white-space: nowrap;
+  }
+  button.nm {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+  }
+  button.nm:hover,
+  button.nm.on {
+    color: var(--blue);
+    text-decoration: underline;
   }
   .full {
     display: block;
