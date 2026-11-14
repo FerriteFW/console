@@ -1413,11 +1413,12 @@ pub fn sat_info_of(rec: &[u8]) -> Option<String> {
     sats::info_of(rec).map(|i| json(&i))
 }
 
-/// SAT-21: whether a connect rewrites the satellites; `info` the info record's JSON or "null".
+/// SAT-21: whether a connect writes the list; `same_set` the radio holds the list's satellites; `info` the info
+/// record's JSON or "null".
 #[wasm_bindgen]
-pub fn sats_sync_due(built: u32, held: u32, info: &str, now: u32) -> bool {
+pub fn sats_sync_due(built: u32, same_set: bool, info: &str, now: u32) -> bool {
     let info: Option<sats::InfoRow> = serde_json::from_str(info).unwrap_or(None);
-    sats::sync_due(built, held as usize, info, now)
+    sats::sync_due(built, same_set, info, now)
 }
 
 /// LINK-65: `CLOCK`'s answer after the status (JSON `{now, source}`), or undefined.
