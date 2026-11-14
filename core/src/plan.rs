@@ -123,8 +123,7 @@ pub struct Plan {
     pub ops: Vec<Op>,
     pub problems: Vec<Problem>,
     /// LINK-53: the channels (as the radio numbers them, 1-1000) whose position changes, set or cleared after the
-    /// ops; their diff is the `position` field in `changes`. Sent only to a radio whose `HELLO` says
-    /// `caps::POSITION`.
+    /// ops; their diff is the `position` field in `changes`.
     pub positions: Vec<u16>,
 }
 

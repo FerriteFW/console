@@ -1,6 +1,6 @@
 //! The owner's lists over the link (LINK-54 – LINK-56, decision 327; Appendix G "Records" 8–10): the quick messages
 //! (TEXT-7), the waypoints (GPS-10) and the DTMF memories with their names (DTMF-12), by `READ_MANY` and `WRITE_MANY`
-//! as the channels go. Only for a radio whose `HELLO` says `caps::LISTS`; an older one answers `bad argument`.
+//! as the channels go.
 //!
 //! The records are built and read here; every check is the radio's own (ferrite's link session answers `invalid`
 //! with its reason), so these only shape the bytes. The tests write through ferrite's own session
@@ -194,7 +194,7 @@ pub fn parse_many(rest: &[u8]) -> Option<(u16, Records)> {
 mod tests {
     use super::*;
     use crate::radioside::RadioSide;
-    use ferrite_core::link::{caps, event as ev, msg, what, Status};
+    use ferrite_core::link::{event as ev, msg, what, Status};
 
     fn all(r: &mut RadioSide, w: u8) -> Vec<(u16, Vec<u8>)> {
         let mut got = Vec::new();
@@ -224,24 +224,12 @@ mod tests {
         r.ask(msg::WRITE_MANY, &p)
     }
 
-    /// LINK-35.2: ferrite's session says `LISTS` (128).
-    #[test]
-    fn hello_says_lists() {
-        let mut r = RadioSide::new();
-        let (s, a) = r.ask(msg::HELLO, &crate::answers::hello_payload("test"));
-        assert_eq!(s, 0);
-        let h = crate::answers::Hello::parse(&a).unwrap();
-        assert!(h.caps & caps::LISTS != 0, "caps {:#x}", h.caps);
-    }
-
     /// LINK-58: a preset's skip list written and read back through ferrite's session; it stays with its preset when
-    /// the one before is deleted; one outside the range is refused with ferrite's reason; caps2 says so.
+    /// the one before is deleted; one outside the range is refused with ferrite's reason.
     #[test]
     fn preset_skips_through_ferrites_link() {
         use ferrite_app::data::RangePreset;
         let mut r = RadioSide::new();
-        let (_, a) = r.ask(msg::HELLO, &crate::answers::hello_payload("test"));
-        assert!(crate::answers::Hello::parse(&a).unwrap().caps2 & ferrite_core::link::caps2::PRESET_SKIPS != 0);
         let pr = |n: &[u8], start: u32| RangePreset { name: ferrite_ui::text::Buf::from(n), start, end: start + 400_000, step: 10, mode: 0, narrow: true, skips: 0, resume: 0 };
         r.seed_presets(&[pr(b"2 m", 14_400_000), pr(b"70 cm", 43_000_000)]);
         assert!(all(&mut r, what::PRESET_SKIPS).is_empty());

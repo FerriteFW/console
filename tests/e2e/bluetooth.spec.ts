@@ -8,7 +8,7 @@ test.afterEach(async ({ page }) => disconnect(page));
 test("bluetooth: Live View from the radio's updates, keys, a lost update put right", async ({ page }, info) => {
   const url = await bluetoothBridge();
   test.skip(!url, "the simulator only");
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const sent: Buffer[] = [];
   page.on("websocket", (ws) => ws.on("framesent", (f) => typeof f.payload !== "string" && sent.push(f.payload as Buffer)));
   await openConsole(page, "live", url!);
@@ -19,6 +19,19 @@ test("bluetooth: Live View from the radio's updates, keys, a lost update put rig
   await expectScreen(page, "Home");
   const ui = await state(page, (f) => f.radio.ui);
   expect(ui.cards.length).toBeGreaterThan(0);
+
+  // The connect's own errands done first (the clock, SAT-21's satellites written again with fresh elements: Live View
+  // waits while Console is busy): nothing sent for 2.5 s, Console not busy and Live View by updates again.
+  await expect
+    .poll(
+      async () => {
+        const n = sent.length;
+        await page.waitForTimeout(2500);
+        return sent.length === n && (await state(page, (f) => !f.radio.busy && ((f.radio.subMask as number) & 4) !== 0));
+      },
+      { timeout: 45_000 },
+    )
+    .toBe(true);
 
   // no text readback (UI, 0x33) is asked while the updates come: the frames sent are SUBSCRIBE renewals and keys
   const before = sent.length;

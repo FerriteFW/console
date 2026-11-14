@@ -64,9 +64,6 @@
     {/if}
   </div>
   {#if activity.error}<div class="pg-banner">{activity.error}</div>{/if}
-  {#if connected && activity.readAt && !activity.canLive && !radio.noEvents}
-    <p class="sub small" data-testid="no-live-log">New events show on Refresh: this radio's firmware doesn't send them as they happen (update Ferrite for that).</p>
-  {/if}
 
   {#if activity.readAt || activity.rows.length}
     <div class="pg-scroll">
@@ -115,9 +112,5 @@
 <style>
   a {
     color: var(--blue);
-  }
-  .small {
-    font-size: 12px;
-    margin: 0;
   }
 </style>

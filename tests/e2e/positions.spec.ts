@@ -37,7 +37,6 @@ async function write(check?: () => Promise<void>) {
   await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
   await dl;
   await expect(wd()).toContainText("Backup saved", { timeout: long() });
-  await expect(wd().getByTestId("positions-skipped")).toHaveCount(0); // the simulator's firmware stores them
   await check?.();
   await wd().getByRole("button", { name: /^Write \d+ changes?$/ }).click();
   await expect(wd()).toContainText("Read back: the radio holds the table.", { timeout: long() });

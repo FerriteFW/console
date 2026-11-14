@@ -22,10 +22,9 @@ class Activity {
   private users = 0;
   private release: (() => void) | null = null;
 
-  /** The radio sends its new events as they happen (LINK-57: a radio whose HELLO says caps 128). */
+  /** The radio sends its new events as they happen (LINK-57). */
   get canLive() {
-    const l = radio.connectedLink;
-    return !!l && (l.caps & P.caps.LISTS) !== 0;
+    return !!radio.connectedLink;
   }
 
   /** A page wants new events as they happen (the Event Log, the Live View's panel): subscribed while any does. */

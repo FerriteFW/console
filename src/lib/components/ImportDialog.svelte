@@ -41,7 +41,7 @@
   <div class="overlay" role="presentation">
     <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="imp-title">
       <h2 id="imp-title">Import CHIRP CSV</h2>
-      <p><b>{imp.file}</b>: {imp.channels.length} channels{#if imp.skipped}, {imp.skipped} lines skipped{/if}.</p>
+      <p><b>{imp.file}</b>: {imp.channels.length} channels{#if imp.skipped}, {imp.skipped} {imp.skipped === 1 ? "line" : "lines"} skipped{/if}.</p>
       {#if imp.notes.length}
         <ul class="notes">
           {#each imp.notes as n, i (i)}<li>{n}</li>{/each}

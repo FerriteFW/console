@@ -168,11 +168,6 @@
       <span>Connect (cable, Bluetooth or the demo radio) to read the radio's {store.noun}; files work without a radio.</span>
     {/if}
   </div>
-  {#if store.oldFirmware}
-    <div class="pg-banner warn" data-testid="old-firmware">
-      This radio's firmware doesn't share its {store.noun} over the link: update Ferrite to read and write them here. Files still open and save.
-    </div>
-  {/if}
   {#if store.error}<div class="pg-banner">{store.error}</div>{/if}
 
   {@render children()}

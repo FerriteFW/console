@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 /// The most channels the radio holds (4,000 since layout 3, decision 333).
 pub const MAX_CHANNELS: u16 = ferrite_app::chan::MAX_CHANNELS;
-/// A channel record's length over the link (Appendix G; protocol 3: the zone is 2 bytes, decision 333).
+/// A channel record's length over the link (Appendix G; the zone is 2 bytes, decision 333).
 pub const CHANNEL_LEN: usize = 41;
 /// The symbols a channel name may hold besides letters, digits and space (CHAN-31, decision 221): the same set as
 /// ferrite's `ferrite_core::name`, which the radio maps every name to.
@@ -34,7 +34,7 @@ pub fn map_name(s: &str) -> String {
 }
 /// A zone record's length over the link as written (Appendix G).
 pub const ZONE_LEN: usize = 26;
-/// A zone record as read (protocol 3): [`ZONE_LEN`] bytes, then its channel count (u16, read only: CHAN-36).
+/// A zone record as read: [`ZONE_LEN`] bytes, then its channel count (u16, read only: CHAN-36).
 pub const ZONE_READ_LEN: usize = ZONE_LEN + 2;
 /// The most channels a zone holds (CHAN-35, decision 333); "no zone" has no limit.
 pub const ZONE_CAP: usize = ferrite_app::chan::ZONE_CAP as usize;
@@ -112,8 +112,7 @@ pub fn channel_from_record(rec: &[u8]) -> Option<Channel> {
 }
 
 /// LINK-53 (decision 325): a channel position's record for `WRITE_MANY` of `what::POSITION`: latitude and longitude
-/// in 1e-7 degree (north and east positive), little-endian, 8 bytes; None clears it (an empty record). Only for a
-/// radio whose `HELLO` says `caps::POSITION`.
+/// in 1e-7 degree (north and east positive), little-endian, 8 bytes; None clears it (an empty record).
 pub fn position_record(pos: Option<(i32, i32)>) -> Vec<u8> {
     match pos {
         Some((lat, lon)) => lat.to_le_bytes().into_iter().chain(lon.to_le_bytes()).collect(),
@@ -146,7 +145,7 @@ pub fn zone_record(name: &[u8], c: &ZoneCfg) -> Vec<u8> {
 }
 
 /// A zone from its record (name and settings), as the radio's `apply` reads one: the written form, or the read
-/// form with its channel count after (protocol 3; the count is the radio's, read only, so it is dropped here).
+/// form with its channel count after (the count is the radio's, read only, so it is dropped here).
 pub fn zone_from_record(rec: &[u8]) -> Option<(Name, ZoneCfg)> {
     if rec.len() != ZONE_LEN && rec.len() != ZONE_READ_LEN {
         return None;

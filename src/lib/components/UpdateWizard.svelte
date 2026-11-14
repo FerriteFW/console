@@ -13,7 +13,7 @@
 
   const check = $derived(firmware.check);
   const ok = $derived(!!check && check.problems.length === 0);
-  const onCable = $derived(radio.phase === "connected" && radio.kind === "cable");
+  const onCable = $derived((radio.phase === "connected" || radio.phase === "outdated") && radio.kind === "cable");
   const step = $derived(firmware.stage === "done" ? 3 : firmware.running || firmware.stage === "failed" ? 2 : 1);
   const busy = $derived(firmware.running || radio.phase === "updating");
 
@@ -50,7 +50,7 @@
     {#if step === 1}
       {#if check}
         <div class="versions">
-          <span data-k="now">{radio.info?.firmware ?? "?"}</span>
+          <span data-k="now">{radio.info?.firmware ?? radio.hello?.firmware ?? "?"}</span>
           <span class="arrow">→</span>
           <span class="to" data-k="new">{check.version ?? "?"}</span>
         </div>
@@ -80,7 +80,7 @@
       {/if}
       {#if firmware.error}<div class="err" role="alert" aria-label="Update error">{firmware.error}</div>{/if}
       {#if !onCable}
-        <p class="warn">{radio.phase === "connected" ? "Updates need the cable: disconnect, then connect with the cable." : "Connect the radio with the cable first."}</p>
+        <p class="warn">{radio.phase === "connected" || radio.phase === "outdated" ? "Updates need the cable: disconnect, then connect with the cable." : "Connect the radio with the cable first."}</p>
       {/if}
       <div class="row">
         <button class="btn" onclick={close}>Cancel</button>

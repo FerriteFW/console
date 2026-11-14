@@ -8,9 +8,20 @@ export type Build = { byte: number; name: string; bench: boolean; dry: boolean }
 /** LINK-62: the layout this firmware stores and the one the chip's data is in (they differ while it waits for
  *  Console to move the data: the radio shows D25 "Finish the update", UPD-16). */
 export type Layouts = { firmware: number; chip: number };
-/** `caps2`: LINK-35.2's second capability byte (1 range preset skip lists, 2 protocol 3's raw data and layouts); 0 from
- *  firmware before it. */
-export type Hello = { protocol: number; max_payload: number; may_go_on: boolean; firmware: string; build: Build | null; caps: number; caps2: number; layouts: Layouts | null };
+/** HELLO's answer. A radio on another protocol than `P.protocol` (decision 385) gives only its version and build:
+ *  `caps` 0, `layouts` and `lists_gen` null; Console then offers nothing but the update. */
+export type Hello = {
+  protocol: number;
+  max_payload: number;
+  may_go_on: boolean;
+  firmware: string;
+  build: Build | null;
+  /** LINK-35.2: `P.caps` bits (compression granted, receive audio on this port, line commands). */
+  caps: number;
+  layouts: Layouts | null;
+  /** LINK-71: the lists hash (from the stored channels, zones and range presets; the same across restarts when nothing changed). */
+  lists_gen: number | null;
+};
 export type Info = {
   firmware: string;
   channels: number;
@@ -22,7 +33,7 @@ export type Info = {
   build: Build | null;
   uid: number[] | null;
   uid_text: string | null;
-  /** LINK-62, protocol 3. */
+  /** LINK-62. */
   layouts: Layouts | null;
 };
 export type TextChunk = { more: boolean; text: string; working: boolean };
@@ -76,10 +87,10 @@ export type Protocol = {
   /** LINK-59: `DATA_READ`'s ops and its most bytes, and the erase unit. */
   data: { READ: number; CRC: number; READ_MAX: number; SECTOR: number };
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS" | "SAT" | "SAT_INFO" | "RADIO", number>;
-  /** LINK-35.2: HELLO's caps bits the UI asks about by name (link.ts has the transport ones). */
-  caps: Record<"POSITION" | "LISTS", number>;
-  /** LINK-35.2: the second caps byte's bits. */
-  caps2: Record<"PRESET_SKIPS" | "DATA" | "SATS" | "RADIO" | "LINE_CMDS" | "STATE" | "BEACON", number>;
+  /** The link protocol this Console speaks (decision 385: 1 until Ferrite 0.9; a radio on another is only updated). */
+  protocol: number;
+  /** LINK-35.2: HELLO's capability bits (only what differs by build or session). */
+  caps: Record<"LZ" | "AUDIO" | "LINE_CMDS", number>;
   /** What the radio holds (layout 3, decision 333): 4,000 channels, 512 zones, 256 channels a zone, 1,016 contacts,
    *  2,032 waypoints. */
   limits: { channels: number; zones: number; zoneCap: number; contacts: number; waypoints: number; sats: number };
@@ -113,11 +124,12 @@ export type DemoRadio = wasm.DemoRadio;
 export const audioDecode = (p: Uint8Array): Int16Array => wasm.audio_decode(p);
 export const statusText = (s: number, rest: Uint8Array = new Uint8Array()) => wasm.status_text(s, rest);
 export const helloPayload = (name: string) => wasm.hello_payload(name);
+/** HELLO's payload without asking for compression (a radio on another protocol: its caps can't be read). */
+export const helloPayloadPlain = (name: string) => wasm.hello_payload_lz(name, false);
 export const authPayload = (pin: string) => wasm.auth_payload(pin);
 export const baudPayload = (rate: number) => wasm.baud_payload(rate);
 export const parseHello = (rest: Uint8Array): Hello | null => JSON.parse(wasm.parse_hello(rest));
-/** `protocol`: HELLO's (3: the zone count is 2 bytes, and the layouts end it). */
-export const parseInfo = (rest: Uint8Array, protocol: number): Info | null => JSON.parse(wasm.parse_info(rest, protocol));
+export const parseInfo = (rest: Uint8Array): Info | null => JSON.parse(wasm.parse_info(rest));
 export const parseTextChunk = (rest: Uint8Array): TextChunk | null => JSON.parse(wasm.parse_text_chunk(rest));
 export const parseUi = (text: string): Ui => JSON.parse(wasm.parse_ui(text));
 export const keyPayload = (name: string, action: "short" | "long" | "down" | "up") => wasm.key_payload(name, action);
@@ -260,8 +272,7 @@ export const decodePresets = (records: Uint8Array[]): { presets: Preset[]; bad: 
 export const normalizePreset = (p: Preset): Preset => JSON.parse(wasm.normalize_preset(js(p)));
 export const checkPreset = (p: Preset): string | undefined => wasm.check_preset(js(p)) ?? undefined;
 export const newPreset = (number: number, name: string): Preset => JSON.parse(wasm.new_preset(number, name));
-/** `skips`: the radio takes skip lists (LINK-58: caps2); without it none are planned. */
-export const presetsPlan = (base: Preset[], want: Preset[], skips: boolean): PresetPlan => JSON.parse(wasm.presets_plan(js(base), js(want), skips));
+export const presetsPlan = (base: Preset[], want: Preset[]): PresetPlan => JSON.parse(wasm.presets_plan(js(base), js(want)));
 /** A skipped frequency typed in MHz, as 10 Hz; undefined if it isn't one. */
 export const presetSkipParse = (text: string): number | undefined => wasm.preset_skip_parse(text) ?? undefined;
 /** LINK-58: `WRITE_MANY` what 11's record for a skip list, and a read one back (10 Hz each). */

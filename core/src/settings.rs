@@ -1465,7 +1465,7 @@ mod tests {
         // INFO's length is the same (LINK-21).
         let (st, info) = r.ask(msg::INFO, &[]);
         assert_eq!(st, 0);
-        assert_eq!(crate::answers::Info::parse(&info, ferrite_core::link::PROTOCOL).unwrap().settings_len as usize, record_len());
+        assert_eq!(crate::answers::Info::parse(&info).unwrap().settings_len as usize, record_len());
         let (st, _) = r.ask(msg::READ, &read_payload(what::SETTINGS, 1, 0, 10));
         assert_ne!(st, 0, "one settings record only");
     }

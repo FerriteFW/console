@@ -7,11 +7,19 @@
   import { bridgeEnabled, bridgeUrl } from "../transport/bridge";
   import { DEV_TOOLS } from "../devtools";
   import { isTauri } from "../transport/native";
+  import { olderThan } from "../version";
 
   // The development bridge (tools/bridge.py) and the demo radio: developer builds only (devtools.ts).
   const bridge = bridgeEnabled();
 
   const avail = $derived(radio.available());
+  // The release bundled with this Console: a radio on an older Ferrite gets a gentle pointer to the Update tab.
+  void firmware.loadBundled();
+  const newer = $derived(
+    radio.phase === "connected" && radio.info && firmware.bundled && olderThan(radio.info.firmware, firmware.bundled.version)
+      ? firmware.bundled.version
+      : "",
+  );
   let pin = $state("");
   const themeIcon = $derived(theme.mode === "auto" ? "◐" : theme.mode === "light" ? "☀" : "☾");
   const themeName = $derived(theme.mode === "auto" ? `Auto (${theme.shown})` : theme.mode === "light" ? "Light" : "Dark");
@@ -21,6 +29,8 @@
     if (radio.phase === "connecting") return { dot: "busy", text: "Connecting…" };
     if (radio.phase === "pin") return { dot: "busy", text: "The radio asks for its PIN" };
     if (radio.phase === "updating") return { dot: "busy", text: migrate.running ? `Finishing the update on ${radio.label}` : `Firmware Update holds ${radio.label}` };
+    if (radio.phase === "outdated")
+      return { dot: "bad", text: `${radio.label}: ${radio.mismatch?.radioOld === false ? "update Console" : "update the radio"}` };
     if (radio.phase === "connected")
       return radio.notAnswering
         ? { dot: "bad", text: `${radio.label}: the radio isn't answering` }
@@ -52,6 +62,11 @@
       <span class="strip"
         >{[radio.info.callsign || "no callsign", radio.info.firmware, radio.info.build?.name, radio.kind === "cable" && radio.baud ? `${radio.baud} baud` : ""].filter(Boolean).join(" · ")}</span
       >
+      {#if newer}
+        <a class="newer" href="#/firmware" data-k="newer" title="This Console comes with Ferrite {newer}. Update the radio from the Update tab: your channels and settings stay."
+          >{newer} available</a
+        >
+      {/if}
     {/if}
   </div>
 
@@ -102,6 +117,13 @@
 </div>
 {#if radio.error}
   <div class="err" role="alert">{radio.error} <button class="x" aria-label="Dismiss" onclick={() => (radio.error = "")}>×</button></div>
+{/if}
+{#if radio.mismatch}
+  <!-- Decision 385: a radio on another link protocol is only updated; nothing else uses the link. -->
+  <div class="err mismatch" role="alert" aria-label="Update needed">
+    {radio.mismatch.text}
+    {#if radio.mismatch.radioOld}<a href="#/firmware">Update the radio</a>{/if}
+  </div>
 {/if}
 {#if radio.pinError}
   <div class="err" role="alert">{radio.pinError}</div>
@@ -198,6 +220,20 @@
     border-radius: 8px;
     background: var(--surface);
     color: var(--red);
+  }
+  .mismatch a {
+    color: inherit;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+  .newer {
+    font-size: 12px;
+    color: var(--blue);
+    white-space: nowrap;
+    text-decoration: none;
+  }
+  .newer:hover {
+    text-decoration: underline;
   }
   .strip {
     color: var(--sub);

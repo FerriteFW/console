@@ -5,12 +5,18 @@
 import { debugLog } from "./debuglog";
 import { LiveClient, loadCore, P, parseEvent, parseUi, stateMerge, stateParse, tunePayload, type AprsEvent, type Hello, type Info, type RadioNow, type TuneOp, type Ui } from "./core";
 import { Link, RadioError, TimeoutError } from "./link";
+import { mismatch, type Mismatch } from "./mismatch.ts";
 import { provider, type Transport, type TransportKind } from "./transport";
 import { BridgeTransport } from "./transport/bridge";
 import { sleep } from "./transport/types";
 
-/** "updating": Firmware Update holds the cable (no link: the bootloader's protocol, or waiting for the restart). */
-export type Phase = "idle" | "connecting" | "pin" | "connected" | "updating";
+/** "updating": Firmware Update holds the cable (no link: the bootloader's protocol, or waiting for the restart).
+ *  "outdated": the radio answered HELLO with another protocol (decision 385): the link stays open for Firmware Update
+ *  alone (`mismatch` says why); nothing else uses it. */
+export type Phase = "idle" | "connecting" | "pin" | "connected" | "outdated" | "updating";
+
+declare const __CONSOLE_VERSION__: string;
+const CONSOLE_VERSION = typeof __CONSOLE_VERSION__ === "string" ? __CONSOLE_VERSION__ : "dev";
 
 /** Cable: a readback every so often (each takes ~50-100 ms at 115200). Bluetooth: back to back (~1 s each). */
 const POLL_GAP_MS = { cable: 150, bluetooth: 0, demo: 150 } as const;
@@ -42,8 +48,8 @@ class Radio {
   hello = $state<Hello | null>(null);
   info = $state<Info | null>(null);
   ui = $state<Ui | null>(null);
-  /** LINK-67: the radio state (the radio, each slot) while something wants it (`want(who, SUB_STATE)`), from a radio
-   *  that has it (caps2 STATE); null otherwise. */
+  /** LINK-67: the radio state (the radio, each slot) while something wants it (`want(who, SUB_STATE)`); null
+   *  otherwise. */
   now = $state<RadioNow | null>(null);
   private stateRec = new Uint8Array();
   /** LINK-67: a whole-state read in flight, and the STATE events taken meanwhile (with the link's frame count). */
@@ -83,6 +89,11 @@ class Radio {
   get liveByEvents() {
     return (this.subMask & 4) !== 0;
   }
+  /** Live View by events, or about to be: the subscription loop (re)subscribes for it, so no readback is asked meanwhile
+   *  (one came each time a write's `busy` ended, before the SUBSCRIBE: a second of Bluetooth for nothing). */
+  private get byEventsSoon() {
+    return this.liveByEvents || (this.wanted() & 4) !== 0;
+  }
   /** Live View's event bytes a second (the last 10 s), and the updates and whole-state asks so far. */
   liveRate = $state(0);
   liveUpdates = $state(0);
@@ -107,9 +118,15 @@ class Radio {
   private reopen: (() => Promise<Transport>) | null = null;
   private retryGen = 0;
 
-  /** The link while connected (channel programming uses it directly). */
+  /** The link while connected (channel programming uses it directly); never for a radio on another protocol. */
   get connectedLink(): Link | null {
     return this.phase === "connected" ? this.link : null;
+  }
+
+  /** Decision 385: the radio speaks another link protocol: why, and which side needs the update; null otherwise. */
+  get mismatch(): Mismatch | null {
+    if (this.phase !== "outdated" || !this.hello) return null;
+    return mismatch(this.hello.protocol, P.protocol, this.hello.firmware, CONSOLE_VERSION);
   }
 
   available() {
@@ -172,7 +189,7 @@ class Radio {
         }
         await this.connectWith(async () => t, true);
         if (g !== this.retryGen) return;
-        if (this.phase === "connected" || this.phase === "pin") {
+        if (this.phase === "connected" || this.phase === "outdated" || this.phase === "pin") {
           this.retryGen++;
           this.retrying = null;
           return;
@@ -182,11 +199,11 @@ class Radio {
   }
 
   /**
-   * Firmware Update takes the cable from a connected session: polling stops; the link stays usable for REBOOT. The
-   * bar shows "Updating firmware" until `handBack` or `disconnect`.
+   * Firmware Update takes the cable from a connected session (or a radio on another protocol: decision 385): polling
+   * stops; the link stays usable for REBOOT. The bar shows "Updating firmware" until `handBack` or `disconnect`.
    */
   takeForUpdate(): { t: Transport; link: Link } | null {
-    if (this.phase !== "connected" || !this.link || !this.t || this.kind !== "cable") return null;
+    if ((this.phase !== "connected" && this.phase !== "outdated") || !this.link || !this.t || this.kind !== "cable") return null;
     const gen = ++this.generation; // the poll loop stops
     this.wake?.();
     this.phase = "updating";
@@ -268,6 +285,12 @@ class Radio {
       await link.open();
       const hello = await link.hello();
       this.hello = hello;
+      if (!link.current) {
+        // Decision 385: another protocol: kept open for Firmware Update only (no INFO, no faster rate, no events)
+        debugLog(`connect: the radio speaks protocol ${hello.protocol}, this Console ${P.protocol}: update only`);
+        this.phase = "outdated";
+        return;
+      }
       if (!hello.may_go_on) {
         this.phase = "pin";
         return;
@@ -337,10 +360,6 @@ class Radio {
     let m = 0;
     for (const w of this.wants.values()) m |= w;
     if (this.live && !this.busy && this.eventsForLive) m |= 4;
-    // LINK-57: the event log's events only from a radio that has them (HELLO caps 128).
-    if (!this.link || !(this.link.caps & P.caps.LISTS)) m &= ~8;
-    // LINK-67.1: the radio state only from a radio that has it (caps2 STATE).
-    if (!this.link || !(this.link.caps2 & P.caps2.STATE)) m &= ~P.event.SUB_STATE;
     return this.noEvents || this.leaving ? 0 : m;
   }
 
@@ -410,7 +429,7 @@ class Radio {
   /** LINK-67: the whole state by `STATE`. */
   private async readState() {
     const link = this.link;
-    if (!link || !(link.caps2 & P.caps2.STATE) || this.stateReading) return;
+    if (!link || this.stateReading) return;
     this.stateReading = true;
     this.stateQueued = [];
     try {
@@ -433,7 +452,7 @@ class Radio {
    */
   async tune(slot: number, op: TuneOp, value: number): Promise<boolean> {
     const link = this.link;
-    if (!link || this.phase !== "connected" || !(link.caps2 & P.caps2.STATE)) return false;
+    if (!link || this.phase !== "connected") return false;
     try {
       await link.ok(P.msg.TUNE, tunePayload(slot, op, value));
       this.refresh();
@@ -447,7 +466,7 @@ class Radio {
   /** LINK-69: a beacon now, as the radio's own Beacon now; a refusal (APRS off, KISS, no callsign) shows its reason. */
   async beaconNow(): Promise<boolean> {
     const link = this.link;
-    if (!link || this.phase !== "connected" || !(link.caps2 & P.caps2.BEACON)) return false;
+    if (!link || this.phase !== "connected") return false;
     try {
       await link.ok(P.msg.BEACON);
       this.keyNote = "Beacon sent";
@@ -523,7 +542,7 @@ class Radio {
 
   private async poll(gen: number) {
     while (gen === this.generation && this.phase === "connected") {
-      if (this.live && this.link && !this.busy && !this.liveByEvents) {
+      if (this.live && this.link && !this.busy && !this.byEventsSoon) {
         const t0 = performance.now();
         try {
           const text = await this.link.uiText();
@@ -545,7 +564,7 @@ class Radio {
           }
         }
       }
-      const gap = this.live && !this.liveByEvents ? POLL_GAP_MS[this.kind ?? "cable"] : 60_000;
+      const gap = this.live && !this.byEventsSoon ? POLL_GAP_MS[this.kind ?? "cable"] : 60_000;
       await new Promise<void>((r) => {
         this.wake = r;
         setTimeout(r, Math.max(gap, 20));

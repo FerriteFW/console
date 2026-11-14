@@ -1,6 +1,6 @@
 // Live View completeness (LINK-19.4, LINK-19.5, decisions 289 and 291): every text the firmware draws on a screen shows
-// in Console's Live View drawn from that screen's readback with the screen as drawn (`readback_texts`, as a radio that
-// says caps TEXTS sends it). The screens and their texts come from ferrite's simulator
+// in Console's Live View drawn from that screen's readback with the screen as drawn (`readback_texts`, as the radio sends
+// it). The screens and their texts come from ferrite's simulator
 // (sim/tests/liveview_corpus.rs writes ../ferrite/target/liveview/corpus.json; built here when missing or older than
 // this run). A screen the radio changes and Console's look-alike doesn't follow fails here, with the missing texts.
 import { test, expect } from "@playwright/test";

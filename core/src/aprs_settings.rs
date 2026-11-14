@@ -59,6 +59,7 @@ fn probes() -> [Vec<u8>; 2] {
     b[V2 + 4..V2 + 9].copy_from_slice(b"probe");
     b[END..END + 3].copy_from_slice(&[2, 3, 1]);
     b[ferrite_app::link::APRS_REPLY_AT] = 1; // auto reply on (APRS-57, 0.8.2)
+    b[ferrite_app::link::APRS_TEXT_AT] = 3; // the beacon text every 8th beacon (APRS-50.1, 0.8.5)
     [a, b]
 }
 
@@ -459,6 +460,11 @@ pub fn restore(text: &str) -> Result<(Vec<u8>, Backup), String> {
         rec.extend_from_slice(&ferrite_app::aprs::REPLY_TO_DEFAULT);
         rec.extend_from_slice(&[0; ferrite_app::aprs::REPLY_TEXT_LEN]);
     }
+    // A backup from before the text rate (0.8.4 and older, the record ending at it): every beacon's text, the
+    // default (APRS-50.1).
+    if rec.len() == ferrite_app::link::APRS_TEXT_AT {
+        rec.push(0);
+    }
     Ok((rec, b))
 }
 
@@ -626,7 +632,7 @@ mod tests {
             ids,
             [
                 "0 5 4", "0 5 5 1", "0 5 5 2", "0 5 5 3", "0 5 5 6", "0 5 5 7", "0 5 6 1", "0 5 6 2", "0 5 6 3",
-                "0 5 6 4", "0 5 7 1", "0 5 7 2", "0 5 7 3", "0 5 9 1", "0 5 9 2", "0 5 9 3", "0 5 9 4", "0 5 9 5", "0 5 9 9", "reply.to", "reply.delay", "reply.text"
+                "0 5 6 4", "0 5 6 5", "0 5 7 1", "0 5 7 2", "0 5 7 3", "0 5 9 1", "0 5 9 2", "0 5 9 3", "0 5 9 4", "0 5 9 5", "0 5 9 9", "reply.to", "reply.delay", "reply.text"
             ]
         );
         assert_eq!(v.elsewhere.iter().filter(|e| e.starts_with("0 5 9 7")).count(), 1, "{:?}", v.elsewhere);

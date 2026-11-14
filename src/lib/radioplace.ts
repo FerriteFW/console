@@ -3,10 +3,9 @@ import type { Link } from "./link";
 
 /**
  * LINK-66 (decision 347): the radio's place from its radio record: its GPS fix, else its fixed position (MENU 0 6 9)
- * when that is on. Null when it has neither, or the radio has no radio record.
+ * when that is on. Null when it has neither.
  */
 export async function radioPlace(link: Link): Promise<{ place: Place; gps: boolean } | null> {
-  if (!(link.caps2 & P.caps2.RADIO)) return null;
   const r = await link.readRecord(P.what.RADIO, 0);
   if (!r || r.length < 12) return null;
   const v = new DataView(r.buffer, r.byteOffset, r.byteLength);

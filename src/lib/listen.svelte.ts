@@ -7,7 +7,7 @@ import { JITTER } from "./jitter";
 import { audioCounts, Health } from "./listenHealth";
 import { RECORD_MAX_MS, WavRecorder, wavName } from "./wavrec";
 import { saveBlob } from "./codeplug.svelte";
-import { CAP_AUDIO, type Link } from "./link";
+import type { Link } from "./link";
 import { radio } from "./radio.svelte";
 
 /** The jitter buffer (decision 331): play once this much is waiting; never keep more than the cap. */
@@ -86,7 +86,7 @@ class Listen {
   /** Whether this connection can listen: the cable, a radio that offers `AUDIO`. */
   get available(): boolean {
     const l = radio.connectedLink;
-    return !!l && radio.kind === "cable" && (l.caps & CAP_AUDIO) !== 0;
+    return !!l && radio.kind === "cable" && (l.caps & P.caps.AUDIO) !== 0;
   }
 
   async start() {

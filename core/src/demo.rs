@@ -2,8 +2,9 @@
 //! Radio side of the codec is ferrite's own (`link::parse`, `link::build`). It knows `HELLO`, `INFO`, `UI` (with
 //! `MORE` pages), `KEY` (keypad, knob; remote PTT is refused), `CMD` (a line of text) and `BAUD`; the rest answers
 //! `unknown type`. Its screens are a home with three cards and a small quick menu: a look-alike, not the firmware.
-//! Its `HELLO` says the capabilities its records have ([`DEMO_CAPS`], [`DEMO_CAPS2`]), so Console's editors for them
-//! show against it.
+//! Its `HELLO` is protocol 1's (decision 385): every record and message is there, so Console's editors show against
+//! it. `STREAM` (LINK-50) streams its own readback, and ferrite's session streams the records. The radio state,
+//! tuning, beacons and the clock answer `unknown type`: the demo's screen is its own, not ferrite's.
 //!
 //! Records are the firmware's own: `READ`, `WRITE`, `DELETE`, `BEGIN` and `END` go to ferrite's link session
 //! over an in-memory store ([`crate::radioside`]), seeded with [`demo_set`], so channel programming against the demo
@@ -18,12 +19,8 @@ use ferrite_core::link::{self, key, msg, Status, ANSWER, MAX_PAYLOAD, MAX_WIRE};
 /// The UI text a `UI` answer carries at most (as the radio's pages: under the 240-byte payload).
 const PAGE: usize = 200;
 
-/// LINK-35.2: what the demo's records do (ferrite's own session over its store): channel deletes in `WRITE_MANY`,
-/// channel positions, the quick messages, waypoints, DTMF memories and the event log. Not `STREAM`, compression,
-/// audio or the drawn screen: the demo's own answers don't have them.
-pub const DEMO_CAPS: u8 = link::caps::LISTS | link::caps::POSITION | 8;
-/// The second capability byte: range preset skip lists (LINK-58).
-pub const DEMO_CAPS2: u8 = link::caps2::PRESET_SKIPS;
+/// LINK-35.2: the demo's capability byte: no compression, no audio, no line commands.
+pub const DEMO_CAPS: u8 = 0;
 
 pub struct DemoRadio {
     /// Ferrite's radio side, for the records.
@@ -87,9 +84,14 @@ impl DemoRadio {
             if raw.is_empty() || raw == [3] {
                 continue; // a sync, or Ctrl-C then the sync
             }
+            let wire = raw.clone();
             match link::parse(&mut raw) {
                 Ok(f) => {
                     let (ty, seq, p) = (f.ty, f.seq, f.payload.to_vec());
+                    if ty == msg::STREAM {
+                        out.extend(self.stream(seq, &p, &wire));
+                        continue;
+                    }
                     let (status, rest) = match ty {
                         msg::READ
                         | msg::WRITE
@@ -127,27 +129,65 @@ impl DemoRadio {
         out
     }
 
+    /// `STREAM` (LINK-50): the readback's pages as one stream, numbered from the request's seq: `STREAM_MORE`
+    /// while more follow, `STREAM` for the last. The records' streams are ferrite's own session's (`wire`: the
+    /// request as it came). Anything else is `bad argument`, as the radio answers it.
+    fn stream(&mut self, seq: u8, p: &[u8], wire: &[u8]) -> Vec<u8> {
+        let frame = |ty: u8, seq: u8, pay: &[u8]| {
+            let mut w = [0u8; MAX_WIRE];
+            link::build(ty | ANSWER, seq, pay, &mut w).map(|n| w[..n].to_vec()).unwrap_or_default()
+        };
+        match p.first().copied() {
+            Some(msg::UI) => {
+                self.more = self.readback().into_bytes();
+                let mut out = Vec::new();
+                for i in 0u8.. {
+                    let (_, page) = self.page();
+                    let last = page[0] == 0;
+                    let mut pay = vec![Status::Ok as u8];
+                    pay.extend(page);
+                    out.extend(frame(if last { msg::STREAM } else { msg::STREAM_MORE }, seq.wrapping_add(i), &pay));
+                    if last {
+                        break;
+                    }
+                }
+                out
+            }
+            Some(msg::READ_MANY | msg::HEARD | msg::MSGS | msg::LOG_READ) => {
+                let mut w = wire.to_vec();
+                w.push(0);
+                self.side.stream(&w)
+            }
+            _ => frame(msg::STREAM, seq, &[Status::BadArg as u8]),
+        }
+    }
+
     fn answer(&mut self, ty: u8, p: &[u8]) -> (Status, Vec<u8>) {
         match ty {
             msg::HELLO => {
                 let mut r = vec![link::PROTOCOL, MAX_PAYLOAD as u8, 1];
                 push_text(&mut r, "demo");
                 r.push(link::build::of(true, true, false));
-                r.extend([DEMO_CAPS, DEMO_CAPS2]);
+                r.push(DEMO_CAPS);
+                let l = ferrite_core::layout::LAYOUT_VERSION as u8;
+                r.extend([l, l]); // LINK-62: the layouts (this firmware's, the chip's)
+                let gen = self.side.store.lists_versions().iter().fold(0u32, |a, &v| a.wrapping_add(v));
+                r.extend(gen.to_le_bytes()); // LINK-71
                 (Status::Ok, r)
             }
             msg::INFO => {
                 let mut r = Vec::new();
                 push_text(&mut r, "demo");
                 r.extend(self.side.store.count().to_le_bytes());
-                r.extend(self.side.store.zones().to_le_bytes()); // protocol 3: 2 bytes
+                r.extend(self.side.store.zones().to_le_bytes());
                 r.push(self.side.store.presets.borrow().len() as u8);
                 r.extend(400u16.to_le_bytes());
                 r.push(0);
                 push_text(&mut r, "N0CALL");
                 r.push(link::build::of(true, true, false));
                 r.extend(ferrite_core::uid::bytes([0x3F2A_91C0, 0x7D44_0123, 0x89AB_CDEF]));
-                r.extend([3, 3]); // LINK-62: the layouts (this firmware's, the chip's)
+                let l = ferrite_core::layout::LAYOUT_VERSION as u8;
+                r.extend([l, l]); // LINK-62: the layouts (this firmware's, the chip's)
                 (Status::Ok, r)
             }
             msg::UI => {
@@ -395,10 +435,14 @@ mod tests {
         let (st, h) = ask(&mut r, &mut s, msg::HELLO, &crate::answers::hello_payload("test"));
         assert_eq!(st, 0);
         let h = Hello::parse(&h).unwrap();
-        assert!(h.may_go_on && h.build.unwrap().dry);
-        assert_eq!((h.caps, h.caps2), (DEMO_CAPS, DEMO_CAPS2), "the demo says what its records do");
+        assert!(h.may_go_on && h.build.as_ref().unwrap().dry);
+        assert!(h.current(), "protocol 1 (decision 385)");
+        assert_eq!(h.caps, DEMO_CAPS);
+        let l = ferrite_core::layout::LAYOUT_VERSION as u8;
+        assert_eq!(h.layouts, Some(crate::answers::Layouts { firmware: l, chip: l }));
+        assert!(h.lists_gen.is_some());
         let (_, i) = ask(&mut r, &mut s, msg::INFO, &[]);
-        assert_eq!(Info::parse(&i, 3).unwrap().uid_text.unwrap().len(), 23);
+        assert_eq!(Info::parse(&i).unwrap().uid_text.unwrap().len(), 23);
         let ui_text = |r: &mut DemoRadio, s: &mut Session| {
             let (_, mut rest) = ask(r, s, msg::UI, &[0]);
             let mut t = String::new();
@@ -424,7 +468,39 @@ mod tests {
         assert_eq!(ask(&mut r, &mut s, 0x55, &[]).0, Status::UnknownType as u8);
     }
 
-    /// The capabilities the demo's HELLO says are there: its lists read back as seeded, a skip list with its preset,
+    /// LINK-50: `STREAM` from the demo: its readback's pages, numbered from the request's seq, `STREAM` last, the
+    /// same text as `UI` and `MORE` give; a records stream is ferrite's session's; another type `bad argument`.
+    #[test]
+    fn demo_streams() {
+        let (mut r, mut s) = (DemoRadio::new(), Session::new());
+        r.feed(&s.take_cable(0.0));
+        let stream = |r: &mut DemoRadio, s: &mut Session, p: &[u8]| {
+            let req = s.request(msg::STREAM, p, 0.0).unwrap();
+            let got = s.feed(&r.feed(&req.wire));
+            s.skip(got.len() as u8 + 1);
+            for (i, a) in got.iter().enumerate() {
+                assert_eq!(a.seq, req.seq.wrapping_add(i as u8));
+                let last = if i + 1 == got.len() { msg::STREAM } else { msg::STREAM_MORE };
+                assert_eq!(a.ty, last | ANSWER);
+            }
+            got
+        };
+        let got = stream(&mut r, &mut s, &[msg::UI, 0]);
+        assert!(got.len() > 1, "the readback is more than a page");
+        let text: String = got.iter().map(|a| TextChunk::parse(&a.rest).unwrap().text).collect();
+        assert_eq!(crate::ui::parse(&text).cards.len(), 3);
+        let mut p = vec![msg::READ_MANY, link::what::CHANNEL];
+        p.extend(0u16.to_le_bytes());
+        p.extend(1000u16.to_le_bytes());
+        let got = stream(&mut r, &mut s, &p);
+        assert!(got.iter().all(|a| a.status == 0));
+        let n: usize = got.iter().map(|a| crate::lists::parse_many(&a.rest).unwrap().1.len()).sum();
+        assert_eq!(n, demo_set().channels.len());
+        let got = stream(&mut r, &mut s, &[msg::KEY]);
+        assert_eq!((got.len(), got[0].status), (1, Status::BadArg as u8));
+    }
+
+    /// What protocol 1 always has, from the demo: its lists read back as seeded, a skip list with its preset,
     /// the event log by `LOG_READ`, and `SUBSCRIBE` with the event log's mask taken.
     #[test]
     fn demo_lists_through_the_link() {
@@ -461,7 +537,7 @@ mod tests {
         let set = demo_set();
         assert!(set.parts().is_ok());
         assert!(crate::plan::plan(&set, &set).problems.is_empty());
-        let i = Info::parse(&ask(&mut r, &mut s, msg::INFO, &[]).1, 3).unwrap();
+        let i = Info::parse(&ask(&mut r, &mut s, msg::INFO, &[]).1).unwrap();
         assert_eq!((i.channels as usize, i.zones as usize), (set.channels.len(), set.zones.len()));
         let mut zones = Vec::new();
         for z in 0..i.zones {

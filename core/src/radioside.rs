@@ -366,6 +366,18 @@ impl RadioSide {
         out.0
     }
 
+    /// A `STREAM` request's whole wire frame (LINK-50): every frame of its stream, polled until the session is quiet.
+    pub fn stream(&mut self, wire: &[u8]) -> Vec<u8> {
+        let mut out = Out(self.feed(wire));
+        let mut quiet = 0;
+        while quiet < 4 {
+            let n = out.0.len();
+            self.poll(&mut out);
+            quiet = if out.0.len() == n { quiet + 1 } else { 0 };
+        }
+        out.0
+    }
+
     fn poll(&mut self, out: &mut Out) {
         for _ in 0..8 {
             self.now = self.now.wrapping_add(5);
