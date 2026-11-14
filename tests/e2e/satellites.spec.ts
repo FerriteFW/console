@@ -42,8 +42,9 @@ type Held = { id: number; short: string; epoch: number }[];
 const held = (page: Page) => state(page, (f: any) => (f.satellites.held as Held | null)?.map((s) => ({ id: s.id, short: s.short, epoch: s.epoch })) ?? null);
 const info = (page: Page) => state(page, (f: any) => f.satellites.info as { decl: number | null; stamp: number; written: number } | null);
 const toolbar = (page: Page) => page.getByRole("toolbar", { name: "Satellites" });
-const listRows = (page: Page) => page.getByRole("table", { name: "Satellites to write" }).locator("tbody tr");
-const radioRows = (page: Page) => page.getByRole("table", { name: "Satellites on the radio" }).locator("tbody tr");
+// one table (Alex, Nov 14, 2026): the list, sorted by next pass; "On the radio" says which the radio holds
+const listRows = (page: Page) => page.getByRole("table", { name: "Satellites" }).locator("tbody tr");
+const radioRows = (page: Page) => listRows(page).filter({ has: page.locator("td.onradio.yes") });
 
 /** Connected on the Satellites page with the radio's satellites read. */
 async function ready(page: Page) {
@@ -63,8 +64,8 @@ test("the list: only what an FM handheld can work, all written, with the clock a
   await openConsole(page, "satellites");
   await page.evaluate(() => ((window as any).ferrite.library.placeText = "49.2827, -123.1207"));
   await expect(listRows(page)).toHaveCount(5);
-  await expect(page.getByRole("table", { name: "Satellites to write" })).not.toContainText("TEVEL2-8");
-  await expect(page.locator("[data-status]")).toContainText("List of 2026-10-31: 5 satellites an FM handheld can work, all of them go to the radio.");
+  await expect(page.getByRole("table", { name: "Satellites" })).not.toContainText("TEVEL2-8");
+  await expect(page.locator("[data-status]")).toContainText("List of 2026-10-31: 5 satellites an FM handheld can work.");
   await expect(page.getByRole("checkbox", { name: /^Pick / })).toHaveCount(0); // no picking (Alex, Nov 14, 2026)
   await expect(listRows(page).filter({ hasText: "SO-50" })).toContainText("tone 67.0 (arm 74.4)");
   await ready(page);
@@ -75,6 +76,11 @@ test("the list: only what an FM handheld can work, all written, with the clock a
   await expect(radioRows(page)).toHaveCount(5);
   const listed = await state(page, (f: any) => f.satellites.file.sats.map((s: { id: number }) => s.id) as number[]);
   expect((await held(page))!.map((s) => s.id)).toEqual(listed); // the whole list, in its order
+  await expect(page.locator('[data-k="radio-state"]')).toContainText("The radio has this list (5 satellites).");
+  // sorted by next pass: up now first, then the soonest
+  const order = await listRows(page).locator("td.pass").allTextContents();
+  const up = order.filter((t) => t.startsWith("Up now")).length;
+  expect(order.slice(0, up).every((t) => t.startsWith("Up now"))).toBe(true);
   await expect(radioRows(page).filter({ hasText: "SO-50" })).toContainText("arm 74.4");
   const i = (await info(page))!;
   expect(i.stamp).toBe(utc("2026-10-31"));
@@ -130,7 +136,7 @@ test("SAT-21: a connect puts the whole list on the radio when its set differs or
   await expect.poll(async () => (await held(page))?.length, { timeout: long }).toBe(5);
 });
 
-test("SAT-23: the map shows the satellite picked in its menu, or a row clicked in either table", async ({ page }) => {
+test("SAT-23: one list sorted by next pass; the map shows the satellite picked in its menu or a row clicked", async ({ page }) => {
   await serveSats(page, () => file("2026-10-31"));
   await openConsole(page, "satellites");
   await page.evaluate(() => ((window as any).ferrite.library.placeText = "49.2827, -123.1207"));
@@ -140,18 +146,19 @@ test("SAT-23: the map shows the satellite picked in its menu, or a row clicked i
   const caption = page.locator('[data-k="satmap"]');
   await expect(menu).toBeVisible();
   // SAT-23: each satellite's next pass over the place, and the map's passes
-  await expect(page.getByRole("table", { name: "Satellites to write" }).locator("td.pass").first()).toHaveText(/(Up now until|Today|Tomorrow|[A-Z][a-z]{2}) .*\d+°|none in 2 days/);
+  await expect(page.getByRole("table", { name: "Satellites" }).locator("td.pass").first()).toHaveText(/(Up now until|Today|Tomorrow|[A-Z][a-z]{2}) .*\d+°|none in 2 days/);
   await expect(page.locator('[data-k="pass"]')).toContainText(/Next over you|Over you now|No pass/);
   // the menu
   await menu.selectOption({ label: "SO-50" });
   await expect(menu.locator("option:checked")).toHaveText("SO-50");
   await expect(caption).toContainText("km up");
-  // a row in the list below
-  await listRows(page).filter({ hasText: "AO-27" }).locator("td.num").first().click();
+  // a row in the list
+  await listRows(page).filter({ hasText: "AO-27" }).locator("td.pass").click();
   await expect(menu.locator("option:checked")).toHaveText("AO-27");
-  // a row on the radio's table
-  const r = radioRows(page).first();
-  const name = (await r.locator("td.nm").textContent())!.trim();
-  await r.click();
-  await expect(menu.locator("option:checked")).toHaveText(name);
+  // one table, no second list of the radio's
+  await expect(page.getByRole("table")).toHaveCount(1);
+  // sorted by next pass: the passes' times never go backwards (no-pass rows last)
+  const keys = await listRows(page).evaluateAll((trs) => trs.map((tr) => tr.querySelector("td.pass")?.textContent ?? ""));
+  const firstNone = keys.findIndex((k) => k.startsWith("none") || k === "–");
+  if (firstNone >= 0) expect(keys.slice(firstNone).every((k) => k.startsWith("none") || k === "–")).toBe(true);
 });

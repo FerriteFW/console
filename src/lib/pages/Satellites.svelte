@@ -29,18 +29,15 @@
   const busy = $derived(!!satellites.busy);
   const max = $derived(coreUp ? P.limits.sats : 32);
   const file = $derived(satellites.file);
-  // SAT-23: the satellite shown on the map: picked in the map's menu or by a click on its row in either table; to
-  // start, the radio's first, else the list's first
+  // SAT-23: the satellite shown on the map: picked in the map's menu or by a click on its row; to start, the top of
+  // the list (the next over you)
   let shown = $state(0);
   const choices = $derived.by(() => {
     const seen = new Set<number>();
     const out: SatRow[] = [];
-    for (const s of [...(satellites.held ?? []), ...(file?.sats ?? [])]) if (!seen.has(s.id) && seen.add(s.id)) out.push(s);
+    for (const s of [...(file?.sats ?? []), ...(satellites.held ?? [])]) if (!seen.has(s.id) && seen.add(s.id)) out.push(s);
     return out;
   });
-  const onMap = $derived(
-    choices.find((s) => s.id === shown) ?? satellites.held?.[0] ?? file?.sats[0] ?? null,
-  );
   // SAT-23: passes over the Near me place, else over this computer (decision 398)
   let mine = $state<{ lat: number; lon: number } | null>(null);
   let locNote = $state("");
@@ -74,6 +71,37 @@
     shown = id;
     document.querySelector('[aria-label="On the map"]')?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
+
+  // One list (Alex, Nov 14, 2026: two lists confused): the file's satellites in the order they go to the radio, then
+  // any the radio holds that the file doesn't (added in the terminal), each marked whether the radio has it
+  const heldIds = $derived(new Set((satellites.held ?? []).map((s) => s.id)));
+  const rows = $derived.by(() => {
+    const listed = satellites.toWrite;
+    const ids = new Set(listed.map((s) => s.id));
+    const all = [...listed.map((s) => ({ s, only: false })), ...(satellites.held ?? []).filter((h) => !ids.has(h.id)).map((s) => ({ s, only: true }))];
+    // by next pass (Alex): up now first (by when it sets), then the soonest; none within two days, or no place, last
+    const key = (id: number) => {
+      const p = next.get(id);
+      return p ? (p.aos <= now ? p.los - 1e10 : p.aos) : Infinity;
+    };
+    return all.map((r, i) => ({ ...r, i })).sort((a, b) => key(a.s.id) - key(b.s.id) || a.i - b.i);
+  });
+  const onMap = $derived(
+    choices.find((s) => s.id === shown) ?? rows[0]?.s ?? null,
+  );
+  // where the radio stands against the list
+  const radioState = $derived.by(() => {
+    if (!connected) return "Connect a radio to put the list on it.";
+    if (!satellites.held) return supported ? "Reading the radio's satellites…" : "This radio's firmware has no satellites over the link: update Ferrite.";
+    const held = satellites.held;
+    if (!held.length) return "The radio holds no satellites yet: Write puts the list on it.";
+    const listed = satellites.toWrite;
+    const same = listed.length === held.length && listed.every((s) => heldIds.has(s.id));
+    const stamp = satellites.info?.stamp ?? 0;
+    if (same && file && stamp >= file.built) return `The radio has this list (${held.length} satellites).`;
+    if (same) return `The radio has these ${held.length} satellites with older data: Write updates them${satellites.auto ? " (and the next connect does by itself)" : ""}.`;
+    return `The radio holds ${held.length} satellites, not this list: Write puts the list on it${satellites.auto ? " (and the next connect does by itself)" : ""}.`;
+  });
 
   const mhz = (hz: number) => (hz / 1e6).toFixed(3);
   const tpText = (t: SatTp) =>
@@ -115,93 +143,72 @@
       <span>Loading the satellite list…</span>
     {:else if file}
       <span
-        >List of {file.built_text}{satellites.fileKept ? " (the copy kept on this computer: the server couldn't be reached)" : ""}: {file.sats.length} satellites an FM handheld can work{file.sats.length > max ? ` · the first ${max} go to the radio (active first)` : ", all of them go to the radio"}.</span
+        >List of {file.built_text}{satellites.fileKept ? " (the copy kept on this computer: the server couldn't be reached)" : ""}: {file.sats.length} satellites an FM handheld can work{file.sats.length > max ? `; the radio holds ${max} (active first)` : ""}.</span
       >
     {/if}
   </div>
-
-  <div class="pg-status" data-k="pass-place">
-    {#if place}
-      <span>Passes over {library.place ? "the Near me place" : "this computer's location"} ({place.lat.toFixed(2)}, {place.lon.toFixed(2)}).</span>
-    {:else if placeNote && placeNote !== "Finding where you are…"}
-      <span>No passes: {placeNote}</span>
-      {#if canLocate}<button class="btn quiet" onclick={retryPlace}>Try again</button>{/if}
-    {:else if canLocate}
-      <span>Finding where you are, for the passes…</span>
-    {:else}
-      <span>No passes: set a place in Channels › Add channels › Near me.</span>
-    {/if}
-  </div>
+  <div class="pg-status" data-k="radio-state"><span>{radioState}</span></div>
   {#if satellites.fileError}<div class="pg-banner">{satellites.fileError}</div>{/if}
   {#if satellites.error}<div class="pg-banner">{satellites.error}</div>{/if}
   {#if satellites.notice}<div class="pg-banner ok" aria-live="polite">{satellites.notice}</div>{/if}
 
-  <section aria-label="On the radio">
-    <h2>On the radio</h2>
-    {#if !connected}
-      <p class="sub">Connect a radio to see its satellites and write them.</p>
-    {:else if satellites.held}
-      <p class="sub small" data-radio-info>
-        {satellites.held.length} of {max} satellites · declination {declText(satellites.info?.decl ?? null)} · list of {satellites.info?.stamp
-          ? new Date(satellites.info.stamp * 1000).toISOString().slice(0, 10)
-          : "unknown"} · written {date(satellites.info?.written ?? 0)} · radio clock {satellites.clock?.now ? `${date(satellites.clock.now)} (${satellites.clock.source === "GPS" ? "GPS" : "set"})` : "not set"}
-      </p>
-      {#if satellites.held.length}
-        <div class="pg-scroll short">
-          <table class="tbl" aria-label="Satellites on the radio">
-            <thead><tr><th>#</th><th>Name</th><th>Next pass</th><th>NORAD</th><th title="How old its orbit data is: passes drift as it ages">Data age</th><th>Transponders</th></tr></thead>
-            <tbody>
-              {#each satellites.held as s, i (s.id)}
-                <tr class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={() => show(s.id)}>
-                  <td class="num">{i + 1}</td>
-                  <td class="nm">{s.short}</td>
-                  <td class="nowrap pass" class:up={next.get(s.id)?.aos !== undefined && next.get(s.id)!.aos <= now}>{passCell(s.id)}</td>
-                  <td class="num">{s.id}</td>
-                  <td class="nowrap"><span class={`tag ${ageTag(s)}`} title="Orbit data from {date(s.epoch)}">{age(s)}</span></td>
-                  <td>{s.tps.map(tpText).join(" · ")}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {:else}
-        <p class="sub">The radio holds no satellites yet: pick them below and write.</p>
-      {/if}
-    {/if}
-  </section>
-
   {#if onMap && coreUp}
     <section aria-label="On the map">
-      <h2>On the map</h2>
-      <SatMap sat={onMap} {choices} onpick={(id) => (shown = id)} {place} {placeNote} />
+      <SatMap sat={onMap} choices={rows.map((r) => r.s)} onpick={(id) => (shown = id)} {place} {placeNote} />
+      <p class="sub small" data-k="pass-place">
+        {#if place}
+          Passes over {library.place ? "the Near me place" : "this computer's location"} ({place.lat.toFixed(2)}, {place.lon.toFixed(2)}).
+        {:else if placeNote && placeNote !== "Finding where you are…"}
+          No passes: {placeNote}
+          {#if canLocate}<button class="btn quiet" onclick={retryPlace}>Try again</button>{/if}
+        {:else if canLocate}
+          Finding where you are, for the passes…
+        {:else}
+          No passes: set a place in Channels › Add channels › Near me.
+        {/if}
+      </p>
     </section>
   {/if}
 
-  <section aria-label="Satellite list">
-    <h2>Satellite list</h2>
-    {#if file}
+  <section aria-label="Satellites">
+    {#if rows.length}
       <div class="pg-scroll">
-        <table class="tbl" aria-label="Satellites to write">
-          <thead><tr><th>Name</th><th>Next pass</th><th>NORAD</th><th>Status</th><th title="How old its orbit data is: passes drift as it ages">Data age</th><th>Transponders</th></tr></thead>
+        <table class="tbl" aria-label="Satellites">
+          <thead
+            ><tr
+              ><th>Name</th><th>Next pass</th><th title="Whether the radio holds it">On the radio</th><th title="How old its orbit data is: passes drift as it ages">Data age</th><th>Transponders</th><th>NORAD</th></tr
+            ></thead
+          >
           <tbody>
-            {#each file.sats as s (s.id)}
-              <tr class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={() => show(s.id)}>
-                <td><span class="nm">{s.short}</span>{#if s.name !== s.short}<span class="full sub small">{s.name}</span>{/if}</td>
+            {#each rows as { s, only } (s.id)}
+              <tr class="pickable" class:shown={onMap?.id === s.id} data-sat={s.id} title="Show on the map" onclick={() => show(s.id)}>
+                <td
+                  ><span class="nm">{s.short}</span>{#if s.status !== "active" && !only}<span class="tag dim-tag">{s.status}</span>{/if}{#if s.name !== s.short}<span class="full sub small">{s.name}</span>{/if}</td
+                >
                 <td class="nowrap pass" class:up={next.get(s.id)?.aos !== undefined && next.get(s.id)!.aos <= now}>{passCell(s.id)}</td>
-                <td class="num">{s.id}</td>
-                <td>{s.status}</td>
+                <td class="nowrap onradio" class:yes={heldIds.has(s.id)}
+                  >{!satellites.held ? "–" : only ? "only there" : heldIds.has(s.id) ? "yes" : "not yet"}</td
+                >
                 <td class="nowrap"><span class={`tag ${ageTag(s)}`} title="Orbit data from {date(s.epoch)}: amber past 7 days (3 for the ISS), red past 30">{age(s)}</span></td>
                 <td>{s.tps.map(tpText).join(" · ")}{#if s.dropped}<span class="sub small"> (+{s.dropped} the radio can't use)</span>{/if}</td>
+                <td class="num dim">{s.id}</td>
               </tr>
             {/each}
           </tbody>
         </table>
       </div>
+      {#if connected && satellites.held}
+        <p class="sub small" data-radio-info>
+          On the radio: {satellites.held.length} of {max} satellites · declination {declText(satellites.info?.decl ?? null)} · list of {satellites.info?.stamp
+            ? new Date(satellites.info.stamp * 1000).toISOString().slice(0, 10)
+            : "unknown"} · written {date(satellites.info?.written ?? 0)} · radio clock {satellites.clock?.now ? `${date(satellites.clock.now)} (${satellites.clock.source === "GPS" ? "GPS" : "set"})` : "not set"}
+        </p>
+      {/if}
       <p class="sub small">
-        Only 2 m and 70 cm FM and APRS transponders are listed: the radio works nothing else. Data age: how old each satellite's orbit data is (amber past 7 days, 3 for the ISS; red past 30): its passes drift as it ages, and Reload list fetches fresh data.
-        Writing replaces the radio's whole list; it keeps each satellite's own settings (trim, FD/HD, transponder, power) by its NORAD number.
+        Click a satellite to show it on the map. Only 2 m and 70 cm FM and APRS transponders are listed: the radio works nothing else. Data age: how old its orbit
+        data is; passes drift as it ages, and Reload list fetches fresh data. Writing keeps each satellite's own settings on the radio (trim, FD/HD, transponder, power).
       </p>
-      <p class="dim small">{file.attribution} {file.licence}.</p>
+      {#if file}<p class="dim small">{file.attribution} {file.licence}.</p>{/if}
     {:else if !satellites.fileError}
       <p class="sub">Loading…</p>
     {/if}
@@ -209,10 +216,6 @@
 </div>
 
 <style>
-  h2 {
-    font-size: 15px;
-    margin: 4px 0 8px;
-  }
   .small {
     font-size: 12px;
   }
@@ -223,8 +226,16 @@
     font-size: 13px;
     cursor: pointer;
   }
-  .pg-scroll.short {
-    max-height: 320px;
+  td.onradio {
+    color: var(--sub);
+  }
+  td.onradio.yes {
+    color: var(--green);
+  }
+  .dim-tag {
+    margin-left: 6px;
+    font-size: 11px;
+    color: var(--sub);
   }
   .nm {
     white-space: nowrap;
