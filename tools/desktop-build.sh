@@ -39,7 +39,12 @@ if [ "$what" = mac ]; then
     profile=${NOTARY_PROFILE:-FerriteConsole}
     xcrun notarytool history --keychain-profile "$profile" >/dev/null 2>&1 || { echo "mac: no notarization profile $profile in the keychain (see above)" >&2; exit 1; }
   fi
-  APPLE_SIGNING_IDENTITY="$identity" npx tauri build --bundles app,dmg 2>&1 | tail -n 8
+  # unsigned: the variable left out (an empty one makes Tauri sign with an identity named "", which fails)
+  if [ -n "$identity" ]; then
+    APPLE_SIGNING_IDENTITY="$identity" npx tauri build --bundles app,dmg 2>&1 | tail -n 8
+  else
+    env -u APPLE_SIGNING_IDENTITY npx tauri build --bundles app,dmg 2>&1 | tail -n 8
+  fi
   dmg=$(ls target/release/bundle/dmg/*.dmg | head -n 1)
   if [ -n "$identity" ]; then
     codesign --verify --deep --strict target/release/bundle/macos/*.app
