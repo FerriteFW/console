@@ -87,8 +87,8 @@
         void add();
       }}
     >
-      <input placeholder="Callsign-SSID" aria-label="Callsign" bind:value={call} maxlength="9" />
-      <input placeholder="Name" aria-label="Name" bind:value={name} maxlength="12" />
+      <input class="pg-field call" placeholder="Callsign-SSID" aria-label="Callsign" bind:value={call} maxlength="9" />
+      <input class="pg-field" placeholder="Name" aria-label="Name" bind:value={name} maxlength="12" />
       <button class="btn primary" disabled={!callOk(callUp) || full || !!c.busy}>Add or rename</button>
       {#if full}<span class="dim">{MAX} contacts: delete one first.</span>{/if}
     </form>
@@ -101,7 +101,7 @@
           {#each rows as x (x.call)}
             <tr>
               <td class="mono">{x.call}</td>
-              <td><input class="cell" value={x.name} maxlength="12" aria-label="Name of {x.call}" onchange={(e) => rename(x, e)} disabled={!!c.busy} /></td>
+              <td><input class="pg-field cell" value={x.name} maxlength="12" aria-label="Name of {x.call}" onchange={(e) => rename(x, e)} disabled={!!c.busy} /></td>
               <td><button class="btn quiet" disabled={!!c.busy} onclick={() => c.write([], [x.call])}>Delete</button></td>
             </tr>
           {:else}
@@ -130,9 +130,25 @@
     flex-wrap: wrap;
     align-items: center;
   }
+  .call {
+    width: 11em;
+    text-transform: uppercase;
+  }
+  .call::placeholder {
+    text-transform: none;
+  }
+  /* in the table: the shared field, quieter until hovered or edited */
   .cell {
     width: 100%;
     min-width: 8em;
+    height: 28px;
+    border-color: transparent;
+    background: transparent;
+  }
+  .cell:hover,
+  .cell:focus {
+    border-color: var(--line);
+    background: var(--bg);
   }
   .foot {
     font-size: 12px;
