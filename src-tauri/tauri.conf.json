@@ -41,5 +41,11 @@
         "exportedType": { "identifier": "dev.ferritefw.console.codeplug", "conformsTo": ["public.data", "public.zip-archive"] }
       }
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE5MjI4QkJBNkU3NkVFRkMKUldUODduWnV1b3NpcVZsUldmSXp6N24ydWhiSXI2cFFibnZWM2oyVitzZ3YxOEZVN1JmR1EwOXUK",
+      "endpoints": ["https://github.com/FerriteFW/console/releases/latest/download/latest.json"]
+    }
   }
 }

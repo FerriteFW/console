@@ -8,7 +8,7 @@
   import { aprs, ago, compass, distance } from "../aprs.svelte";
   import { degrees, SOURCE_WORDS, waypoints } from "../lists.svelte";
   import { radio } from "../radio.svelte";
-  import { ATTRIBUTION, loadLeaflet, TILES, type Leaflet, type LLayer, type LMap } from "../leaflet";
+  import { ATTRIBUTION, loadLeaflet, TILES, type Leaflet, type LLayer, type LMap, type LMarker } from "../leaflet";
   import { route } from "../route.svelte";
 
   let el: HTMLDivElement;
@@ -16,6 +16,7 @@
   let map: LMap | null = null;
   let layers: LLayer[] = [];
   let mapError = $state("");
+  let wpNote = $state("");
   let now = $state(Date.now());
   const connected = $derived(radio.phase === "connected");
   const WP_KEY = "ferrite.map.waypoints";
@@ -55,6 +56,15 @@
         if (gone) return;
         map = l.map(el, { worldCopyJump: true }).setView([45.42, -75.69], 9);
         l.tileLayer(TILES, { maxZoom: 18, attribution: ATTRIBUTION }).addTo(map);
+        // Decision 396: a right-click adds a waypoint there, on top (unwritten until Write, as APRS › Waypoints)
+        map.on("contextmenu", (e) => {
+          if (!e.latlng || waypoints.items.length >= waypoints.max) return;
+          (e.originalEvent as Event | undefined)?.preventDefault();
+          const name = `Waypoint ${waypoints.items.length + 1}`;
+          waypoints.add(name, [e.latlng.lat, e.latlng.lng]);
+          showWp = true;
+          wpNote = `Added ${name}: rename it in Waypoints, then Write.`;
+        });
         L = l;
       })
       .catch((e) => (mapError = (e as Error).message));
@@ -134,12 +144,18 @@
       pts.push(ll);
       const d = aprs.me ? distance(aprs.me, { lat: ll[0], lon: ll[1] }) : null;
       const mk = l
-        .marker(ll, { icon: l.divIcon({ className: "aprs-wp", html: "<span></span>", iconSize: [14, 14] }), title: w.name, keyboard: false })
+        .marker(ll, { icon: l.divIcon({ className: "aprs-wp", html: "<span></span>", iconSize: [14, 14] }), title: w.name, keyboard: false, draggable: true })
         .addTo(m)
         .bindTooltip(esc(w.name), { permanent: wps.length <= 25, direction: "right", className: "aprs-label wp-label" })
         .bindPopup(
           `<b>${esc(w.name)}</b> · waypoint<br>${ll[0].toFixed(5)}, ${ll[1].toFixed(5)}${d ? `<br>${d.km.toFixed(1)} km ${compass(d.deg)}` : ""}<br>${esc(SOURCE_WORDS[w.source] ?? w.source)}`,
         );
+      // Decision 396: dragged, it moves (unwritten until Write)
+      mk.on("dragend", () => {
+        const p = (mk as unknown as LMarker).getLatLng();
+        waypoints.edit(w.key, { lat: Math.round(p.lat * 1e7), lon: Math.round(p.lng * 1e7) });
+        wpNote = `Moved ${w.name}: Write in Waypoints to put it on the radio.`;
+      });
       if (wpFocus && w.name === wpFocus) {
         mk.openPopup();
         wpAt = ll;
@@ -177,6 +193,7 @@
         <input type="checkbox" bind:checked={showWp} aria-label="Show waypoints" />
         <span class="wp-key" aria-hidden="true"></span> Waypoints ({waypoints.items.length})
       </label>
+      <span class="sub" data-k="wp-note">{wpNote || "Right-click the map to add a waypoint; drag one to move it."}</span>
     {/if}
   </div>
   {#if mapError}<div class="pg-banner warn">{mapError}</div>{/if}

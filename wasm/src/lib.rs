@@ -1366,6 +1366,13 @@ pub fn aprs_wx(comment: &str) -> String {
     json(&ferrite_console_core::aprs::wx(comment))
 }
 
+/// SAT-23: a satellite on the map (core/src/satmap.rs): `record` the radio's satellite record, `now` UTC seconds, the
+/// place (degrees) when `has_place`. JSON: `satmap::SatMap`.
+#[wasm_bindgen]
+pub fn sat_map(record: &[u8], now: u32, has_place: bool, lat: f64, lon: f64) -> Result<String, JsError> {
+    ferrite_console_core::satmap::sat_map(record, now, has_place.then_some((lat, lon))).map(|m| json(&m)).map_err(|e| JsError::new(&e))
+}
+
 /// `sats.json` as the workable satellites with their records (JSON: `sats::Parsed`), or why it didn't read.
 #[wasm_bindgen]
 pub fn sats_parse(json: &str) -> Result<String, JsError> {

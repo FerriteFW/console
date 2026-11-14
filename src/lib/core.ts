@@ -324,6 +324,11 @@ export type SatInfo = { decl: number | null; stamp: number; written: number };
 /** LINK-65: the radio's UTC (0 none) and its source. */
 export type RadioClock = { now: number; source: "none" | "GPS" | "set" };
 
+/** SAT-23: a satellite on the map (core/src/satmap.rs): where it is, its track for two orbits, the next pass over `place`. */
+export type SatPoint = { lat: number; lon: number };
+export type SatMap = { now: SatPoint; alt_km: number; footprint_km: number; track: SatPoint[][]; next: { aos: number; los: number; max_el: number } | null };
+export const satMap = (record: Uint8Array, now: number, place: { lat: number; lon: number } | null): SatMap =>
+  JSON.parse(wasm.sat_map(record, now, !!place, place?.lat ?? 0, place?.lon ?? 0));
 export const satsParse = (json: string): SatsFile => JSON.parse(wasm.sats_parse(json));
 export const satHeld = (rec: Uint8Array): SatRow | null => parsed(wasm.sat_held(rec));
 /** SAT-21: the radio's records again from the file (by NORAD number, in the radio's order). */

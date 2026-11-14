@@ -219,6 +219,9 @@ fn core_protocol() -> u8 {
 pub fn run() {
     tauri::Builder::default()
         .manage(App::default())
+        // UPD-26: Console's own updates (the page checks only once the releases are public: updates.ts)
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // The window fits the screen it opens on (a 14" MacBook is ~1512 x 945 points): 90 % of its height, up to
         // 1440 wide, centred. The config's size is only the fallback.
         .setup(|app| {
