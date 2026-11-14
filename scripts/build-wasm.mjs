@@ -25,8 +25,11 @@ const run = (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" });
 const remap = [`--remap-path-prefix=${homedir()}=~`, `--remap-path-prefix=${resolve(process.cwd(), "..")}=.`];
 process.env.RUSTFLAGS = [process.env.RUSTFLAGS, ...remap].filter(Boolean).join(" ");
 run("cargo", ["build", "-p", "ferrite-console-wasm", "--target", "wasm32-unknown-unknown", "--profile", "wasm"]);
+// Where cargo put it: CARGO_TARGET_DIR when set (the Linux build box uses its own), not always target/. Reading
+// target/ there took the last Windows build's core: Linux 0.8.5 shipped 0.8.4's, and failed on an older radio.
+const targetDir = process.env.CARGO_TARGET_DIR || "target";
 run("wasm-bindgen", [
-  "target/wasm32-unknown-unknown/wasm/ferrite_console_wasm.wasm",
+  `${targetDir}/wasm32-unknown-unknown/wasm/ferrite_console_wasm.wasm`,
   "--target", "web", "--out-dir", "src/core-wasm", "--out-name", "core",
   // A third of the file, only for stack traces. Stripped here, not by cargo (strip = "symbols"), which would drop
   // target_features too and turn wasm-bindgen's returns back to the slower, larger glue without multivalue.

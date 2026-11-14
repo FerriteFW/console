@@ -92,11 +92,13 @@ run() { # IMAGE TARGET-DIR COMMAND
 docker run --rm -v ferrite-console-xwin:/xwin alpine chmod 777 /xwin
 out=$dir/out; rm -rf "$out"; mkdir -p "$out"
 if [ "$what" != windows ]; then
+  rm -rf ferrite-console/target-linux/release/bundle # only this build's installers, not every older version's
   run ferrite-console-desktop-linux target-linux 'npx tauri build 2>&1 | tail -n 15'
   cp ferrite-console/target-linux/release/bundle/deb/*.deb ferrite-console/target-linux/release/bundle/rpm/*.rpm \
      ferrite-console/target-linux/release/bundle/appimage/*.AppImage "$out/" 2>/dev/null || true
 fi
 if [ "$what" != linux ]; then
+  rm -rf ferrite-console/target/x86_64-pc-windows-msvc/release/bundle
   run ferrite-console-desktop target 'npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc 2>&1 | tail -n 15'
   cp ferrite-console/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe "$out/" 2>/dev/null || true
   # The bare app too: runs without installing (Windows 10 and 11 have the WebView2 runtime it needs).
