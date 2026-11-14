@@ -26,10 +26,29 @@ if [ "$what" = mac ]; then
   [ "$(uname)" = Darwin ] || { echo "mac: build on a Mac" >&2; exit 1; }
   cd "$here"
   node scripts/bundle-firmware.mjs ${FIRMWARE:-} >/dev/null # as the Docker builds below
-  npx tauri build --bundles app,dmg 2>&1 | tail -n 8
+  # Signed with the team's Developer ID and notarized, so macOS opens it without a warning. The certificate is in
+  # this Mac's keychain; the notarization login is the keychain profile FerriteConsole (made once with
+  # `xcrun notarytool store-credentials FerriteConsole --team-id TEAM --apple-id APPLE_ID`; org/signing.md).
+  # UNSIGNED=1 builds as before (an ad-hoc signature, fine on the Mac that built it).
+  identity=""
+  if [ -z "${UNSIGNED:-}" ]; then
+    identity=${APPLE_SIGNING_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)}
+    [ -n "$identity" ] || { echo "mac: no Developer ID Application certificate in the keychain (UNSIGNED=1 to build without)" >&2; exit 1; }
+    profile=${NOTARY_PROFILE:-FerriteConsole}
+    xcrun notarytool history --keychain-profile "$profile" >/dev/null 2>&1 || { echo "mac: no notarization profile $profile in the keychain (see above)" >&2; exit 1; }
+  fi
+  APPLE_SIGNING_IDENTITY="$identity" npx tauri build --bundles app,dmg 2>&1 | tail -n 8
+  dmg=$(ls target/release/bundle/dmg/*.dmg | head -n 1)
+  if [ -n "$identity" ]; then
+    codesign --verify --deep --strict target/release/bundle/macos/*.app
+    codesign --force --timestamp --sign "$identity" "$dmg"
+    xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait
+    xcrun stapler staple "$dmg"
+    spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+  fi
   mkdir -p target/desktop
   rm -rf "target/desktop/Ferrite Console.app"
-  cp -R target/release/bundle/macos/*.app target/release/bundle/dmg/*.dmg target/desktop/
+  cp -R target/release/bundle/macos/*.app "$dmg" target/desktop/
   ls -la target/desktop
   exit 0
 fi
