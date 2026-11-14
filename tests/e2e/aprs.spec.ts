@@ -152,3 +152,23 @@ test("Live View: APRS mode's large card shows the counts (heard, /hr) and the st
     await cmd("slot A active").catch(() => {});
   }
 });
+
+test("station graphs: what Console recorded, one chart a measure (decision 397)", async ({ page }, info) => {
+  test.skip(onRadio(), "the demo radio's heard list");
+  // Three readings an hour apart, kept from an earlier session
+  await page.addInitScript(() => {
+    const now = Date.now();
+    const s = (h: number, speed: number, temp: number) => ({ t: now - h * 3_600_000, speed, alt: 120 + h, temp, wind: null, gust: null, hum: null, hpa: null, rain: null });
+    localStorage.setItem("ferrite.history.v1", JSON.stringify({ VA3RTX: [s(3, 10, 4.5), s(2, 42, 6), s(1, 37, 7.5)] }));
+  });
+  await openConsole(page, "aprs-heard");
+  await connect(page);
+  await page.getByRole("button", { name: "Graphs for VA3RTX" }).click();
+  const g = page.locator('[data-k="graphs"]');
+  await expect(g.locator("figure")).toHaveCount(3); // speed, altitude, temperature: the measures it has
+  await expect(g.locator("figcaption").first()).toContainText("Speed");
+  await expect(g.getByRole("img", { name: /Temperature: \d+ readings/ })).toBeVisible();
+  await shot(page, info, "aprs-graphs");
+  await page.getByRole("button", { name: "Graphs for VA3RTX" }).click();
+  await expect(g).toHaveCount(0);
+});

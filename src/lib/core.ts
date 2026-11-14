@@ -548,6 +548,9 @@ export type Station = {
   path: string;
   comment: string;
 };
+/** APRS-23 (decision 397): a weather station's report, metric; null when the comment isn't one. */
+export type Wx = { dir: number | null; wind_kmh: number | null; gust_kmh: number | null; temp_c: number | null; rain_mm: number | null; hum: number | null; hpa: number | null };
+export const aprsWx = (comment: string): Wx | null => JSON.parse(wasm.aprs_wx(comment));
 export type MsgState = "unread" | "read" | "pending" | "acked" | "retrying" | "failed" | "rejected" | "cancelled";
 export type Message = { inbound: boolean; state: MsgState; state_n: number; tries: number; ago_s: number; peer: string; text: string };
 export type AprsEvent =
