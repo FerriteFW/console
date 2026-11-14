@@ -55,6 +55,7 @@ FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh all --host USER@HOST   
 
 - `FIRMWARE` names the Ferrite release to build in (its signed `.ffw` and the signed reader, `.minisig` beside it). Without it, `../ferrite/target`'s local build goes in.
 - The build box is reached over ssh and needs Docker; without `--host` it's ours.
+- It first checks `public/THIRD-PARTY-LICENSES.md` (About's third-party licences) against what the app links; after a dependency change run `python3 tools/thirdparty.py` and commit the file.
 - Out: `target/desktop/`. A release ships the `.dmg`, the `.AppImage` and the Windows portable `.exe`.
 - The builds aren't signed or notarized yet.
 

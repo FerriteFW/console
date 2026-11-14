@@ -22,6 +22,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 here=$(cd "$(dirname "$0")/.." && pwd)
+# The third-party notices About shows must match what this build links (tools/thirdparty.py).
+python3 "$here/tools/thirdparty.py" --check
 if [ "$what" = mac ]; then
   [ "$(uname)" = Darwin ] || { echo "mac: build on a Mac" >&2; exit 1; }
   cd "$here"
