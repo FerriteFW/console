@@ -1366,6 +1366,14 @@ pub fn aprs_wx(comment: &str) -> String {
     json(&ferrite_console_core::aprs::wx(comment))
 }
 
+/// SAT-23: each satellite's next pass over the place, for the tables: `records` the radio records end to end
+/// (`len` bytes each). JSON: an array of `satmap::Pass` or null.
+#[wasm_bindgen]
+pub fn sat_next_passes(records: &[u8], len: usize, now: u32, lat: f64, lon: f64) -> String {
+    let recs: Vec<Vec<u8>> = records.chunks(len.max(1)).map(<[u8]>::to_vec).collect();
+    json(&ferrite_console_core::satmap::next_passes(&recs, now, (lat, lon)))
+}
+
 /// SAT-23: a satellite on the map (core/src/satmap.rs): `record` the radio's satellite record, `now` UTC seconds, the
 /// place (degrees) when `has_place`. JSON: `satmap::SatMap`.
 #[wasm_bindgen]
