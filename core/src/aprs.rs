@@ -322,3 +322,42 @@ pub(crate) mod tests {
         assert_eq!(parse_event(&[ev::MSG, 1]), None);
     }
 }
+
+/// A weather station's report as station graphs plot it (APRS-23, decision 397): the fields at the start of its
+/// comment, read by the radio's own parser, in metric (km/h, °C, mm, hPa); None when the comment isn't one.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Wx {
+    pub dir: Option<u16>,
+    pub wind_kmh: Option<f32>,
+    pub gust_kmh: Option<f32>,
+    pub temp_c: Option<f32>,
+    pub rain_mm: Option<f32>,
+    pub hum: Option<u8>,
+    pub hpa: Option<f32>,
+}
+
+pub fn wx(comment: &str) -> Option<Wx> {
+    let w = ferrite_app::aprs::wx(comment.as_bytes())?;
+    let kmh = |mph: u16| (mph as f32 * 1.609_344 * 10.0).round() / 10.0;
+    Some(Wx {
+        dir: w.dir,
+        wind_kmh: w.wind.map(kmh),
+        gust_kmh: w.gust.map(kmh),
+        temp_c: w.temp_f.map(|f| ((f as f32 - 32.0) * 50.0 / 9.0).round() / 10.0),
+        rain_mm: w.rain.map(|h| (h as f32 * 0.254 * 10.0).round() / 10.0),
+        hum: w.hum,
+        hpa: w.baro.map(|b| b as f32 / 10.0),
+    })
+}
+
+#[cfg(test)]
+mod wx_tests {
+    /// Decision 397: a weather report's fields in metric; a plain comment is none.
+    #[test]
+    fn weather_in_metric() {
+        let w = super::wx("270/007g012t072r010p000P000h65b10123 Home WX").unwrap();
+        assert_eq!((w.dir, w.wind_kmh, w.gust_kmh, w.temp_c, w.rain_mm, w.hum, w.hpa), (Some(270), Some(11.3), Some(19.3), Some(22.2), Some(2.5), Some(65), Some(1012.3)));
+        assert!(super::wx("On the trail").is_none());
+    }
+}
+

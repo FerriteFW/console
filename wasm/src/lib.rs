@@ -1360,6 +1360,12 @@ pub fn presets_restore(text: &str) -> Result<String, JsError> {
 
 // Satellite mode (LINK-63 – LINK-65): core/src/sats.rs and wmm.rs.
 
+/// APRS-23 (decision 397): a weather station's comment read as weather, metric (JSON `aprs::Wx`), or "null".
+#[wasm_bindgen]
+pub fn aprs_wx(comment: &str) -> String {
+    json(&ferrite_console_core::aprs::wx(comment))
+}
+
 /// SAT-23: a satellite on the map (core/src/satmap.rs): `record` the radio's satellite record, `now` UTC seconds, the
 /// place (degrees) when `has_place`. JSON: `satmap::SatMap`.
 #[wasm_bindgen]

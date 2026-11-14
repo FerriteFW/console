@@ -1,6 +1,7 @@
 // The APRS console's state: the radio's heard list and messages (HEARD, MSGS: LINK-44), kept current by the
 // subscription's events (LINK-46) while an APRS page is open, sending a message (MSG_SEND: LINK-45), and the radio's
 // own position for distances (its GPS fix, else its fixed position). Ages become times when they arrive.
+import { history } from "./history.svelte";
 import { parsePlace, type AprsEvent, type Message, type Station } from "./core";
 import { RadioError } from "./link";
 import { radioPlace } from "./radioplace";
@@ -105,6 +106,7 @@ class Aprs {
       const h = await link.heard();
       this.heardCount = h.count;
       this.stations = h.stations.map((s) => ({ ...s, at: atOf(s.ago_s, now) })); // APRS-4: restored rows may have no time
+      for (const s of this.stations) history.record(s, s.at); // decision 397
       const m = await link.msgs();
       this.messages = m.messages.map((x) => ({ ...x, at: atOf(x.ago_s, now), id: nextId++ }));
       this.loaded = true;
@@ -141,6 +143,7 @@ class Aprs {
     if (ev.kind === "heard") {
       const s: HeardRow = { ...ev.station, at: atOf(ev.station.ago_s, now) };
       this.stations = [s, ...this.stations.filter((x) => x.call !== s.call)];
+      history.record(s, s.at); // decision 397
       this.heardCount = ev.count;
       this.events++;
     } else if (ev.kind === "message") {

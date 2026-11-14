@@ -5,9 +5,13 @@
   import { ago, aprs, compass, distance, when, type HeardRow } from "../aprs.svelte";
   import { radio } from "../radio.svelte";
   import { href, mapHref } from "../route.svelte";
+  import StationGraphs from "../components/StationGraphs.svelte";
+  import { history } from "../history.svelte";
 
   let now = $state(Date.now());
   let search = $state("");
+  // Decision 397: the station whose graphs are open
+  let open = $state<string | null>(null);
   const connected = $derived(radio.phase === "connected");
 
   $effect(() => aprs.use());
@@ -72,6 +76,14 @@
               <td class="nowrap">
                 {#if s.lat !== null}<a href={mapHref({ call: s.call })} title="On the map">{s.call}</a>{:else}{s.call}{/if}
                 <a class="msg" href={href("aprs-messages", { to: s.call })} title={`Message ${s.call}`} aria-label={`Message ${s.call}`}>✉</a>
+                <button
+                  class="graph"
+                  class:on={open === s.call}
+                  aria-expanded={open === s.call}
+                  title={`${s.call} over time (${history.of(s.call).length} readings recorded)`}
+                  aria-label={`Graphs for ${s.call}`}
+                  onclick={() => (open = open === s.call ? null : s.call)}>Graphs</button
+                >
               </td>
               <td class="nowrap">{s.symbol_name}</td>
               <td class="nowrap" title={when(s.at)}>{ago(s.at, now)}</td>
@@ -84,6 +96,9 @@
                 {#if s.alt_m !== null}<span class="dim"> · {s.alt_m} m</span>{/if}
               </td>
             </tr>
+            {#if open === s.call}
+              <tr class="graphs-row"><td colspan="7"><StationGraphs call={s.call} /></td></tr>
+            {/if}
           {:else}
             <tr><td colspan="7" class="empty">{aprs.stations.length ? "No station matches." : "No stations heard yet."}</td></tr>
           {/each}
@@ -100,6 +115,22 @@
   a.btn {
     color: var(--text);
     text-decoration: none;
+  }
+  .graph {
+    margin-left: 6px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--sub);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0 5px;
+    cursor: pointer;
+  }
+  .graph:hover,
+  .graph.on {
+    color: var(--blue);
+    border-color: var(--blue);
   }
   .msg {
     margin-left: 6px;
