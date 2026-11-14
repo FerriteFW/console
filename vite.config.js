@@ -66,8 +66,19 @@ export default defineConfig(({ mode }) => ({
   clearScreen: false,
   // Tauri's dev server convention: a fixed port the shell loads (src-tauri/tauri.conf.json devUrl).
   server: { port: 1420, strictPort: true, fs: { allow: [".", ferrite] } },
-  build:
-    mode === "single"
+  build: {
+    ...(mode === "single"
       ? { target: "es2022", outDir: "dist-single", assetsInlineLimit: 100_000_000, copyPublicDir: false }
-      : { target: "es2022", assetsInlineLimit: 0 },
+      : { target: "es2022", assetsInlineLimit: 0 }),
+    // An import with no matching export is only a warning to the bundler, which then writes `void 0` in its place:
+    // the build ends here instead. (Linux 0.8.5 bundled a stale wasm core and failed at run time with
+    // "(void 0) is not a function" when connecting to a radio on another protocol.)
+    rolldownOptions: {
+      onLog(level, log, handler) {
+        // handler("error", log) only prints it (rolldown 1.0): throw
+        if (log.code === "IMPORT_IS_UNDEFINED" || log.code === "MISSING_EXPORT") throw new Error(`${log.code}: ${log.message}`);
+        else handler(level, log);
+      },
+    },
+  },
 }));
