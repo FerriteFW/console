@@ -7,6 +7,7 @@
   // of their own, switched on and off here (remembered on this computer).
   import { aprs, ago, compass, distance } from "../aprs.svelte";
   import { degrees, SOURCE_WORDS, waypoints } from "../lists.svelte";
+  import { canLocate, here as computerHere } from "../here";
   import { radio } from "../radio.svelte";
   import { ATTRIBUTION, loadLeaflet, TILES, type Leaflet, type LLayer, type LMap, type LMarker } from "../leaflet";
   import { route } from "../route.svelte";
@@ -83,12 +84,8 @@
   const focus = $derived(route.params.get("call")?.toUpperCase() ?? null);
   let here = $state<[number, number] | null>(null);
   $effect(() => {
-    if (aprs.me || here || typeof navigator === "undefined" || !navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (p) => (here = [p.coords.latitude, p.coords.longitude]),
-      () => {},
-      { timeout: 10_000, maximumAge: 600_000 },
-    );
+    if (aprs.me || here || !canLocate) return;
+    computerHere().then((p) => (here = [p.lat, p.lon]), () => {}); // decision 398: the Mac app's too
   });
   let fitted = "";
 

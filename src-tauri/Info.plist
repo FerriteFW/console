@@ -4,5 +4,9 @@
 <dict>
   <key>NSBluetoothAlwaysUsageDescription</key>
   <string>Ferrite Console connects to your radio over Bluetooth.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Ferrite Console uses your location for Near me, the APRS map and satellite passes. It stays on this computer.</string>
+  <key>NSLocationUsageDescription</key>
+  <string>Ferrite Console uses your location for Near me, the APRS map and satellite passes. It stays on this computer.</string>
 </dict>
 </plist>

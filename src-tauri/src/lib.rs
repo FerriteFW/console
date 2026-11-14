@@ -12,6 +12,7 @@
 
 mod ble;
 mod debug;
+mod locate;
 mod serial;
 
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -241,6 +242,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            locate::here,
             serial_ports,
             ble_scan_start,
             transport_unlock,
