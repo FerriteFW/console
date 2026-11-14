@@ -57,6 +57,7 @@ pub mod plan;
 pub mod presets;
 pub mod radioside;
 pub mod records;
+pub mod satmap;
 pub mod sats;
 pub mod session;
 pub mod settings;
