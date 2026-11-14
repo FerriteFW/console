@@ -7,6 +7,7 @@ import {
   authPayload,
   baudPayload,
   helloPayload,
+  helloPayloadPlain,
   keyPayload,
   knobPayloads,
   logReadPayload,
@@ -69,15 +70,6 @@ type Waiter = { ty: number; seq: number; resolve: (a: Answer) => void };
 /** LINK-50: frames of one STREAM, numbered from its request's seq. */
 type StreamWaiter = { seq: number; frames: Uint8Array[]; done: (gap: boolean) => void; poke: () => void; onFrame?: (f: Uint8Array) => void };
 
-/** LINK-35.2: HELLO's caps bits. */
-export const CAP_STREAM = 1;
-export const CAP_WINDOW = 2;
-export const CAP_LZ = 4;
-export const CAP_DELETE_MANY = 8;
-/** LINK-13.4: receive audio over this port (the cable). */
-export const CAP_AUDIO = 16;
-/** LINK-19.5: the readback with the screen as drawn (`UI` what=3, the Live View's TEXTS flag). */
-export const CAP_TEXTS = 32;
 const STREAM = 0x19;
 const STREAM_MORE = 0x1a;
 
@@ -87,14 +79,11 @@ export class Link {
   private streamW: StreamWaiter | null = null;
   /** LINK-15.1: the module's `!!!!` answer to the speed unlock is dropped, not fed to the session. */
   private dropUnlock = false;
-  /** LINK-35.2: what the radio does beyond protocol 2 (HELLO). */
+  /** LINK-35.2: HELLO's capability byte (`P.caps`: compression granted, receive audio on this port, line commands). */
   caps = 0;
-  /** LINK-35.2: the second capability byte (1 range preset skip lists, LINK-58; 2 protocol 3's raw data and layouts);
-   *  0 from older firmware. */
-  caps2 = 0;
-  /** HELLO's protocol (3: 2-byte zones, the layouts; LINK-62). */
+  /** HELLO's protocol: `P.protocol`, or the radio can only be updated (decision 385; see `current`). */
   protocol = 0;
-  /** LINK-62: the layouts HELLO gave (this firmware's, the chip's); null from a radio before protocol 3. */
+  /** LINK-62: the layouts HELLO gave (this firmware's, the chip's); null from a radio on another protocol. */
   layouts: Layouts | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private holdUntil = 0;
@@ -211,7 +200,7 @@ export class Link {
       this.waiters.delete(seq);
       // A frame sent just after a restart or 10 s of quiet can go to the terminal (TERM-2): a read-only request is
       // sent once more after a 0x00. Never a KEY, CMD, MORE or write: those would act twice or skip a chunk.
-      if (!resynced && this.caps & CAP_LZ && ty !== HELLO) {
+      if (!resynced && this.caps & P.caps.LZ && ty !== HELLO) {
         resynced = true; // LINK-51: the windows may be apart: start them over, then ask again
         await this.resync();
         continue;
@@ -244,27 +233,46 @@ export class Link {
     return this.exclusive(() => this.okRaw(ty, payload, timeoutMs));
   }
 
+  /** The radio speaks this Console's protocol (decision 385); otherwise it is only good for an update. */
+  get current(): boolean {
+    return this.protocol === P.protocol;
+  }
+
+  /**
+   * HELLO. A radio on another protocol (decision 385: Ferrite 0.8.4 says 3) is asked once more without
+   * compression: its capability byte means other things, so Console can't tell whether it granted it, and the
+   * update needs plain frames (REBOOT).
+   */
   async hello(): Promise<Hello> {
-    return this.noteHello(await this.ok(P.msg.HELLO, helloPayload(CLIENT_NAME)));
+    return this.exclusive(async () => {
+      const h = this.noteHello(await this.okRaw(P.msg.HELLO, helloPayload(CLIENT_NAME)));
+      if (this.current) return h;
+      return this.noteHello(await this.okRaw(P.msg.HELLO, helloPayloadPlain(CLIENT_NAME)));
+    });
   }
 
   /** LINK-35.2, LINK-51: a HELLO answer's caps; compression on from here when it granted it (both windows new). */
   private noteHello(rest: Uint8Array): Hello {
     const h = parseHello(rest);
     if (!h) throw new Error("The radio's HELLO answer didn't parse.");
-    this.caps = h.caps ?? 0;
-    this.caps2 = h.caps2 ?? 0;
     this.protocol = h.protocol;
+    this.caps = this.current ? h.caps : 0;
     this.layouts = h.layouts ?? null;
-    this.session.set_lz((this.caps & CAP_LZ) !== 0);
+    this.session.set_lz((this.caps & P.caps.LZ) !== 0);
     return h;
+  }
+
+  /** A HELLO after the first (a resync, a new rate): as the first, without compression from a radio on another
+   *  protocol. */
+  private helloAgain() {
+    return this.current ? helloPayload(CLIENT_NAME) : helloPayloadPlain(CLIENT_NAME);
   }
 
   /** LINK-51: after a lost frame while compressed, a HELLO starts both ends' windows over. */
   private async resync() {
-    if (!(this.caps & CAP_LZ)) return;
+    if (!(this.caps & P.caps.LZ)) return;
     await sleep(300);
-    const { status, rest } = await this.askRaw(P.msg.HELLO, helloPayload(CLIENT_NAME), undefined, false);
+    const { status, rest } = await this.askRaw(P.msg.HELLO, this.helloAgain(), undefined, false);
     if (status === 0) this.noteHello(rest);
   }
 
@@ -288,14 +296,14 @@ export class Link {
       this.dropUnlock = false;
       for (let i = 0; i < 3; i++) {
         try {
-          const { rest } = await this.askRaw(HELLO, helloPayload(CLIENT_NAME), undefined, false);
+          const { rest } = await this.askRaw(HELLO, this.helloAgain(), undefined, false);
           this.noteHello(rest);
           return unlocked ? 115200 : 9600;
         } catch {
           await sleep(500);
         }
       }
-      this.noteHello(await this.okRaw(HELLO, helloPayload(CLIENT_NAME)));
+      this.noteHello(await this.okRaw(HELLO, this.helloAgain()));
       return 9600;
     });
   }
@@ -403,7 +411,7 @@ export class Link {
   }
 
   async info(): Promise<Info> {
-    const i = parseInfo(await this.ok(P.msg.INFO), this.protocol);
+    const i = parseInfo(await this.ok(P.msg.INFO));
     if (!i) throw new Error("The radio's INFO answer didn't parse.");
     return i;
   }
@@ -412,7 +420,7 @@ export class Link {
    * stops the paging early (the radio's next command ends what is left). */
   text(ty: number, payload: Uint8Array, enough?: (soFar: string) => boolean): Promise<string> {
     return this.exclusive(async () => {
-      if (ty === P.msg.UI && this.caps & CAP_STREAM) {
+      if (ty === P.msg.UI) {
         // LINK-50: the pages back to back; a lost one asks the whole readback again
         for (let i = 0; i < 3; i++) {
           try {
@@ -422,6 +430,7 @@ export class Link {
             if (!(e instanceof StreamGap)) throw e;
           }
         }
+        throw new StreamGap([]);
       }
       let out = "";
       let rest = await this.okRaw(ty, payload);
@@ -436,9 +445,8 @@ export class Link {
     });
   }
 
-  /** What the screen shows (LINK-19's readback): 0 the state; 3 with the screen as drawn (LINK-19.5), the default
-   * where the radio has it. */
-  uiText(what = this.caps & CAP_TEXTS ? 3 : 0) {
+  /** What the screen shows (LINK-19's readback): 0 the state; 3 with the screen as drawn (LINK-19.5), the default. */
+  uiText(what = 3) {
     return this.text(P.msg.UI, new Uint8Array([what]));
   }
 
@@ -486,14 +494,14 @@ export class Link {
         await sleep(baud_switch_ms);
         await t.setBaud!(rate);
         try {
-          await this.askRaw(HELLO, helloPayload(CLIENT_NAME), Math.max(200, baud_fallback_ms - (performance.now() - at) - 100), false);
+          await this.askRaw(HELLO, this.helloAgain(), Math.max(200, baud_fallback_ms - (performance.now() - at) - 100), false);
           return rate;
         } catch {
           await t.setBaud!(cable_baud);
           const left = baud_fallback_ms + 300 - (performance.now() - at);
           if (left > 0) await sleep(left);
           await t.write(this.session.take_cable(performance.now()));
-          await this.okRaw(HELLO, helloPayload(CLIENT_NAME));
+          await this.okRaw(HELLO, this.helloAgain());
         }
       }
       return t.baud ?? cable_baud;
@@ -516,7 +524,7 @@ export class Link {
       await sleep(baud_switch_ms);
       await t.setBaud!(cable_baud);
       try {
-        await this.askRaw(HELLO, helloPayload(CLIENT_NAME), 800, false);
+        await this.askRaw(HELLO, this.helloAgain(), 800, false);
       } catch {
         /* the radio falls back to 115200 by itself without it (LINK-11) */
       }
@@ -681,8 +689,7 @@ export class Link {
   /**
    * LINK-53: channel positions written (`WRITE_MANY` of what 7): each the channel's index (its number minus 1) and
    * its 8-byte record, or 0 bytes to clear it. 21 to a frame (MAX_PAYLOAD 240); `busy` goes again from the first
-   * not applied; a refusal throws with the radio's reason. `progress(done)` as frames are answered. Only for a radio
-   * whose HELLO says caps 64.
+   * not applied; a refusal throws with the radio's reason. `progress(done)` as frames are answered.
    */
   writePositions(recs: { index: number; record: Uint8Array }[], progress?: (done: number) => void): Promise<void> {
     return this.writeRecords(P.what.POSITION, recs, progress);
@@ -752,67 +759,45 @@ export class Link {
         }
         return d.getUint16(0, true);
       };
-      if (this.caps & CAP_STREAM) {
-        // LINK-50: one request, the answers back to back; after a lost frame, again from the last one that came
-        for (let tries = 0; tries < 8 && at < end; tries++) {
-          const p = new Uint8Array(5);
-          const v = new DataView(p.buffer);
-          p[0] = what;
-          v.setUint16(1, at, true);
-          v.setUint16(3, Math.min(end - at, 0xffff), true);
-          let frames: Uint8Array[];
-          let whole = true;
-          // Each answer is taken as it arrives, so progress moves during the stream, not after it.
-          let taken = 0;
-          const each = (f: Uint8Array) => {
-            at = Math.max(at, take(f));
-            taken++;
-            progress?.(at, out.size);
-          };
-          try {
-            frames = await this.streamRaw(P.msg.READ_MANY, p, each);
-          } catch (e) {
-            if (!(e instanceof StreamGap)) throw e;
-            [frames, whole] = [e.got, false];
-          }
-          // Any frames not seen by `each` (none normally) are taken now; the error frame (0xff) is not a record.
-          for (const f of frames.slice(taken)) {
-            if (f[0] === 0xff) continue;
-            at = Math.max(at, take(f));
-            progress?.(at, out.size);
-          }
-          if (whole) return out;
-        }
-        throw new StreamGap([]);
-      }
-      while (at < end) {
+      // LINK-50: one request, the answers back to back; after a lost frame, again from the last one that came
+      for (let tries = 0; tries < 8 && at < end; tries++) {
         const p = new Uint8Array(5);
         const v = new DataView(p.buffer);
         p[0] = what;
         v.setUint16(1, at, true);
         v.setUint16(3, Math.min(end - at, 0xffff), true);
-        const a = await this.okRaw(P.msg.READ_MANY, p);
-        const d = new DataView(a.buffer, a.byteOffset, a.byteLength);
-        const next = d.getUint16(0, true);
-        let o = 2;
-        while (o + 3 <= a.length) {
-          const i = d.getUint16(o, true);
-          const n = a[o + 2];
-          out.set(i, a.slice(o + 3, o + 3 + n));
-          o += 3 + n;
+        let frames: Uint8Array[];
+        let whole = true;
+        // Each answer is taken as it arrives, so progress moves during the stream, not after it.
+        let taken = 0;
+        const each = (f: Uint8Array) => {
+          at = Math.max(at, take(f));
+          taken++;
+          progress?.(at, out.size);
+        };
+        try {
+          frames = await this.streamRaw(P.msg.READ_MANY, p, each);
+        } catch (e) {
+          if (!(e instanceof StreamGap)) throw e;
+          [frames, whole] = [e.got, false];
         }
-        if (next <= at) break; // the radio's last index
-        at = next;
-        progress?.(at, out.size);
+        // Any frames not seen by `each` (none normally) are taken now; the error frame (0xff) is not a record.
+        for (const f of frames.slice(taken)) {
+          if (f[0] === 0xff) continue;
+          at = Math.max(at, take(f));
+          progress?.(at, out.size);
+        }
+        if (whole) return out;
       }
-      return out;
+      if (at >= end) return out;
+      throw new StreamGap([]);
     });
   }
 
   /** LINK-46: SUBSCRIBE (mask 0 ends it); `renew` keeps it as it is (a keepalive). The dictionary version. */
   async subscribe(mask: number, renew = false): Promise<number> {
-    // LINK-19.5: the Live View with the screen as drawn, where the radio has it (every screen then shows whole)
-    const texts = (mask & 4) !== 0 && (this.caps & CAP_TEXTS) !== 0;
+    // LINK-19.5: the Live View with the screen as drawn (every screen then shows whole)
+    const texts = (mask & 4) !== 0;
     const rest = await this.ok(P.msg.SUBSCRIBE, subscribePayload(mask, 0, renew, texts));
     return rest[1] ?? 0;
   }
@@ -822,29 +807,21 @@ export class Link {
     return this.exclusive(async () => {
       const stations: Station[] = [];
       let count = 0;
-      if (this.caps & CAP_STREAM) {
-        for (let tries = 0; tries < 6; tries++) {
-          try {
-            for (const f of await this.streamRaw(P.msg.HEARD, new Uint8Array([0]))) {
-              const h = parseHeard(f);
-              if (!h) throw new Error("A HEARD answer didn't parse.");
-              count = h.count;
-              stations.push(...h.stations);
-            }
-            return { count, stations };
-          } catch (e) {
-            if (!(e instanceof StreamGap)) throw e;
-            stations.length = 0;
+      for (let tries = 0; tries < 6; tries++) {
+        try {
+          for (const f of await this.streamRaw(P.msg.HEARD, new Uint8Array([0]))) {
+            const h = parseHeard(f);
+            if (!h) throw new Error("A HEARD answer didn't parse.");
+            count = h.count;
+            stations.push(...h.stations);
           }
+          return { count, stations };
+        } catch (e) {
+          if (!(e instanceof StreamGap)) throw e;
+          stations.length = 0;
         }
       }
-      for (;;) {
-        const h = parseHeard(await this.okRaw(P.msg.HEARD, new Uint8Array([Math.min(stations.length, 255)])));
-        if (!h) throw new Error("A HEARD answer didn't parse.");
-        count = h.count;
-        stations.push(...h.stations);
-        if (!h.stations.length || stations.length >= count || stations.length >= 255) return { count, stations };
-      }
+      throw new StreamGap([]);
     });
   }
 
@@ -853,30 +830,21 @@ export class Link {
     return this.exclusive(async () => {
       const messages: Message[] = [];
       let count = 0;
-      if (this.caps & CAP_STREAM) {
-        for (let tries = 0; tries < 6; tries++) {
-          try {
-            for (const f of await this.streamRaw(P.msg.MSGS, new Uint8Array([0, 0]))) {
-              const m = parseMsgs(f);
-              if (!m) throw new Error("A MSGS answer didn't parse.");
-              count = m.count;
-              messages.push(...m.messages);
-            }
-            return { count, messages };
-          } catch (e) {
-            if (!(e instanceof StreamGap)) throw e;
-            messages.length = 0;
+      for (let tries = 0; tries < 6; tries++) {
+        try {
+          for (const f of await this.streamRaw(P.msg.MSGS, new Uint8Array([0, 0]))) {
+            const m = parseMsgs(f);
+            if (!m) throw new Error("A MSGS answer didn't parse.");
+            count = m.count;
+            messages.push(...m.messages);
           }
+          return { count, messages };
+        } catch (e) {
+          if (!(e instanceof StreamGap)) throw e;
+          messages.length = 0;
         }
       }
-      for (;;) {
-        const p = new Uint8Array([messages.length & 0xff, messages.length >> 8]);
-        const m = parseMsgs(await this.okRaw(P.msg.MSGS, p));
-        if (!m) throw new Error("A MSGS answer didn't parse.");
-        count = m.count;
-        messages.push(...m.messages);
-        if (!m.messages.length || messages.length >= count) return { count, messages };
-      }
+      throw new StreamGap([]);
     });
   }
 
@@ -915,39 +883,27 @@ export class Link {
       let before = 0xffffffff;
       let next = 0;
       let held = 0;
-      if (this.caps & CAP_STREAM) {
-        // LINK-50: newest first, back to back; after a lost frame, again from below the last record that came
-        for (let tries = 0; tries < 8; tries++) {
-          let frames: Uint8Array[];
-          let whole = true;
-          try {
-            frames = await this.streamRaw(P.msg.LOG_READ, logReadPayload(before));
-          } catch (e) {
-            if (!(e instanceof StreamGap)) throw e;
-            [frames, whole] = [e.got, false];
-          }
-          for (const f of frames) {
-            const p = parseLogPage(f);
-            if (!p) throw new Error("A LOG_READ answer didn't parse.");
-            if (!records.length && before === 0xffffffff) [next, held] = [p.next, p.held];
-            records.push(...p.records);
-            if (p.records.length) before = p.records[p.records.length - 1].seq;
-          }
-          progress?.(records.length);
-          if (whole) return { next, held, records };
+      // LINK-50: newest first, back to back; after a lost frame, again from below the last record that came
+      for (let tries = 0; tries < 8; tries++) {
+        let frames: Uint8Array[];
+        let whole = true;
+        try {
+          frames = await this.streamRaw(P.msg.LOG_READ, logReadPayload(before));
+        } catch (e) {
+          if (!(e instanceof StreamGap)) throw e;
+          [frames, whole] = [e.got, false];
         }
-      }
-      for (let pages = 0; pages < 500; pages++) {
-        const p = parseLogPage(await this.okRaw(P.msg.LOG_READ, logReadPayload(before)));
-        if (!p) throw new Error("A LOG_READ answer didn't parse.");
-        if (pages === 0) [next, held] = [p.next, p.held];
-        if (!p.records.length) break;
-        records.push(...p.records);
+        for (const f of frames) {
+          const p = parseLogPage(f);
+          if (!p) throw new Error("A LOG_READ answer didn't parse.");
+          if (!records.length && before === 0xffffffff) [next, held] = [p.next, p.held];
+          records.push(...p.records);
+          if (p.records.length) before = p.records[p.records.length - 1].seq;
+        }
         progress?.(records.length);
-        before = p.records[p.records.length - 1].seq;
-        if (records.length >= p.held || before === 0) break;
+        if (whole) return { next, held, records };
       }
-      return { next, held, records };
+      throw new StreamGap([]);
     });
   }
 
@@ -964,7 +920,7 @@ export class Link {
         for (let i = 0; i < ops.length; ) {
           // LINK-41: channel and zone writes go as WRITE_MANY, several to a frame; deletes and the settings record
           // (bigger than a frame) as before.
-          const dels = this.caps & CAP_DELETE_MANY ? deleteRun(ops, i) : 0;
+          const dels = deleteRun(ops, i);
           if (dels > 0) {
             // LINK-41.2: channel deletes several to a WRITE_MANY (records of length 0)
             const body = new Uint8Array(1 + dels * 3);
@@ -983,13 +939,8 @@ export class Link {
             continue;
           }
           const run = manyRun(ops, i);
-          if (run > 0 && this.caps & CAP_WINDOW) {
-            i = await this.writeManyWindowed(ops, i, progress);
-            continue;
-          }
           if (run > 0) {
-            await this.writeMany(ops, i, run, progress);
-            i += run;
+            i = await this.writeManyWindowed(ops, i, progress);
             continue;
           }
           const op = ops[i];

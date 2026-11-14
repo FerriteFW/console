@@ -71,8 +71,10 @@ test("read: the APRS record as MENU 0 5 shows it", async ({}, info) => {
   for (const id of ["0 5 5 6 Ambiguity", "0 5 5 7 Mic-E", "0 5 9 3 TX delay", "0 5 9 4 TX level"])
     await expect(page.getByRole("group", { name: id, exact: true })).toBeVisible();
   await expect(page.getByLabel("0 5 6 4 Telemetry", { exact: true }).locator("option")).toHaveText(["Off", "On"]);
+  // APRS-50.1 (0.8.5): the beacon text rate, from the record's last byte
+  await expect(page.getByLabel("0 5 6 5 Text rate", { exact: true }).locator("option")).toHaveText(["All", "1/2", "1/4", "1/8"]);
   // the settings record's MENU 0 5 settings, named from the core
-  await expect(page.getByText(/^In Radio Settings \(the settings record\): 0 5 3 APRS mode, .*0 5 9 7 Shared VHF\.$/)).toBeVisible();
+  await expect(page.getByText(/^In Radio Settings \(the settings record\): 0 5 3 APRS mode, .*0 5 9 7 Shared VHF, 0 5 9 8 Decode log\.$/)).toBeVisible();
   await shot(page, info, "aprs-settings-01-read");
 });
 

@@ -217,16 +217,18 @@ class Firmware {
     if (this.stage !== "failed") this.stage = "pick";
   }
 
-  /** The whole update, from a connected Ferrite radio on the cable. */
+  /** The whole update, from a connected Ferrite radio on the cable (or one on another link protocol: decision 385,
+   *  which knows only HELLO and REBOOT from here). */
   async start() {
     if (this.running || !this.bytes) return;
     const info = radio.info;
+    const hello = radio.hello;
     const got = radio.takeForUpdate();
     if (!got) {
       this.error = "Connect the radio over the cable first.";
       return;
     }
-    this.before = { firmware: info?.firmware ?? "?", build: info?.build?.name ?? "" };
+    this.before = { firmware: info?.firmware ?? hello?.firmware ?? "?", build: info?.build?.name ?? hello?.build?.name ?? "" };
     this.after = null;
     this.error = "";
     this.canResume = false;
@@ -420,6 +422,7 @@ class Firmware {
       }
     }
     await radio.handBack(t);
+    if (radio.phase === "outdated") throw new Error(`The radio restarted, but ${radio.mismatch?.text ?? "it speaks another link protocol."}`);
     if (radio.phase !== "connected") throw new Error(radio.error || "Connecting again failed.");
     const l = radio.hello?.layouts;
     if (l && l.firmware !== l.chip) {

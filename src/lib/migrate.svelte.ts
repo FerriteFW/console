@@ -163,7 +163,6 @@ class Migrate {
       // A try of ours cut after writing (the radio says 255, half moved, until the stamp): only the copy counts.
       const resume = k && k.state === "writing" && (!uid || k.uid === uid) ? k : undefined;
       if (!pending && !resume && !this.picked) throw new Error("The radio's data is already in its firmware's layout: nothing to finish.");
-      if (!(link.caps2 & P.caps2.DATA)) throw new Error("This firmware can't move data over the link: update it first.");
       const fromFile = () => {
         const c = MigrateCopy.from_file(this.picked!.bytes);
         const v = c.layout();

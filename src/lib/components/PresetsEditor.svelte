@@ -47,9 +47,7 @@
     if (p) channels.editPreset(p.number, k, v);
   }
 
-  // The skip list: a radio connected without LINK-58 (no caps2 bit) can't take it; offline it is edited for a file.
-  const link = $derived(radio.connectedLink);
-  const noSkips = $derived(!!link && (link.caps2 & P.caps2.PRESET_SKIPS) === 0);
+  // The skip list (LINK-58); offline it is edited for a file.
   const skips = $derived(p?.skips ?? []);
   let skipText = $state("");
   let skipNote = $state("");
@@ -157,12 +155,6 @@
           This range's scan passes over these. On the radio, <b>#</b> on a hit adds one for good (<b>*</b> skips it for this scan only,
           MENU 0 1 5).
         </p>
-        {#if noSkips}
-          <p class="note" data-testid="skips-old-firmware">
-            This radio's firmware doesn't share skip lists over the link: update Ferrite. The radio keeps its own with this preset; a list
-            here stays in the table and in .ferrite files.
-          </p>
-        {/if}
         {#if skips.length}
           <ul class="skiplist" aria-label="Skipped frequencies of this preset">
             {#each skips as f, i (i)}
@@ -385,9 +377,6 @@
   }
   .skips p:last-child {
     margin: 0;
-  }
-  .skips .note {
-    color: var(--amber);
   }
   .skips .err {
     color: var(--red);

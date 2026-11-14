@@ -117,12 +117,10 @@ pub fn protocol() -> String {
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION,
                   "QUICK": what::QUICK, "WAYPOINT": what::WAYPOINT, "DTMF": what::DTMF, "PRESET_SKIPS": what::PRESET_SKIPS,
                   "SAT": what::SAT, "SAT_INFO": what::SAT_INFO, "RADIO": what::RADIO },
-        "caps2": { "PRESET_SKIPS": ferrite_console_core::link::caps2::PRESET_SKIPS, "DATA": ferrite_console_core::link::caps2::DATA,
-                   "SATS": ferrite_console_core::link::caps2::SATS, "RADIO": ferrite_console_core::link::caps2::RADIO,
-                   "LINE_CMDS": ferrite_console_core::link::caps2::LINE_CMDS, "STATE": ferrite_console_core::link::caps2::STATE, "BEACON": ferrite_console_core::link::caps2::BEACON },
         "limits": { "channels": channels::MAX_CHANNELS, "zones": ferrite_console_core::radioside::MAX_ZONES, "zoneCap": channels::ZONE_CAP,
                     "contacts": lists::CONTACT_MAX, "waypoints": lists::WAYPOINT_MAX, "sats": sats::MAX },
-        "caps": { "POSITION": ferrite_console_core::link::caps::POSITION, "LISTS": ferrite_console_core::link::caps::LISTS },
+        "protocol": ferrite_console_core::link::PROTOCOL,
+        "caps": { "LZ": ferrite_console_core::link::caps::LZ, "AUDIO": ferrite_console_core::link::caps::AUDIO, "LINE_CMDS": ferrite_console_core::link::caps::LINE_CMDS },
         "waypointAdd": lists::WAYPOINT_ADD,
         "satAll": ferrite_console_core::link::ADD,
         "event": { "SUB_HEARD": event::SUB_HEARD, "SUB_MSGS": event::SUB_MSGS, "SUB_UI": event::SUB_UI, "SUB_LOG": event::SUB_LOG, "SUB_STATE": event::SUB_STATE, "STATE": event::STATE, "LOG": event::LOG, "HEARD": event::HEARD,
@@ -144,6 +142,12 @@ pub fn hello_payload(name: &str) -> Vec<u8> {
     answers::hello_payload(name)
 }
 
+/// `HELLO`'s payload asking for compression or not (a radio on another protocol is asked again without it).
+#[wasm_bindgen]
+pub fn hello_payload_lz(name: &str, lz: bool) -> Vec<u8> {
+    answers::hello_payload_lz(name, lz)
+}
+
 #[wasm_bindgen]
 pub fn auth_payload(pin: &str) -> Vec<u8> {
     answers::auth_payload(pin)
@@ -160,10 +164,10 @@ pub fn parse_hello(rest: &[u8]) -> String {
     json(&answers::Hello::parse(rest))
 }
 
-/// `INFO`'s answer as JSON, or null; `protocol` is `HELLO`'s (3: 2-byte zone count and the layouts).
+/// `INFO`'s answer as JSON, or null.
 #[wasm_bindgen]
-pub fn parse_info(rest: &[u8], protocol: u8) -> String {
-    json(&answers::Info::parse(rest, protocol))
+pub fn parse_info(rest: &[u8]) -> String {
+    json(&answers::Info::parse(rest))
 }
 
 #[wasm_bindgen]
@@ -1327,10 +1331,10 @@ pub fn new_preset(number: u8, name: &str) -> String {
 
 /// The presets write plan from the radio's to the table's (JSON lists of presets).
 #[wasm_bindgen]
-pub fn presets_plan(base: &str, want: &str, skips: bool) -> Result<String, JsError> {
+pub fn presets_plan(base: &str, want: &str) -> Result<String, JsError> {
     let b: Vec<ferrite_console_core::presets::PresetView> = from_json(base, "base")?;
     let w: Vec<ferrite_console_core::presets::PresetView> = from_json(want, "table")?;
-    Ok(json(&ferrite_console_core::presets::plan(&b, &w, skips)))
+    Ok(json(&ferrite_console_core::presets::plan(&b, &w)))
 }
 
 /// SCAN-10: a skipped frequency typed in MHz, as 10 Hz, or undefined.

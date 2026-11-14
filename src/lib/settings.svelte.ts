@@ -31,10 +31,8 @@ export type SettingsWriteStep =
 export const same = (a: Uint8Array | null, b: Uint8Array | null) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
 
 /** The settings the settings record doesn't carry (Watch, Battery Save), as the radio holds them: its radio record
- * (LINK-66, decision 347). A radio without one (the demo radio, an older firmware) gives none: those settings then
- * show as not read. */
+ * (LINK-66, decision 347). A radio that refuses it gives none: those settings then show as not read. */
 export async function readExtras(link: Link): Promise<Extras> {
-  if (!(link.caps2 & P.caps2.RADIO)) return {};
   try {
     const rec = await link.readRecord(P.what.RADIO, 0);
     return rec ? extrasFromRadio(rec) : {};

@@ -106,10 +106,9 @@ class Satellites {
   /** The link each connect's check ran for (once a connection). */
   private syncedFor: Link | null = null;
 
-  /** The connected radio says it takes satellites (LINK-63, `caps2::SATS`). */
+  /** A radio is connected: it takes satellites (LINK-63). */
   get supported(): boolean {
-    const l = radio.connectedLink;
-    return !!l && (l.caps2 & P.caps2.SATS) !== 0;
+    return !!radio.connectedLink;
   }
 
   /** sats.json (once; again by `loadFile(true)`). The picks start as every active satellite, 32 at most. */

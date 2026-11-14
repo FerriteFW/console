@@ -88,9 +88,9 @@
     { id: "about", name: "About" },
   ];
   const all: Page[] = [...sections.flatMap((x) => x.tabs ?? [{ id: x.id, name: x.name }]), ...more];
-  // Decision 347: a user build has no line commands, so no Terminal while one is connected (caps2 LINE_CMDS).
+  // Decision 347: a user build has no line commands, so no Terminal while one is connected (HELLO's LINE_CMDS).
   const moreShown = $derived(
-    more.filter((p) => p.id !== "terminal" || !radio.connectedLink || (radio.connectedLink.caps2 & P.caps2.LINE_CMDS) !== 0),
+    more.filter((p) => p.id !== "terminal" || !radio.connectedLink || (radio.connectedLink.caps & P.caps.LINE_CMDS) !== 0),
   );
   const sectionOf = (id: string) => sections.find((x) => x.id === id || x.tabs?.some((t) => t.id === id));
   const hrefOf = (x: Section) => `#/${x.tabs ? x.tabs[0].id : x.id}`;
@@ -156,7 +156,7 @@
   let welcome = $state(!params.has("demo") && location.hash !== "#install");
   let closedByConnect = false;
   $effect(() => {
-    const up = radio.phase === "connected" || radio.phase === "updating";
+    const up = radio.phase === "connected" || radio.phase === "outdated" || radio.phase === "updating";
     // Closed as soon as the port or radio is open (Live View says "Connecting…" meanwhile); a connect that then
     // fails before it's up brings the welcome back with the error.
     if (up) closedByConnect = false;
@@ -293,6 +293,11 @@
     background: var(--toast);
     box-shadow: var(--shadow);
     font-size: 13px;
+  }
+  /* A page's own notice (Channels' or a list's Undo) sits at the same place: this one moves up above it, so
+     neither covers the other's buttons. */
+  :global(body:has(.toast[aria-live]:not([data-sat-toast]))) .toast {
+    bottom: 76px;
   }
   .x {
     background: none;

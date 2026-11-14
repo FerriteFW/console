@@ -41,8 +41,8 @@ const FILES: { file: string; tag: string; skipped: number; notes: RegExp[]; want
   {
     file: "chirp-radio-export.csv",
     tag: "CHIRP",
-    skipped: 2,
-    notes: [/line 10: mode WFM.*skipped/, /line 11: mode DV.*skipped/],
+    skipped: 1, // the DV row; WFM is a channel mode and imports (BCR-33)
+    notes: [/line 11: mode DV.*skipped/],
     want: [
       { name: "CALL 2M", rx: "146.52000", duplex: "", tx_tone: "off", rx_tone: "off", mode: "FM", power: "High" },
       { name: "NSHORE", rx: "146.94000", duplex: "-", offset: "0.60000", tx_tone: "127.3", rx_tone: "off" },
@@ -52,6 +52,7 @@ const FILES: { file: string; tag: string; skipped: number; notes: RegExp[]; want
       { name: "DCS RPT", rx: "443.25000", duplex: "+", offset: "5.00000", tx_tone: "D023N", rx_tone: "D023N", mode: "FM" },
       { name: "DCS REV", rx: "442.70000", tx_tone: "D754I", rx_tone: "D754N", mode: "NFM" },
       { name: "SAT UP", rx: "145.80000", duplex: "split", offset: "437.80000", skip: true },
+      { name: "CBC VAN", rx: "88.10000", mode: "WFM" },
       { name: "WX VAN", rx: "162.55000", rx_only: true, skip: true, power: "Low" },
       { name: "SIMPLEX 2", rx: "147.55500", duplex: "", power: "Low" },
     ],
@@ -182,7 +183,7 @@ for (const fx of FILES) {
 
       await page.locator('input[type=file][accept^=".csv"]').setInputFiles(fixture(fx.file));
       await expect(imp()).toBeVisible();
-      await expect(imp()).toContainText(`${fx.want.length} channels${fx.skipped ? `, ${fx.skipped} lines skipped` : ""}.`);
+      await expect(imp()).toContainText(`${fx.want.length} channels${fx.skipped ? `, ${fx.skipped} line${fx.skipped === 1 ? "" : "s"} skipped` : ""}.`);
       for (const n of fx.notes) await expect(imp().locator(".notes li").filter({ hasText: n })).toHaveCount(1);
       const opt = imp().getByRole("radio", { name: "Add as new channels in a new zone" });
       // The default when the file's numbers clash with the table's.

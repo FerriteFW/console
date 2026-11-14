@@ -304,7 +304,7 @@
               <b>Reading the screen…</b>
             {:else}
               <b>Ready to connect</b>
-              <span>Cable or Bluetooth, at the top.{#if DEV} No radio? Try the demo radio.{/if}</span>
+              <span>Cable or Bluetooth, at the top.{#if DEV}{" "}No radio? Try the demo radio.{/if}</span>
             {/if}
           </div>
         {/if}

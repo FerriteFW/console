@@ -204,7 +204,7 @@
   <section>
     <h4>
       Heard now
-      {#if connected && (radio.connectedLink?.caps2 ?? 0) & P.caps2.BEACON}
+      {#if connected}
         <button class="beacon" title="Send a position beacon now (as the radio's Beacon now)" onclick={() => radio.beaconNow()}>Beacon now</button>
       {/if}
     </h4>

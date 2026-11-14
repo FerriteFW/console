@@ -12,7 +12,8 @@
   let wizard = $state(false);
   const bridge = bridgeEnabled();
 
-  const connected = $derived(radio.phase === "connected");
+  // A radio on another link protocol (decision 385) is connected for this page alone.
+  const connected = $derived(radio.phase === "connected" || radio.phase === "outdated");
   const onCable = $derived(connected && radio.kind === "cable");
   const holding = $derived(radio.phase === "updating");
   const check = $derived(firmware.check);
@@ -30,7 +31,7 @@
     if (firmware.running || (firmware.stage === "failed" && holding)) wizard = true;
   });
   const bare = (v: string) => v.trim().replace(/^v/i, "");
-  const mine = $derived(radio.info?.firmware ?? "");
+  const mine = $derived(radio.info?.firmware ?? radio.hello?.firmware ?? "");
   const latest = $derived(firmware.check?.version ?? firmware.bundled?.version ?? "");
   // A file chosen here (not the bundled release): Advanced stays open to show its checks.
   const chosen = $derived(!!firmware.fileName && firmware.fileName !== firmware.bundled?.file);

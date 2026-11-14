@@ -29,6 +29,8 @@
     if (radio.phase === "connecting") return { dot: "busy", text: "Connecting…" };
     if (radio.phase === "pin") return { dot: "busy", text: "The radio asks for its PIN" };
     if (radio.phase === "updating") return { dot: "busy", text: migrate.running ? `Finishing the update on ${radio.label}` : `Firmware Update holds ${radio.label}` };
+    if (radio.phase === "outdated")
+      return { dot: "bad", text: `${radio.label}: ${radio.mismatch?.radioOld === false ? "update Console" : "update the radio"}` };
     if (radio.phase === "connected")
       return radio.notAnswering
         ? { dot: "bad", text: `${radio.label}: the radio isn't answering` }
@@ -115,6 +117,13 @@
 </div>
 {#if radio.error}
   <div class="err" role="alert">{radio.error} <button class="x" aria-label="Dismiss" onclick={() => (radio.error = "")}>×</button></div>
+{/if}
+{#if radio.mismatch}
+  <!-- Decision 385: a radio on another link protocol is only updated; nothing else uses the link. -->
+  <div class="err mismatch" role="alert" aria-label="Update needed">
+    {radio.mismatch.text}
+    {#if radio.mismatch.radioOld}<a href="#/firmware">Update the radio</a>{/if}
+  </div>
 {/if}
 {#if radio.pinError}
   <div class="err" role="alert">{radio.pinError}</div>
@@ -211,6 +220,11 @@
     border-radius: 8px;
     background: var(--surface);
     color: var(--red);
+  }
+  .mismatch a {
+    color: inherit;
+    font-weight: 600;
+    margin-left: 6px;
   }
   .newer {
     font-size: 12px;

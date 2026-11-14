@@ -79,9 +79,6 @@
   {#if satellites.fileError}<div class="pg-banner">{satellites.fileError}</div>{/if}
   {#if satellites.error}<div class="pg-banner">{satellites.error}</div>{/if}
   {#if satellites.notice}<div class="pg-banner ok" aria-live="polite">{satellites.notice}</div>{/if}
-  {#if connected && coreUp && !satellites.supported}
-    <div class="pg-banner warn">This radio's firmware has no satellites over the link: update Ferrite.</div>
-  {/if}
 
   <section aria-label="On the radio">
     <h2>On the radio</h2>

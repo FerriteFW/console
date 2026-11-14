@@ -118,14 +118,9 @@ abstract class ListEditor<T> {
     return this.#plan.changes.length;
   }
 
-  /** The connected radio has these lists over the link (LINK-35.2: HELLO caps 128). */
+  /** A radio is connected: it has these lists over the link (LINK-54 – LINK-56). */
   get supported() {
-    const l = radio.connectedLink;
-    return !!l && (l.caps & P.caps.LISTS) !== 0;
-  }
-  /** Connected to a radio whose firmware is older than these lists. */
-  get oldFirmware() {
-    return !!radio.connectedLink && !this.supported;
+    return !!radio.connectedLink;
   }
 
   /** Reads once a connection is up (and the page open), unless unwritten edits would be dropped. */

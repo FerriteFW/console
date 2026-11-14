@@ -19,7 +19,9 @@ The WebSocket (ws://127.0.0.1:8765 by default, 127.0.0.1 only):
 
 Test hooks (the simulator only, never a radio): {"inject_event": [bytes]} sends Console an EVENT frame (LINK-46)
 with that payload as the radio's next one would come (an APRS station heard, which the headless simulator can't
-hear); {"drop_ui": N} drops the next N Live View events from the simulator (a lost update, LINK-48).
+hear); {"drop_ui": N} drops the next N Live View events from the simulator (a lost update, LINK-48);
+{"hello_protocol": N} makes the next client's session see protocol N in every HELLO answer (an old Ferrite, decision
+385: Console must only update it) until that session sends REBOOT (the "new firmware" then answers as it is) or ends.
 
 With `--fakeboot MODE.json` (the simulator only): once the simulator accepts a link REBOOT (LINK-24), the bytes go
 to a fake stock bootloader (tools/fakeboot.py) instead, until its END; then back to the simulator, which restarted
@@ -346,6 +348,8 @@ class Bridge:
         self.fakeboot_mode = fakeboot_mode
         self.boot = None
         self.busy = False
+        # {"hello_protocol": N}: for the next client's session (test hook)
+        self.next_hello = None
 
     async def client(self, r, w):
         peer = w.get_extra_info("peername")
@@ -376,14 +380,19 @@ class Bridge:
         # The simulator's test hooks (the e2e tests; never on a radio): events seen (their seq, for an injected one),
         # UI events to drop (a lost Live View update), and the frames held while dropping.
         sim = target.kind != "serial"
-        hook = {"ev_seq": None, "drop_ui": 0, "buf": b""}
-        events = LinkFrames()
+        hook = {"ev_seq": None, "drop_ui": 0, "buf": b"", "hello": self.next_hello if sim else None}
+        self.next_hello = None
+        events, asked = LinkFrames(), LinkFrames()
+        if hook["hello"] is not None:
+            log(f"test hook: HELLO answers say protocol {hook['hello']} until REBOOT")
 
         def forward(b):
-            if not hook["drop_ui"]:
+            if not hook["drop_ui"] and hook["hello"] is None:
+                b, hook["buf"] = hook["buf"] + b, b""  # a frame half held when a hook ended goes on whole
                 asyncio.ensure_future(ws.send(2, b))
                 return
-            # whole frames only while dropping: a UI event (type 0x51, kind 4) goes nowhere
+            # whole frames only while dropping: a UI event (type 0x51, kind 4) goes nowhere; a HELLO answer (0x81,
+            # never compressed: LINK-51) gets the hook's protocol after its status byte
             hook["buf"] += b
             *parts, hook["buf"] = hook["buf"].split(b"\x00")
             out = bytearray()
@@ -393,8 +402,11 @@ class Bridge:
                     hook["drop_ui"] -= 1
                     log(f"test hook: dropped UI event #{body[1]}")
                     continue
+                if hook["hello"] is not None and body and len(body) > 6 and body[0] == 0x81 and body[2] == 0:
+                    body = body[:3] + bytes([hook["hello"]]) + body[4:-2]
+                    p = cobs_encode(body + struct.pack("<H", link_crc(body)))
                 out += p + b"\x00"
-            if not hook["drop_ui"]:
+            if not hook["drop_ui"] and hook["hello"] is None:
                 out += hook["buf"]
                 hook["buf"] = b""
             if out:
@@ -455,6 +467,9 @@ class Bridge:
                     if self.boot is not None:
                         await to_boot(data)
                         continue
+                    if hook["hello"] is not None and any(ty == REBOOT for ty, _, _ in asked.feed(data)):
+                        hook["hello"] = None  # the radio restarts into its "new firmware"
+                        log("test hook: REBOOT sent; HELLO answers as they are again")
                     if self.fakeboot_mode:
                         frames = sent.feed(data)
                         starts = [seq for ty, seq, p in frames if ty == fakeboot.STOCK_RESTORE and p[:1] == b"\x00"]
@@ -499,6 +514,9 @@ class Bridge:
                         self.boot = None
                         heard.buf = b""
                         await ws.send_json({"reset": True})
+                    elif sim and "hello_protocol" in msg:
+                        self.next_hello = None if msg["hello_protocol"] is None else int(msg["hello_protocol"]) & 0xFF
+                        await ws.send_json({"hello_protocol": self.next_hello})
                     elif sim and "drop_ui" in msg:
                         hook["drop_ui"] = int(msg["drop_ui"])
                         await ws.send_json({"dropping": hook["drop_ui"]})
