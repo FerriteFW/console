@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32 } from "../../src/lib/zip";
-import { connect, disconnect, expect, onRadio, openConsole, shot, test } from "./helpers";
+import { closeWelcome, connect, disconnect, expect, onRadio, openConsole, shot, test } from "./helpers";
 
 // The worker's bridge sets the mode file once its fixture has run, so it is read when a test runs.
 const modeFile = () => process.env.FERRITE_E2E_FAKEBOOT ?? "";
@@ -120,6 +120,26 @@ test("firmware: a whole update through the fake bootloader, then connected again
   expect(r.blocks).toBe(24);
   expect(r.count).toBe(23);
   expect(r.sha256).toBe(sha(btf));
+});
+
+test("firmware: a radio older than the bundled release gets a link to Update in the top bar; the same or newer none", async ({ page }) => {
+  setMode({});
+  let bundled = "v9.8.7";
+  await page.route("**/firmware/manifest.json*", (route) => route.fulfill({ json: { ferrite: { version: bundled, file: "x.btf", sha256: "00" } } }));
+  await openConsole(page, "live");
+  await connect(page);
+  const link = page.locator('[data-k="newer"]');
+  await expect(link).toHaveText("v9.8.7 available");
+  await expect(link).toHaveAttribute("href", "#/firmware");
+  await link.click();
+  await expect(page.getByRole("heading", { name: "Update Ferrite" })).toBeVisible();
+  await disconnect(page);
+  bundled = "v0.0.1"; // older than any radio: nothing to say
+  await page.reload();
+  await closeWelcome(page);
+  await connect(page);
+  await expect(page.locator(".strip")).toBeVisible();
+  await expect(link).toHaveCount(0);
 });
 
 test("firmware: the bundled release, checked by its SHA-256 (Ferrite to the next from the browser)", async ({ page }) => {
