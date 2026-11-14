@@ -136,3 +136,30 @@ test("SAT-21: a connect refreshes the radio's own satellites when the list is ne
   await expect.poll(() => held(page), { timeout: long }).toEqual([]);
   expect((await info(page))!.written).toBe(written);
 });
+
+test("SAT-23: the map shows the satellite picked in its menu, or a row clicked in either table", async ({ page }) => {
+  await serveSats(page, () => file("2026-10-31"));
+  await openConsole(page, "satellites");
+  await page.evaluate(() => ((window as any).ferrite.library.placeText = "49.2827, -123.1207"));
+  await expect(listRows(page)).toHaveCount(5);
+  await ready(page);
+  const menu = page.getByRole("combobox", { name: "Satellite on the map" });
+  const caption = page.locator('[data-k="satmap"]');
+  await expect(menu).toBeVisible();
+  // the menu
+  await menu.selectOption({ label: "SO-50" });
+  await expect(menu.locator("option:checked")).toHaveText("SO-50");
+  await expect(caption).toContainText("km up");
+  // a row in the list below
+  await listRows(page).filter({ hasText: "AO-27" }).locator("td.num").first().click();
+  await expect(menu.locator("option:checked")).toHaveText("AO-27");
+  // a row on the radio's table
+  const r = radioRows(page).first();
+  const name = (await r.locator("td.nm").textContent())!.trim();
+  await r.click();
+  await expect(menu.locator("option:checked")).toHaveText(name);
+  // a pick box still picks, not shows
+  const before = (await menu.locator("option:checked").textContent())!.trim();
+  await page.getByRole("checkbox", { name: "Pick AO-27" }).click();
+  await expect(menu.locator("option:checked")).toHaveText(before);
+});
