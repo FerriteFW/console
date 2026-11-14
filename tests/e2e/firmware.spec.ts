@@ -161,7 +161,7 @@ test("firmware: the bundled release, checked by its SHA-256 (Ferrite to the next
   await wizard(page).getByRole("button", { name: "Cancel" }).click();
   served = testBtf(25); // the file on the server isn't the one the manifest names
   await page.getByText("Advanced: install a file (.ffw or .btf)").click();
-  await page.getByRole("button", { name: "Back to the bundled release" }).click();
+  await page.getByRole("button", { name: "Back to the latest release" }).click();
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("doesn't match its checksum");
 });
 

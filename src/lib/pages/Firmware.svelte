@@ -7,6 +7,7 @@
   import { signatureText } from "../signature";
   import { bridgeEnabled } from "../transport/bridge";
   import UpdateWizard from "../components/UpdateWizard.svelte";
+  import { CONSOLE_DOWNLOADS } from "../updates.svelte";
 
   let fileInput: HTMLInputElement;
   let wizard = $state(false);
@@ -51,8 +52,11 @@
       <dt>Your radio</dt>
       <dd data-k="now">{connected ? mine || "?" : "not connected"}</dd>
       <dt>{chosen && firmware.check ? "Chosen file" : "Latest"}</dt>
-      <dd data-k="latest">{latest || "none in this copy of Console: choose a file under Advanced"}</dd>
+      <dd data-k="latest">{latest || "none in this copy of Console: choose a file under Advanced"}{!chosen && firmware.bundled?.url ? " (downloaded from ferritefw.dev)" : ""}</dd>
     </dl>
+    {#if firmware.needsConsole}
+      <p class="sub" data-k="needs-console">Ferrite {firmware.needsConsole} is out; it needs a newer Console. <a href={CONSOLE_DOWNLOADS} target="_blank" rel="noopener">Get it</a>.</p>
+    {/if}
     <div class="row">
       <button class="btn primary" disabled={!latest || (!!check && !ok)} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
       {#if connected && current}<span class="sub">Up to date.</span>{/if}
@@ -67,7 +71,7 @@
       <input bind:this={fileInput} type="file" accept=".ffw,.FFW,.btf,.BTF,.minisig" multiple hidden aria-label="Firmware file" onchange={pick} />
       {#if firmware.fileName}<span class="fname">{firmware.fileName}</span>{/if}
       {#if firmware.bundled}
-        <button class="btn quiet" disabled={firmware.running} onclick={() => firmware.useBundled()}>Back to the bundled release</button>
+        <button class="btn quiet" disabled={firmware.running} onclick={() => firmware.useBundled()}>Back to the latest release</button>
       {/if}
     </div>
     <p class="sub hint">A .ffw (a release: the firmware and its SPI parts, signed inside) installs whole. A bare .btf: pick its .minisig with it. Update then installs this file.</p>

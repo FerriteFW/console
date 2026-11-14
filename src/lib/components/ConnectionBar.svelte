@@ -8,13 +8,16 @@
   import { DEV_TOOLS } from "../devtools";
   import { isTauri } from "../transport/native";
   import { olderThan } from "../version";
+  import { appUpdate, CONSOLE_DOWNLOADS } from "../updates.svelte";
 
   // The development bridge (tools/bridge.py) and the demo radio: developer builds only (devtools.ts).
   const bridge = bridgeEnabled();
 
   const avail = $derived(radio.available());
-  // The release bundled with this Console: a radio on an older Ferrite gets a gentle pointer to the Update tab.
+  // The release bundled with this Console (or a newer one online, UPD-25): a radio on an older Ferrite gets a gentle
+  // pointer to the Update tab.
   void firmware.loadBundled();
+  void appUpdate.check(); // UPD-26
   const newer = $derived(
     radio.phase === "connected" && radio.info && firmware.bundled && olderThan(radio.info.firmware, firmware.bundled.version)
       ? firmware.bundled.version
@@ -63,9 +66,19 @@
         >{[radio.info.callsign || "no callsign", radio.info.firmware, radio.info.build?.name, radio.kind === "cable" && radio.baud ? `${radio.baud} baud` : ""].filter(Boolean).join(" · ")}</span
       >
       {#if newer}
-        <a class="newer" href="#/firmware" data-k="newer" title="This Console comes with Ferrite {newer}. Update the radio from the Update tab: your channels and settings stay."
+        <a class="newer" href="#/firmware" data-k="newer" title="Ferrite {newer} is out. Update the radio from the Update tab: your channels and settings stay."
           >{newer} available</a
         >
+      {/if}
+    {/if}
+    {#if appUpdate.version}
+      <!-- UPD-26: a newer Console; the desktop app installs it and restarts, elsewhere the download page -->
+      {#if appUpdate.installable}
+        <button class="link newer" data-k="console-update" disabled={appUpdate.busy || firmware.running || migrate.running} title="Download Console {appUpdate.version}, install it and restart" onclick={() => appUpdate.install()}
+          >{appUpdate.busy ? "Updating Console…" : `Console ${appUpdate.version}: install`}</button
+        >
+      {:else}
+        <a class="newer" data-k="console-update" href={CONSOLE_DOWNLOADS} target="_blank" rel="noopener" title={appUpdate.error || "Download the new Console"}>Console {appUpdate.version} available</a>
       {/if}
     {/if}
   </div>
