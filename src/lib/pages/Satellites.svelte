@@ -62,7 +62,15 @@
     satNextPasses(choices.map((c) => c.record), t, place).forEach((p, i) => m.set(choices[i].id, p));
     return m;
   });
-  const passCell = (id: number) => (next.has(id) ? passShort(next.get(id) ?? null, Math.floor(now)) : "");
+  const passCell = (id: number) => (next.has(id) ? passShort(next.get(id) ?? null, Math.floor(now)) : "–");
+  // the orbit data's age, in words (the TLE epoch): passes drift as it ages
+  const age = (s: SatRow) => {
+    const d = ageDays(s.epoch, now);
+    return d === 0 ? "today" : d === 1 ? "1 day" : `${d} days`;
+  };
+  const retryPlace = () => {
+    locNote = "";
+  };
   const show = (id: number) => {
     shown = id;
     document.querySelector('[aria-label="On the map"]')?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -117,6 +125,18 @@
     {/if}
   </div>
 
+  <div class="pg-status" data-k="pass-place">
+    {#if place}
+      <span>Passes over {library.place ? "the Near me place" : "this computer's location"} ({place.lat.toFixed(2)}, {place.lon.toFixed(2)}).</span>
+    {:else if placeNote && placeNote !== "Finding where you are…"}
+      <span>No passes: {placeNote}</span>
+      {#if canLocate}<button class="btn quiet" onclick={retryPlace}>Try again</button>{/if}
+    {:else if canLocate}
+      <span>Finding where you are, for the passes…</span>
+    {:else}
+      <span>No passes: set a place in Channels › Add channels › Near me.</span>
+    {/if}
+  </div>
   {#if satellites.fileError}<div class="pg-banner">{satellites.fileError}</div>{/if}
   {#if satellites.error}<div class="pg-banner">{satellites.error}</div>{/if}
   {#if satellites.notice}<div class="pg-banner ok" aria-live="polite">{satellites.notice}</div>{/if}
@@ -134,15 +154,15 @@
       {#if satellites.held.length}
         <div class="pg-scroll short">
           <table class="tbl" aria-label="Satellites on the radio">
-            <thead><tr><th>#</th><th>Name</th><th>NORAD</th><th>Next pass</th><th>Elements</th><th>Transponders</th></tr></thead>
+            <thead><tr><th>#</th><th>Name</th><th>Next pass</th><th>NORAD</th><th title="How old its orbit data is: passes drift as it ages">Data age</th><th>Transponders</th></tr></thead>
             <tbody>
               {#each satellites.held as s, i (s.id)}
                 <tr class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={() => show(s.id)}>
                   <td class="num">{i + 1}</td>
                   <td class="nm">{s.short}</td>
-                  <td class="num">{s.id}</td>
                   <td class="nowrap pass" class:up={next.get(s.id)?.aos !== undefined && next.get(s.id)!.aos <= now}>{passCell(s.id)}</td>
-                  <td class="nowrap"><span class={`tag ${ageTag(s)}`}>{ageDays(s.epoch, now)} d</span></td>
+                  <td class="num">{s.id}</td>
+                  <td class="nowrap"><span class={`tag ${ageTag(s)}`} title="Orbit data from {date(s.epoch)}">{age(s)}</span></td>
                   <td>{s.tps.map(tpText).join(" · ")}</td>
                 </tr>
               {/each}
@@ -167,7 +187,7 @@
     {#if file}
       <div class="pg-scroll">
         <table class="tbl" aria-label="Satellites to write">
-          <thead><tr><th></th><th>Name</th><th>NORAD</th><th>Status</th><th>Next pass</th><th>Elements</th><th>Transponders</th></tr></thead>
+          <thead><tr><th></th><th>Name</th><th>Next pass</th><th>NORAD</th><th>Status</th><th title="How old its orbit data is: passes drift as it ages">Data age</th><th>Transponders</th></tr></thead>
           <tbody>
             {#each file.sats as s (s.id)}
               <tr class:off={!picked.has(s.id)} class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={(e) => (e.target as HTMLElement).closest("input") || show(s.id)}>
@@ -181,10 +201,10 @@
                   />
                 </td>
                 <td><span class="nm">{s.short}</span>{#if s.name !== s.short}<span class="full sub small">{s.name}</span>{/if}</td>
+                <td class="nowrap pass" class:up={next.get(s.id)?.aos !== undefined && next.get(s.id)!.aos <= now}>{passCell(s.id)}</td>
                 <td class="num">{s.id}</td>
                 <td>{s.status}</td>
-                <td class="nowrap pass" class:up={next.get(s.id)?.aos !== undefined && next.get(s.id)!.aos <= now}>{passCell(s.id)}</td>
-                <td class="nowrap"><span class={`tag ${ageTag(s)}`} title="The elements' age: amber past 7 days (3 for the ISS), red past 30">{ageDays(s.epoch, now)} d</span></td>
+                <td class="nowrap"><span class={`tag ${ageTag(s)}`} title="Orbit data from {date(s.epoch)}: amber past 7 days (3 for the ISS), red past 30">{age(s)}</span></td>
                 <td>{s.tps.map(tpText).join(" · ")}{#if s.dropped}<span class="sub small"> (+{s.dropped} the radio can't use)</span>{/if}</td>
               </tr>
             {/each}
@@ -192,7 +212,7 @@
         </table>
       </div>
       <p class="sub small">
-        Only 2 m and 70 cm FM and APRS transponders are listed: the radio works nothing else. Elements age: amber past 7 days (3 for the ISS), red past 30.
+        Only 2 m and 70 cm FM and APRS transponders are listed: the radio works nothing else. Data age: how old each satellite's orbit data is (amber past 7 days, 3 for the ISS; red past 30): its passes drift as it ages, and Reload list fetches fresh data.
         Writing replaces the radio's whole list; it keeps each satellite's own settings (trim, FD/HD, transponder, power) by its NORAD number.
       </p>
       <p class="dim small">{file.attribution} {file.licence}.</p>
