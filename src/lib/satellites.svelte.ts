@@ -1,6 +1,6 @@
 // Satellite mode's satellites (manual chapter 28a: SAT-2, SAT-3, SAT-13, SAT-15, SAT-18, SAT-21; LINK-63 – LINK-65):
-// data.ferritefw.dev's satellites/sats.json (through sitedata.ts, kept for offline use), the FM-workable list and the
-// user's picks, what the radio holds (READ_MANY of SAT and SAT_INFO), and the write: the clock, then the whole list
+// data.ferritefw.dev's satellites/sats.json (through sitedata.ts, kept for offline use), the FM-workable list (all of
+// it written), what the radio holds (READ_MANY of SAT and SAT_INFO), and the write: the clock, then the whole list
 // (clear all, records 0..n-1 in order), then the info record with the WMM2025 declination at the radio's position.
 // With "Keep satellites up to date" on, each connect refreshes a radio's own satellites when the file is newer
 // (SAT-21: at most once a day, never a radio with none).
@@ -60,10 +60,6 @@ class Satellites {
   /** The file came from the offline copy (the server couldn't be reached). */
   fileKept = $state(false);
   loadingFile = $state(false);
-  /** The NORAD numbers picked to write, in the file's order. */
-  picks = $state<number[]>([]);
-  /** The picks were changed by hand (a read of the radio no longer resets them). */
-  private touched = false;
   /** What the radio holds: its satellites (null: not read), the info record, its clock. */
   held = $state.raw<SatRow[] | null>(null);
   info = $state.raw<SatInfo | null>(null);
@@ -111,7 +107,7 @@ class Satellites {
     return !!radio.connectedLink;
   }
 
-  /** sats.json (once; again by `loadFile(true)`). The picks start as every active satellite, 32 at most. */
+  /** sats.json (once; again by `loadFile(true)`). */
   async loadFile(again = false): Promise<SatsFile | null> {
     if (this.file && !again) return this.file;
     this.loadingFile = true;
@@ -123,7 +119,6 @@ class Satellites {
       this.fileText = text;
       this.fileKept = kept;
       this.file = f;
-      if (!this.touched) this.defaultPicks();
       return f;
     } catch (e) {
       this.fileError = `The satellite list didn't load: ${(e as Error).message}`;
@@ -133,27 +128,29 @@ class Satellites {
     }
   }
 
-  /** Picks: what the radio holds when it holds some (by NORAD number, those in the file), else every active one. */
-  private defaultPicks() {
-    const f = this.file;
-    if (!f) return;
-    const ids = new Set(f.sats.map((s) => s.id));
-    const held = (this.held ?? []).map((s) => s.id).filter((id) => ids.has(id));
-    this.picks = held.length ? f.sats.filter((s) => held.includes(s.id)).map((s) => s.id) : f.sats.filter((s) => s.status === "active").slice(0, P.limits.sats).map((s) => s.id);
+  /**
+   * What Write puts on the radio (Alex, Nov 14, 2026: no picking; about 19 workable satellites and 32 places): the
+   * whole list in its order; past 32, the active ones first.
+   */
+  get toWrite(): SatRow[] {
+    const all = this.file?.sats ?? [];
+    if (all.length <= P.limits.sats) return all;
+    // past 32 (as Pocket): active first, then voice before APRS and beacons; the file's order within each
+    const rank = (s: SatRow) => (s.status === "active" ? 0 : 2) + (s.tps.some((t) => t.kind === "Voice") ? 0 : 1);
+    return all
+      .map((s, i) => ({ s, i }))
+      .sort((a, b) => rank(a.s) - rank(b.s) || a.i - b.i)
+      .slice(0, P.limits.sats)
+      .map((x) => x.s);
   }
 
-  toggle(id: number) {
-    this.touched = true;
-    if (this.picks.includes(id)) this.picks = this.picks.filter((x) => x !== id);
-    else if (this.picks.length < P.limits.sats) {
-      const order = this.file?.sats.map((s) => s.id) ?? [];
-      this.picks = [...this.picks, id].sort((a, b) => order.indexOf(a) - order.indexOf(b));
-    }
-  }
-
-  pickAll(active: boolean) {
-    this.touched = true;
-    this.picks = active ? (this.file?.sats.filter((s) => s.status === "active").slice(0, P.limits.sats).map((s) => s.id) ?? []) : [];
+  /** The list's records for the radio, each keeping the starting settings the radio holds for it (by NORAD number). */
+  private records(rows: SatRow[]): Uint8Array[] {
+    const held = new Map((this.held ?? []).map((h) => [h.id, h]));
+    return rows.map((r) => {
+      const h = held.get(r.id);
+      return h ? satsRefresh(this.fileText, [new Uint8Array(h.record)])[0] : new Uint8Array(r.record);
+    });
   }
 
   /** Reads once a connection is up (the page open); with Keep up to date on, the connect's own check reads instead. */
@@ -174,7 +171,6 @@ class Satellites {
     radio.busy = this.busy = "Reading satellites";
     try {
       await this.readOn(link);
-      if (!this.touched) this.defaultPicks();
     } catch (e) {
       this.error = (e as Error).message;
       throw e;
@@ -228,21 +224,17 @@ class Satellites {
     return pos ? `declination ${declText(decl)} at ${pos.from}` : "no declination (the radio has no position: set one in Near me, or MENU 0 6 9)";
   }
 
-  /** Writes the picks to the radio (the page's Write). */
+  /** Writes the list to the radio (the page's Write). */
   async write(): Promise<void> {
     const link = radio.connectedLink;
     const f = this.file;
     if (!link || !f || !this.supported) return;
-    const rows = f.sats.filter((s) => this.picks.includes(s.id));
+    const rows = this.toWrite;
     this.error = "";
     this.notice = "";
     radio.busy = this.busy = `Writing ${rows.length} satellites`;
     try {
-      const how = await this.writeOn(
-        link,
-        rows.map((s) => new Uint8Array(s.record)),
-        f.built,
-      );
+      const how = await this.writeOn(link, this.records(rows), f.built);
       this.heldFor = link;
       this.notice = `Wrote ${rows.length} ${rows.length === 1 ? "satellite" : "satellites"} and set the radio's clock; ${how}.`;
     } catch (e) {
@@ -253,9 +245,10 @@ class Satellites {
   }
 
   /**
-   * SAT-21, on each connect: a radio that takes satellites and holds some gets the same satellites again with fresh
-   * elements (and the declination and clock) when the file is newer than its data and Console last wrote them more
-   * than a day ago. No prompt; a toast says so. Quiet when anything fails (the page shows errors when opened).
+   * SAT-21, on each connect: the whole list goes on the radio (with the declination and clock) when the radio's set
+   * isn't the list's (a radio holding none too) or the list is newer than its data, and Console last wrote them more
+   * than a day ago; each keeps the starting settings the radio held for it. No prompt; a toast says so. Quiet when
+   * anything fails (the page shows errors when opened).
    */
   async connected(link: Link) {
     if (this.syncedFor === link) return;
@@ -281,16 +274,17 @@ class Satellites {
       await this.readOn(link);
       this.heldFor = link;
       const held = this.held ?? [];
-      if (!held.length) return;
       const f = await this.loadFile(true);
-      if (!f || !satsSyncDue(f.built, held.length, this.info, nowS()) || radio.connectedLink !== link) return;
+      if (!f || radio.connectedLink !== link) return;
+      const rows = this.toWrite;
+      const ids = (l: { id: number }[]) => l.map((s) => s.id).sort((a, b) => a - b).join(",");
+      const same = ids(held) === ids(rows);
+      if (!rows.length || !satsSyncDue(f.built, same, this.info, nowS())) return;
       radio.busy = this.busy = "Updating the radio's satellites";
-      const recs = satsRefresh(
-        this.fileText,
-        held.map((s) => new Uint8Array(s.record)),
-      );
-      await this.writeOn(link, recs, f.built);
-      this.toast = `Updated the radio's ${held.length} ${held.length === 1 ? "satellite" : "satellites"} with fresh elements (data of ${f.built_text}).`;
+      await this.writeOn(link, this.records(rows), f.built);
+      this.toast = same
+        ? `Updated the radio's ${rows.length} satellites with fresh elements (data of ${f.built_text}).`
+        : `Put the ${rows.length} satellites of the list on the radio (data of ${f.built_text}).`;
     } catch {
       /* the page shows what's wrong when opened */
     } finally {

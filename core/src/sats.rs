@@ -367,12 +367,13 @@ pub fn info_of(rec: &[u8]) -> Option<InfoRow> {
     Info::decode(rec).ok().map(|i| InfoRow { decl: i.decl, stamp: i.stamp, written: i.written })
 }
 
-/// SAT-21: whether a connect rewrites the radio's satellites by itself: the radio holds some (the user picks first),
-/// the file was built after the data the radio holds, and Console last wrote them more than a day ago (at most one
-/// rewrite a day; a radio with no info record counts as never written).
-pub fn sync_due(built: u32, held: usize, info: Option<InfoRow>, now: u32) -> bool {
+/// SAT-21: whether a connect writes the whole list by itself (Alex, Nov 14, 2026: no picking; the radio holds the
+/// list): the radio's set of satellites isn't the list's (a radio holding none too), or the file was built after the
+/// data the radio holds; and Console last wrote them more than a day ago (at most once a day; a radio with no info
+/// record counts as never written).
+pub fn sync_due(built: u32, same_set: bool, info: Option<InfoRow>, now: u32) -> bool {
     let (stamp, written) = info.map_or((0, 0), |i| (i.stamp, i.written));
-    held > 0 && built > stamp && now.saturating_sub(written) > SYNC_GAP_S
+    (!same_set || built > stamp) && now.saturating_sub(written) > SYNC_GAP_S
 }
 
 /// LINK-65: `CLOCK`'s answer after the status: the radio's UTC (0 none) and where it came from.
@@ -499,22 +500,19 @@ mod tests {
         assert_eq!(fresh.flags, Sat::HD, "its flags kept");
     }
 
-    /// SAT-21: a connect rewrites only a radio holding satellites, with older data, written more than a day ago.
+    /// SAT-21: a connect writes the list when the radio's set isn't the list's or the list is newer, once a day.
     #[test]
     fn sync_rule() {
         let now = 1_793_541_600;
         let info = |stamp, written| Some(InfoRow { decl: None, stamp, written });
         let built = 1_793_491_200;
-        assert!(sync_due(built, 3, info(built - 86_400, now - 2 * 86_400), now));
+        assert!(sync_due(built, true, info(built - 86_400, now - 2 * 86_400), now), "a newer list");
+        assert!(sync_due(built, false, info(built, now - 2 * 86_400), now), "another set (or none): the list");
+        assert!(!sync_due(built, true, info(built, now - 2 * 86_400), now), "the radio has this list");
+        assert!(!sync_due(built, false, info(built - 86_400, now - 3_600), now), "written an hour ago: one a day");
+        assert!(sync_due(built, true, None, now), "no info record: never written");
         assert!(
-            !sync_due(built, 0, info(built - 86_400, now - 2 * 86_400), now),
-            "no satellites: the user picks first"
-        );
-        assert!(!sync_due(built, 3, info(built, now - 2 * 86_400), now), "the radio has this build");
-        assert!(!sync_due(built, 3, info(built - 86_400, now - 3_600), now), "written an hour ago: one a day");
-        assert!(sync_due(built, 3, None, now), "no info record: never written");
-        assert!(
-            !sync_due(built, 3, info(built - 86_400, now + 3_600), now),
+            !sync_due(built, false, info(built - 86_400, now + 3_600), now),
             "written 'later' (a clock off): not again"
         );
     }

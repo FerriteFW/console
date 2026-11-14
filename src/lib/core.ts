@@ -355,7 +355,7 @@ export const satsRefresh = (file: string, held: Uint8Array[]): Uint8Array[] => {
 };
 export const satInfoRecord = (decl: number | null, stamp: number, written: number): Uint8Array => wasm.sat_info_record(decl ?? 0x7fff, stamp, written);
 export const satInfoOf = (rec: Uint8Array): SatInfo | null => parsed(wasm.sat_info_of(rec));
-export const satsSyncDue = (built: number, held: number, info: SatInfo | null, now: number): boolean => wasm.sats_sync_due(built, held, js(info), now);
+export const satsSyncDue = (built: number, sameSet: boolean, info: SatInfo | null, now: number): boolean => wasm.sats_sync_due(built, sameSet, js(info), now);
 export const clockOf = (rest: Uint8Array): RadioClock | null => parsed(wasm.clock_of(rest));
 /** SAT-18: the WMM2025 declination at a place and time (UTC seconds), 0.1° east positive. */
 export const wmmDeclination = (lat: number, lon: number, unix: number): number => wasm.wmm_declination(lat, lon, unix);

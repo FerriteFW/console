@@ -1,7 +1,7 @@
 <script lang="ts">
   // Satellites (manual chapter 28a; SAT-2, SAT-9, SAT-13, SAT-15, SAT-18, SAT-21): the satellites an FM handheld can
-  // work, from data.ferritefw.dev (CelesTrak's elements, SatNOGS DB's transponders), picked up to 32, and what the
-  // radio holds. Write puts the picks on the radio with its clock and the magnetic declination at its position.
+  // work, from data.ferritefw.dev (CelesTrak's elements, SatNOGS DB's transponders), and what the radio holds. Write
+  // puts the whole list on the radio (up to 32, the active first) with its clock and the magnetic declination.
   import { satellites, ageDays, ageLevel, declText } from "../satellites.svelte";
   import { radio } from "../radio.svelte";
   import { loadCore, P, satNextPasses, type SatPass, type SatRow, type SatTp } from "../core";
@@ -29,9 +29,8 @@
   const busy = $derived(!!satellites.busy);
   const max = $derived(coreUp ? P.limits.sats : 32);
   const file = $derived(satellites.file);
-  const picked = $derived(new Set(satellites.picks));
   // SAT-23: the satellite shown on the map: picked in the map's menu or by a click on its row in either table; to
-  // start, the radio's first, else the list's first picked, else its first
+  // start, the radio's first, else the list's first
   let shown = $state(0);
   const choices = $derived.by(() => {
     const seen = new Set<number>();
@@ -40,7 +39,7 @@
     return out;
   });
   const onMap = $derived(
-    choices.find((s) => s.id === shown) ?? satellites.held?.[0] ?? file?.sats.find((s) => picked.has(s.id)) ?? file?.sats[0] ?? null,
+    choices.find((s) => s.id === shown) ?? satellites.held?.[0] ?? file?.sats[0] ?? null,
   );
   // SAT-23: passes over the Near me place, else over this computer (decision 398)
   let mine = $state<{ lat: number; lon: number } | null>(null);
@@ -89,15 +88,12 @@
       <button class="btn" disabled={!supported || busy} onclick={() => satellites.readRadio().catch(() => {})} title="Read the radio's satellites">Read from radio</button>
       <button
         class="btn primary"
-        disabled={!supported || busy || !file || !satellites.picks.length}
+        disabled={!supported || busy || !file || !satellites.toWrite.length}
         onclick={() => satellites.write()}
-        title="Write the picked satellites to the radio, with its clock and the magnetic declination at its position">Write to radio</button
+        title="Write the satellite list to the radio, with its clock and the magnetic declination at its position">Write to radio</button
       >
     </div>
     <div class="grp">
-      <span class="label">Pick</span>
-      <button class="btn quiet" disabled={!file} onclick={() => satellites.pickAll(true)}>Active</button>
-      <button class="btn quiet" disabled={!file} onclick={() => satellites.pickAll(false)}>None</button>
       <button class="btn quiet" disabled={satellites.loadingFile} onclick={() => satellites.loadFile(true)} title="Fetch the satellite list again">Reload list</button>
     </div>
     <div class="grp">
@@ -119,8 +115,7 @@
       <span>Loading the satellite list…</span>
     {:else if file}
       <span
-        >List of {file.built_text}{satellites.fileKept ? " (the copy kept on this computer: the server couldn't be reached)" : ""}: {file.sats.length} satellites an FM handheld can work · {satellites.picks
-          .length} of {max} picked.</span
+        >List of {file.built_text}{satellites.fileKept ? " (the copy kept on this computer: the server couldn't be reached)" : ""}: {file.sats.length} satellites an FM handheld can work{file.sats.length > max ? ` · the first ${max} go to the radio (active first)` : ", all of them go to the radio"}.</span
       >
     {/if}
   </div>
@@ -187,19 +182,10 @@
     {#if file}
       <div class="pg-scroll">
         <table class="tbl" aria-label="Satellites to write">
-          <thead><tr><th></th><th>Name</th><th>Next pass</th><th>NORAD</th><th>Status</th><th title="How old its orbit data is: passes drift as it ages">Data age</th><th>Transponders</th></tr></thead>
+          <thead><tr><th>Name</th><th>Next pass</th><th>NORAD</th><th>Status</th><th title="How old its orbit data is: passes drift as it ages">Data age</th><th>Transponders</th></tr></thead>
           <tbody>
             {#each file.sats as s (s.id)}
-              <tr class:off={!picked.has(s.id)} class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={(e) => (e.target as HTMLElement).closest("input") || show(s.id)}>
-                <td>
-                  <input
-                    type="checkbox"
-                    aria-label={`Pick ${s.short}`}
-                    checked={picked.has(s.id)}
-                    disabled={!picked.has(s.id) && satellites.picks.length >= max}
-                    onchange={() => satellites.toggle(s.id)}
-                  />
-                </td>
+              <tr class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={() => show(s.id)}>
                 <td><span class="nm">{s.short}</span>{#if s.name !== s.short}<span class="full sub small">{s.name}</span>{/if}</td>
                 <td class="nowrap pass" class:up={next.get(s.id)?.aos !== undefined && next.get(s.id)!.aos <= now}>{passCell(s.id)}</td>
                 <td class="num">{s.id}</td>
@@ -260,9 +246,6 @@
   }
   .full {
     display: block;
-  }
-  tr.off td {
-    color: var(--sub);
   }
   .pg-banner.ok {
     border-color: var(--green);
