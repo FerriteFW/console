@@ -57,7 +57,7 @@ FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh all --host USER@HOST   
 - The build box is reached over ssh and needs Docker; without `--host` it's ours.
 - It first checks `public/THIRD-PARTY-LICENSES.md` (About's third-party licences) against what the app links; after a dependency change run `python3 tools/thirdparty.py` and commit the file.
 - Out: `target/desktop/`. A release ships the `.dmg`, the `.AppImage` and the Windows portable `.exe`.
-- The builds aren't signed or notarized yet.
+- The Mac build is signed with the team's Developer ID and notarized: it needs the "Developer ID Application" certificate in the keychain and the notarization profile `FerriteConsole` (`xcrun notarytool store-credentials FerriteConsole --team-id TEAM --apple-id APPLE_ID`, once). `UNSIGNED=1` builds without. The Linux and Windows builds aren't signed.
 
 ## Layout
 
