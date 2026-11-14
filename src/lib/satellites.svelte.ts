@@ -134,13 +134,14 @@ class Satellites {
    */
   get toWrite(): SatRow[] {
     const all = this.file?.sats ?? [];
-    if (all.length <= P.limits.sats) return all;
+    const max = P?.limits?.sats ?? 32; // read before the core has loaded too (the page's first draw)
+    if (all.length <= max) return all;
     // past 32 (as Pocket): active first, then voice before APRS and beacons; the file's order within each
     const rank = (s: SatRow) => (s.status === "active" ? 0 : 2) + (s.tps.some((t) => t.kind === "Voice") ? 0 : 1);
     return all
       .map((s, i) => ({ s, i }))
       .sort((a, b) => rank(a.s) - rank(b.s) || a.i - b.i)
-      .slice(0, P.limits.sats)
+      .slice(0, max)
       .map((x) => x.s);
   }
 
