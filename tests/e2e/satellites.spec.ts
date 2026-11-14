@@ -146,6 +146,9 @@ test("SAT-23: the map shows the satellite picked in its menu, or a row clicked i
   const menu = page.getByRole("combobox", { name: "Satellite on the map" });
   const caption = page.locator('[data-k="satmap"]');
   await expect(menu).toBeVisible();
+  // SAT-23: each satellite's next pass over the place, and the map's passes
+  await expect(page.getByRole("table", { name: "Satellites to write" }).locator("td.pass").first()).toHaveText(/(Up now until|Today|Tomorrow|[A-Z][a-z]{2}) .*\d+°|none in 2 days/);
+  await expect(page.locator('[data-k="pass"]')).toContainText(/Next over you|Over you now|No pass/);
   // the menu
   await menu.selectOption({ label: "SO-50" });
   await expect(menu.locator("option:checked")).toHaveText("SO-50");

@@ -3,7 +3,7 @@
 //! with the radio's own SGP4 and look angles (`ferrite_core::sat`), so the map and the radio agree.
 
 use ferrite_core::sat::look::{gmst, Observer};
-use ferrite_core::sat::sgp4::Sgp4;
+use ferrite_core::sat::sgp4::{Sgp4, State};
 use ferrite_core::sat::wire;
 use serde::Serialize;
 
@@ -12,8 +12,9 @@ const R_EARTH: f32 = 6378.137;
 /// The ground track's step and the pass search's.
 const TRACK_STEP_S: u32 = 30;
 const PASS_STEP_S: u32 = 20;
-/// How far ahead a pass is looked for.
+/// How far ahead a pass is looked for, and how many the map lists.
 const PASS_HORIZON_S: u32 = 2 * 86_400;
+const MAP_PASSES: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Point {
@@ -38,8 +39,8 @@ pub struct SatMap {
     pub footprint_km: f32,
     /// The ground track from now for two orbits, split where it crosses the date line (one polyline each).
     pub track: Vec<Vec<Point>>,
-    /// The pass under way or the next one within two days, when a place is given.
-    pub next: Option<Pass>,
+    /// The pass under way (if any) and the next ones within two days, up to three, when a place is given.
+    pub passes: Vec<Pass>,
 }
 
 /// The point under a TEME position at `unix` (geocentric latitude: close enough for a map), and the height.
@@ -50,6 +51,50 @@ fn under(r: [f32; 3], unix: u32) -> (Point, f32) {
     let lat = r[2].atan2(rxy).to_degrees();
     let alt = (rxy * rxy + r[2] * r[2]).sqrt() - R_EARTH;
     (Point { lat, lon }, alt)
+}
+
+/// Up to `max` passes over `place` from `now` within two days: one under way first (from its rise), then the next.
+fn find_passes(at: &dyn Fn(u32) -> Option<State>, now: u32, (lat, lon): (f64, f64), max: usize) -> Vec<Pass> {
+    let obs = Observer::new((lat * 1e7) as i32, (lon * 1e7) as i32, 0);
+    let el = |t: u32| at(t).map(|s| obs.look(&s, t).el);
+    let mut out = Vec::new();
+    let mut t = now;
+    // under way now: back to its rise (an hour at most)
+    if el(now).is_some_and(|e| e > 0.0) {
+        while t > now.saturating_sub(3600) && el(t - PASS_STEP_S).is_some_and(|e| e > 0.0) {
+            t -= PASS_STEP_S;
+        }
+    }
+    while out.len() < max {
+        while t < now + PASS_HORIZON_S && el(t).is_some_and(|e| e <= 0.0) {
+            t += PASS_STEP_S;
+        }
+        if t >= now + PASS_HORIZON_S || el(t).is_none() {
+            break;
+        }
+        let aos = t;
+        let mut max_el = f32::MIN;
+        while let Some(e) = el(t).filter(|&e| e > 0.0) {
+            max_el = max_el.max(e);
+            t += PASS_STEP_S;
+        }
+        out.push(Pass { aos, los: t, max_el });
+    }
+    out
+}
+
+/// SAT-23: the next pass over `place` for each satellite record, for the tables (None: none within two days, or
+/// the record doesn't read).
+pub fn next_passes(records: &[Vec<u8>], now: u32, place: (f64, f64)) -> Vec<Option<Pass>> {
+    records
+        .iter()
+        .map(|r| {
+            let sat = wire::decode(r).ok()?;
+            let sgp = Sgp4::new(&sat.el).ok()?;
+            let epoch = sat.el.epoch_unix();
+            find_passes(&|t: u32| sgp.at(t as i32 - epoch as i32).ok(), now, place, 1).into_iter().next()
+        })
+        .collect()
 }
 
 /// The map for the satellite in `record` (the radio's satellite record, SAT-2) at `now`, and the next pass over
@@ -77,32 +122,8 @@ pub fn sat_map(record: &[u8], now: u32, place: Option<(f64, f64)>) -> Result<Sat
         last = Some(p);
         t += TRACK_STEP_S;
     }
-    let next = place.and_then(|(lat, lon)| {
-        let obs = Observer::new((lat * 1e7) as i32, (lon * 1e7) as i32, 0);
-        let el = |t: u32| at(t).map(|s| obs.look(&s, t).el);
-        let mut t = now;
-        // under way now: back to its rise, at most the search horizon's step count
-        if el(now)? > 0.0 {
-            while t > now.saturating_sub(3600) && el(t - PASS_STEP_S).is_some_and(|e| e > 0.0) {
-                t -= PASS_STEP_S;
-            }
-        } else {
-            while t < now + PASS_HORIZON_S && el(t).is_some_and(|e| e <= 0.0) {
-                t += PASS_STEP_S;
-            }
-            if t >= now + PASS_HORIZON_S {
-                return None;
-            }
-        }
-        let aos = t;
-        let mut max_el = f32::MIN;
-        while let Some(e) = el(t).filter(|&e| e > 0.0) {
-            max_el = max_el.max(e);
-            t += PASS_STEP_S;
-        }
-        Some(Pass { aos, los: t, max_el })
-    });
-    Ok(SatMap { now: here, alt_km: alt, footprint_km, track, next })
+    let passes = place.map(|p| find_passes(&at, now, p, MAP_PASSES)).unwrap_or_default();
+    Ok(SatMap { now: here, alt_km: alt, footprint_km, track, passes })
 }
 
 #[cfg(test)]
@@ -144,9 +165,17 @@ mod tests {
                 assert!((w[1].lon - w[0].lon).abs() < 180.0, "a piece never jumps the date line");
             }
         }
-        let p = m.next.expect("an ISS pass over Vancouver within two days");
-        assert!(p.aos >= now - 3600 && p.los > p.aos && p.los - p.aos < 1200 && p.max_el > 0.0, "{p:?}");
-        assert!(sat_map(&iss(now - 3600), now, None).unwrap().next.is_none());
+        assert_eq!(m.passes.len(), 3, "three passes over Vancouver within two days");
+        for p in &m.passes {
+            assert!(p.aos >= now - 3600 && p.los > p.aos && p.los - p.aos < 1200 && p.max_el > 0.0, "{p:?}");
+        }
+        for w in m.passes.windows(2) {
+            assert!(w[1].aos > w[0].los, "in order, apart: {w:?}");
+        }
+        assert!(sat_map(&iss(now - 3600), now, None).unwrap().passes.is_empty());
+        // the tables: each satellite's next pass, the same as the map's first
+        let n = next_passes(&[iss(now - 3600), vec![0u8; 3]], now, (49.25, -123.1));
+        assert_eq!((n[0], n[1]), (Some(m.passes[0]), None));
         assert!(sat_map(&[0u8; 3], now, None).is_err());
     }
 }

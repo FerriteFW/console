@@ -4,10 +4,17 @@
   // so the map and the radio agree. Moves every 15 s.
   import { satMap, type SatMap, type SatRow } from "../core";
   import { library } from "../library.svelte";
-  import { canLocate, here } from "../here";
+  import { hm, passLong } from "../satpass";
   import { ATTRIBUTION, loadLeaflet, NO_TILES, TILES, type Leaflet, type LLayer, type LMap } from "../leaflet";
 
-  let { sat, choices = [], onpick }: { sat: SatRow; choices?: SatRow[]; onpick?: (id: number) => void } = $props();
+  // `place`: the Near me place, else this computer's (the page finds it: decision 398); `placeNote` why there is none
+  let {
+    sat,
+    choices = [],
+    onpick,
+    place,
+    placeNote = "",
+  }: { sat: SatRow; choices?: SatRow[]; onpick?: (id: number) => void; place: { lat: number; lon: number } | null; placeNote?: string } = $props();
 
   let el: HTMLDivElement;
   let map: LMap | null = $state(null);
@@ -39,17 +46,6 @@
     };
   });
 
-  // the next pass over the Near me place, else over this computer (decision 398: the Mac app's location too)
-  let mine = $state<{ lat: number; lon: number } | null>(null);
-  let locNote = $state("");
-  $effect(() => {
-    if (!library.place && !mine && !locNote && canLocate)
-      here().then(
-        (p) => (mine = p),
-        (e) => (locNote = (e as Error).message),
-      );
-  });
-  const place = $derived(library.place ?? mine);
   const where = $derived.by((): { m: SatMap | null; error: string } => {
     try {
       return { m: satMap(Uint8Array.from(sat.record), now, place), error: "" };
@@ -84,21 +80,14 @@
     }
   });
 
-  const hm = (t: number) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const day = (t: number) => {
-    const d = new Date(t * 1000);
-    const today = new Date();
-    return d.toDateString() === today.toDateString() ? "today" : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-  };
+  // the pass under way, then when it comes back around
   const pass = $derived.by(() => {
-    const n = where.m?.next;
-    if (!place)
-      return canLocate && !locNote
-        ? "Finding where you are…"
-        : `${locNote ? `${locNote} ` : ""}Set a place in Near me (Channels › Add channels) for the next pass over it.`;
-    if (!n) return "No pass over the place in the next two days.";
-    const up = n.aos <= now;
-    return `${up ? "Up now" : `Next pass ${day(n.aos)} ${hm(n.aos)}`}–${hm(n.los)}, highest ${Math.round(n.max_el)}° (${Math.round((n.los - n.aos) / 60)} min)`;
+    const ps = where.m?.passes ?? [];
+    if (!place) return placeNote || "Set a place in Near me (Channels › Add channels) for its passes over it.";
+    if (!ps.length) return "No pass over you in the next two days.";
+    const [first, ...rest] = ps;
+    if (first.aos > now) return `Next over you: ${ps.map((p) => passLong(p, now)).join("; ")}.`;
+    return `Over you now until ${hm(first.los)} (highest ${Math.round(first.max_el)}°). Back ${rest.length ? rest.map((p) => passLong(p, now)).join("; ") : "not within two days"}.`;
   });
 </script>
 

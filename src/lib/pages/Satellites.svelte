@@ -4,8 +4,11 @@
   // radio holds. Write puts the picks on the radio with its clock and the magnetic declination at its position.
   import { satellites, ageDays, ageLevel, declText } from "../satellites.svelte";
   import { radio } from "../radio.svelte";
-  import { loadCore, P, type SatRow, type SatTp } from "../core";
+  import { loadCore, P, satNextPasses, type SatPass, type SatRow, type SatTp } from "../core";
   import SatMap from "../components/SatMap.svelte";
+  import { library } from "../library.svelte";
+  import { canLocate, here } from "../here";
+  import { passShort } from "../satpass";
 
   let coreUp = $state(false);
   void loadCore().then(() => {
@@ -39,6 +42,27 @@
   const onMap = $derived(
     choices.find((s) => s.id === shown) ?? satellites.held?.[0] ?? file?.sats.find((s) => picked.has(s.id)) ?? file?.sats[0] ?? null,
   );
+  // SAT-23: passes over the Near me place, else over this computer (decision 398)
+  let mine = $state<{ lat: number; lon: number } | null>(null);
+  let locNote = $state("");
+  $effect(() => {
+    if (!library.place && !mine && !locNote && canLocate)
+      here().then(
+        (p) => (mine = p),
+        (e) => (locNote = (e as Error).message),
+      );
+  });
+  const place = $derived(library.place ?? mine);
+  const placeNote = $derived(!place && canLocate && !locNote ? "Finding where you are…" : locNote);
+  // each satellite's next pass (the tables' column), again each minute
+  const next = $derived.by(() => {
+    const m = new Map<number, SatPass | null>();
+    if (!coreUp || !place || !choices.length) return m;
+    const t = Math.floor(now);
+    satNextPasses(choices.map((c) => c.record), t, place).forEach((p, i) => m.set(choices[i].id, p));
+    return m;
+  });
+  const passCell = (id: number) => (next.has(id) ? passShort(next.get(id) ?? null, Math.floor(now)) : "");
   const show = (id: number) => {
     shown = id;
     document.querySelector('[aria-label="On the map"]')?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -110,13 +134,14 @@
       {#if satellites.held.length}
         <div class="pg-scroll short">
           <table class="tbl" aria-label="Satellites on the radio">
-            <thead><tr><th>#</th><th>Name</th><th>NORAD</th><th>Elements</th><th>Transponders</th></tr></thead>
+            <thead><tr><th>#</th><th>Name</th><th>NORAD</th><th>Next pass</th><th>Elements</th><th>Transponders</th></tr></thead>
             <tbody>
               {#each satellites.held as s, i (s.id)}
                 <tr class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={() => show(s.id)}>
                   <td class="num">{i + 1}</td>
                   <td class="nm">{s.short}</td>
                   <td class="num">{s.id}</td>
+                  <td class="nowrap pass" class:up={next.get(s.id)?.aos !== undefined && next.get(s.id)!.aos <= now}>{passCell(s.id)}</td>
                   <td class="nowrap"><span class={`tag ${ageTag(s)}`}>{ageDays(s.epoch, now)} d</span></td>
                   <td>{s.tps.map(tpText).join(" · ")}</td>
                 </tr>
@@ -133,7 +158,7 @@
   {#if onMap && coreUp}
     <section aria-label="On the map">
       <h2>On the map</h2>
-      <SatMap sat={onMap} {choices} onpick={(id) => (shown = id)} />
+      <SatMap sat={onMap} {choices} onpick={(id) => (shown = id)} {place} {placeNote} />
     </section>
   {/if}
 
@@ -142,7 +167,7 @@
     {#if file}
       <div class="pg-scroll">
         <table class="tbl" aria-label="Satellites to write">
-          <thead><tr><th></th><th>Name</th><th>NORAD</th><th>Status</th><th>Elements</th><th>Transponders</th></tr></thead>
+          <thead><tr><th></th><th>Name</th><th>NORAD</th><th>Status</th><th>Next pass</th><th>Elements</th><th>Transponders</th></tr></thead>
           <tbody>
             {#each file.sats as s (s.id)}
               <tr class:off={!picked.has(s.id)} class="pickable" class:shown={onMap?.id === s.id} title="Show on the map" onclick={(e) => (e.target as HTMLElement).closest("input") || show(s.id)}>
@@ -158,6 +183,7 @@
                 <td><span class="nm">{s.short}</span>{#if s.name !== s.short}<span class="full sub small">{s.name}</span>{/if}</td>
                 <td class="num">{s.id}</td>
                 <td>{s.status}</td>
+                <td class="nowrap pass" class:up={next.get(s.id)?.aos !== undefined && next.get(s.id)!.aos <= now}>{passCell(s.id)}</td>
                 <td class="nowrap"><span class={`tag ${ageTag(s)}`} title="The elements' age: amber past 7 days (3 for the ISS), red past 30">{ageDays(s.epoch, now)} d</span></td>
                 <td>{s.tps.map(tpText).join(" · ")}{#if s.dropped}<span class="sub small"> (+{s.dropped} the radio can't use)</span>{/if}</td>
               </tr>
@@ -196,6 +222,9 @@
   }
   .nm {
     white-space: nowrap;
+  }
+  td.pass.up {
+    color: var(--green);
   }
   tr.pickable {
     cursor: pointer;

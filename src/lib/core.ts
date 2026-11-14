@@ -326,7 +326,16 @@ export type RadioClock = { now: number; source: "none" | "GPS" | "set" };
 
 /** SAT-23: a satellite on the map (core/src/satmap.rs): where it is, its track for two orbits, the next pass over `place`. */
 export type SatPoint = { lat: number; lon: number };
-export type SatMap = { now: SatPoint; alt_km: number; footprint_km: number; track: SatPoint[][]; next: { aos: number; los: number; max_el: number } | null };
+export type SatPass = { aos: number; los: number; max_el: number };
+export type SatMap = { now: SatPoint; alt_km: number; footprint_km: number; track: SatPoint[][]; passes: SatPass[] };
+/** SAT-23: each satellite's next pass over `place` (null: none within two days), for the tables. */
+export const satNextPasses = (records: number[][], now: number, place: { lat: number; lon: number }): (SatPass | null)[] => {
+  if (!records.length) return [];
+  const len = records[0].length;
+  const all = new Uint8Array(records.length * len);
+  records.forEach((r, i) => all.set(r, i * len));
+  return JSON.parse(wasm.sat_next_passes(all, len, now, place.lat, place.lon));
+};
 export const satMap = (record: Uint8Array, now: number, place: { lat: number; lon: number } | null): SatMap =>
   JSON.parse(wasm.sat_map(record, now, !!place, place?.lat ?? 0, place?.lon ?? 0));
 export const satsParse = (json: string): SatsFile => JSON.parse(wasm.sats_parse(json));
