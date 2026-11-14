@@ -23,6 +23,7 @@ import { radio } from "./radio.svelte";
 import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
+import { newerFirmware } from "./updates.svelte";
 import { migrate } from "./migrate.svelte";
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
@@ -95,29 +96,40 @@ class Firmware {
     return this.blocks ? Math.floor((this.done * 100) / this.blocks) : 0;
   }
 
-  /** The Ferrite release bundled with Console (public/firmware/manifest.json, scripts/bundle-firmware.mjs). */
-  bundled = $state<{ version: string; file: string; sha256: string; minisig?: string } | null>(null);
+  /**
+   * The release Update offers: the one bundled with Console (public/firmware/manifest.json, scripts/bundle-firmware.mjs),
+   * or a newer one from the internet (UPD-25: `url` set), whichever is newer.
+   */
+  bundled = $state<{ version: string; file: string; sha256: string; minisig?: string; url?: string } | null>(null);
+  /** UPD-25: a newer Ferrite is out that speaks another link protocol: it needs a newer Console (its version). */
+  needsConsole = $state("");
+  #loading: Promise<void> | null = null;
 
-  /** The manifest, once: what the page offers besides a file (Ferrite to the next Ferrite from the browser). */
-  async loadBundled() {
-    if (this.bundled) return;
-    try {
-      const r = await appFetch("firmware/manifest.json", { cache: "no-cache" });
-      if (r.ok) this.bundled = (await r.json()).ferrite ?? null;
-    } catch {
-      // no bundled release in this copy of Console: a file only
-    }
+  /** The manifest, once, then the feed: what the page offers besides a file. */
+  loadBundled(): Promise<void> {
+    this.#loading ??= (async () => {
+      try {
+        const r = await appFetch("firmware/manifest.json", { cache: "no-cache" });
+        if (r.ok) this.bundled = (await r.json()).ferrite ?? null;
+      } catch {
+        // no bundled release in this copy of Console: a file only
+      }
+      const n = await newerFirmware(this.bundled?.version ?? "");
+      if (n && "usable" in n) this.bundled = { version: n.usable.version, file: n.usable.file, sha256: n.usable.sha256, url: n.usable.url };
+      else if (n) this.needsConsole = n.needsConsole;
+    })();
+    return this.#loading;
   }
 
   /**
-   * UPD-15: the bundled image, used only when its SHA-256 is the manifest's; then checked as a picked file, with the
-   * manifest's signature when it has one.
+   * UPD-15: the bundled image (or UPD-25's download), used only when its SHA-256 is the manifest's (the feed's); then
+   * checked as a picked file, with the manifest's signature when it has one (a .ffw's is inside: UPD-21).
    */
   async useBundled() {
     const r = this.bundled;
     if (this.running || !r) return;
     try {
-      const res = await appFetch(`firmware/${r.file}`, { cache: "no-cache" });
+      const res = r.url ? await fetch(r.url, { cache: "no-cache" }) : await appFetch(`firmware/${r.file}`, { cache: "no-cache" });
       if (!res.ok) throw new Error(`${r.file}: ${res.status}`);
       const b = new Uint8Array(await res.arrayBuffer());
       await loadCore();
@@ -127,7 +139,7 @@ class Firmware {
       if (r.minisig) files.push(new File([r.minisig], `${r.file}.minisig`));
       await this.pick(files);
     } catch (e) {
-      this.error = `The bundled release didn't load (${(e as Error).message}). Choose a file instead.`;
+      this.error = `The release didn't load (${(e as Error).message}). Choose a file instead.`;
     }
   }
 
