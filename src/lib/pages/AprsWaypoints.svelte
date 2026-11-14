@@ -10,6 +10,8 @@
   import { aprs, compass, distance } from "../aprs.svelte";
   import { href } from "../route.svelte";
   import { radio } from "../radio.svelte";
+  import { parseGpx, toGpx } from "../gpx";
+  import { saveBlob } from "../codeplug.svelte";
 
   // Rows show the core's checks and words: drawn once it has loaded (a reload straight to this tab).
   let coreUp = $state(false);
@@ -44,6 +46,30 @@
     search = "";
     picked = String(waypoints.add(`Waypoint ${n}`, from));
     queueMicrotask(() => document.querySelector<HTMLInputElement>("input[aria-label='Waypoint name']")?.select());
+  }
+
+  // Decision 396: GPX in and out. In: the file's waypoints on top, in its order, as many as there is room for.
+  let gpxInput: HTMLInputElement;
+  async function importGpx(e: Event) {
+    const el = e.currentTarget as HTMLInputElement;
+    const f = el.files?.[0];
+    el.value = "";
+    if (!f) return;
+    const pts = parseGpx(await f.text());
+    const room = Math.max(0, waypoints.max - waypoints.items.length);
+    const take = pts.slice(0, room);
+    for (const p of [...take].reverse()) waypoints.add(p.name, [p.lat, p.lon]);
+    search = "";
+    notice = {
+      text: !pts.length
+        ? `No waypoints in ${f.name}.`
+        : `Added ${take.length} waypoint${take.length === 1 ? "" : "s"} from ${f.name}${take.length < pts.length ? ` (${pts.length - take.length} left out: the radio holds ${waypoints.max})` : ""}. Write to put them on the radio.`,
+      undo: take.length > 0,
+    };
+  }
+  async function exportGpx() {
+    const name = await saveBlob("waypoints.gpx", new Blob([toGpx(waypoints.items.map((w) => ({ name: w.name, lat: w.lat / 1e7, lon: w.lon / 1e7 })))], { type: "application/gpx+xml" }));
+    if (name) notice = { text: `Saved ${waypoints.items.length} waypoints as ${name}.`, undo: false };
   }
 
   function remove(w: WaypointItem) {
@@ -81,6 +107,9 @@
 <ListPage store={waypoints} label="Waypoints" bind:notice>
   {#snippet find()}
     <input type="search" placeholder="Find a waypoint" aria-label="Find a waypoint" bind:value={search} />
+    <button class="btn quiet" disabled={waypoints.items.length >= waypoints.max} title="Add the waypoints in a GPX file (from a map app or a GPS)" onclick={() => gpxInput.click()}>Import GPX…</button>
+    <button class="btn quiet" disabled={!waypoints.items.length} title="Save these waypoints as a GPX file, for a map app or a GPS" onclick={exportGpx}>Export GPX</button>
+    <input bind:this={gpxInput} type="file" accept=".gpx,application/gpx+xml" hidden aria-label="GPX file" onchange={importGpx} />
   {/snippet}
   {#if coreUp}
   <ListDetail

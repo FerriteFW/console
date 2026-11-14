@@ -116,6 +116,41 @@ test("waypoints: one added by grid square, written, on the map, deleted again", 
   expect(await state(page, (f: any) => f.lists.waypoints.base.length as number)).toBe(before);
 });
 
+test("waypoints: GPX in (on top, names cut to 16), right-click on the map adds one, GPX out (decision 396)", async ({ page }) => {
+  await page.route(/tile\.openstreetmap\.org/, (r) => r.fulfill({ status: 204 }));
+  await openConsole(page, "aprs-waypoints");
+  await connect(page);
+  await read(page, "waypoints");
+  const before = await state(page, (f: any) => f.lists.waypoints.items.length as number);
+  const gpx = `<?xml version="1.0"?><gpx version="1.1"><wpt lat="49.2827" lon="-123.1207"><name>GPX one</name></wpt><wpt lat="48.9" lon="-122.5"><name>A very long waypoint name</name></wpt></gpx>`;
+  await page.getByLabel("GPX file").setInputFiles({ name: "trip.gpx", mimeType: "application/gpx+xml", buffer: Buffer.from(gpx) });
+  await expect(page.getByText("Added 2 waypoints from trip.gpx")).toBeVisible();
+  const items = await state(page, (f: any) => f.lists.waypoints.items.map((w: any) => w.name) as string[]);
+  expect(items.length).toBe(before + 2);
+  expect(items.slice(0, 2)).toEqual(["GPX one", "A very long wayp"]);
+  // Out: a GPX file with every waypoint
+  const dl = page.waitForEvent("download", { timeout: long });
+  await page.getByRole("button", { name: "Export GPX" }).click();
+  const text = await (await dl).createReadStream().then(async (st) => {
+    let t = "";
+    for await (const c of st) t += c;
+    return t;
+  });
+  expect(text).toContain("<name>GPX one</name>");
+  // The map: a right-click adds one there
+  await page.getByRole("tab", { name: "Map" }).click();
+  const map = page.locator("[data-map]");
+  await expect.poll(async () => (await map.getAttribute("data-map")) === "ready" || (await page.locator(".pg-banner.warn").count()) > 0, { timeout: 20_000 }).toBe(true);
+  if ((await map.getAttribute("data-map")) === "ready") {
+    await map.click({ button: "right", position: { x: 200, y: 200 } });
+    await expect(page.locator('[data-k="wp-note"]')).toContainText(`Added Waypoint ${before + 3}`);
+    expect(await state(page, (f: any) => f.lists.waypoints.items.length as number)).toBe(before + 3);
+  }
+  // Put back: nothing written
+  await page.getByRole("tab", { name: "Waypoints" }).click();
+  await state(page, (f: any) => f.lists.waypoints.revert());
+});
+
 test("DTMF memories: one set (lower case to capitals), refused symbols shown, written, read back, cleared", async ({ page }, info) => {
   await openConsole(page, "settings-dtmf");
   await connect(page);
