@@ -7,7 +7,7 @@ The companion app for [Ferrite](https://github.com/FerriteFW/ferrite), the free 
 ## Start here
 
 1. **Download** from the [Releases page](https://github.com/FerriteFW/console/releases):
-   - **macOS** (Apple silicon): the `.dmg`. It isn't notarized yet: if macOS won't open it, choose Open Anyway in System Settings › Privacy & Security.
+   - **macOS** (Apple silicon and Intel): the `.dmg`, signed and notarized.
    - **Linux:** the `.AppImage`. Make it executable (`chmod +x`), then run it. For the cable, your user needs to be in the `dialout` group.
    - **Windows 10 and 11:** the portable `.exe`. No installer: run it from anywhere.
 2. **Connect** the radio by its programming cable, or by Bluetooth once Ferrite is on it.
