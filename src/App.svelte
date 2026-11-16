@@ -36,6 +36,7 @@
   import AprsWaypoints from "./lib/pages/AprsWaypoints.svelte";
   import DtmfMemories from "./lib/pages/DtmfMemories.svelte";
   import Satellites from "./lib/pages/Satellites.svelte";
+  import Pictures from "./lib/pages/Pictures.svelte";
   import { satellites } from "./lib/satellites.svelte";
   import { lists } from "./lib/lists.svelte";
   import { loadCore, P } from "./lib/core";
@@ -75,6 +76,7 @@
       ],
     },
     { id: "satellites", name: "Satellites" },
+    { id: "pictures", name: "Pictures" },
     {
       id: "firmware",
       name: "Firmware",
@@ -264,6 +266,8 @@
         <DtmfMemories />
       {:else if page === "satellites"}
         <Satellites />
+      {:else if page === "pictures"}
+        <Pictures />
       {/if}
     </main>
   </div>
