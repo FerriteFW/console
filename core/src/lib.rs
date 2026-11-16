@@ -40,6 +40,8 @@ pub mod audio;
 pub mod aprs_settings;
 pub mod channels;
 pub mod chirp;
+#[cfg(test)]
+mod chirp_fuzz;
 pub mod crossband;
 #[cfg(test)]
 mod codeplug_example;

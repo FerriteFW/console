@@ -272,10 +272,10 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
             continue;
         };
         let number = match locs[k] {
-            Some(l) => l + shift,
+            Some(l) => l.saturating_add(shift),
             None => next,
         };
-        next = number + 1;
+        next = number.saturating_add(1);
         if !(1..=MAX_CHANNELS as u32).contains(&number) {
             note(format!("location {number}: the radio has channels 1 to {MAX_CHANNELS}: skipped"));
             out.skipped += 1;
