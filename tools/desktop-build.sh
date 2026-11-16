@@ -4,7 +4,8 @@
 # commit of this repo and of ../ferrite there (what's committed, not the working tree) plus the bundled firmware
 # (scripts/bundle-firmware.mjs, from ../ferrite/target), builds, and brings the
 # bundles back to target/desktop/. `mac` builds the macOS app (.app and .dmg) here instead (macOS only; unsigned:
-# fine on the Mac that built it). Usage: tools/desktop-build.sh [linux|windows|mac|all] [--host USER@HOST]
+# fine on the Mac that built it); universal: Apple silicon and Intel in one app (MAC_TARGET=aarch64-apple-darwin for
+# this Mac's alone). Usage: tools/desktop-build.sh [linux|windows|mac|all] [--host USER@HOST]
 # (all = linux and windows; mac separately)
 # Windows: cargo-xwin downloads Microsoft's CRT and Windows SDK on its first run (kept in a cache volume there);
 # using them means accepting Microsoft's licence for them. Besides the NSIS setup.exe it brings back the bare app
@@ -50,15 +51,19 @@ if [ "$what" = mac ]; then
     profile=${NOTARY_PROFILE:-FerriteConsole}
     xcrun notarytool history --keychain-profile "$profile" >/dev/null 2>&1 || { echo "mac: no notarization profile $profile in the keychain (see above)" >&2; exit 1; }
   fi
+  # One app for Apple silicon and Intel Macs (Rust's x86_64-apple-darwin target: `rustup target add` once).
+  mt=${MAC_TARGET:-universal-apple-darwin}
+  out=target/$mt/release/bundle
+  rm -rf "$out"
   # unsigned: the variable left out (an empty one makes Tauri sign with an identity named "", which fails)
   if [ -n "$identity" ]; then
-    APPLE_SIGNING_IDENTITY="$identity" npx tauri build --bundles app,dmg ${upd[@]+"${upd[@]}"} 2>&1 | tail -n 8
+    APPLE_SIGNING_IDENTITY="$identity" npx tauri build --target "$mt" --bundles app,dmg ${upd[@]+"${upd[@]}"} 2>&1 | tail -n 8
   else
-    env -u APPLE_SIGNING_IDENTITY npx tauri build --bundles app,dmg ${upd[@]+"${upd[@]}"} 2>&1 | tail -n 8
+    env -u APPLE_SIGNING_IDENTITY npx tauri build --target "$mt" --bundles app,dmg ${upd[@]+"${upd[@]}"} 2>&1 | tail -n 8
   fi
-  dmg=$(ls target/release/bundle/dmg/*.dmg | head -n 1)
+  dmg=$(ls $out/dmg/*.dmg | head -n 1)
   if [ -n "$identity" ]; then
-    codesign --verify --deep --strict target/release/bundle/macos/*.app
+    codesign --verify --deep --strict $out/macos/*.app
     codesign --force --timestamp --sign "$identity" "$dmg"
     xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait
     xcrun stapler staple "$dmg"
@@ -66,8 +71,9 @@ if [ "$what" = mac ]; then
   fi
   mkdir -p target/desktop
   rm -rf "target/desktop/Ferrite Console.app"
-  cp -R target/release/bundle/macos/*.app "$dmg" target/desktop/
-  [ ${#upd[@]} -eq 0 ] || cp target/release/bundle/macos/*.app.tar.gz target/release/bundle/macos/*.app.tar.gz.sig target/desktop/
+  rm -f target/desktop/*.dmg
+  cp -R $out/macos/*.app "$dmg" target/desktop/
+  [ ${#upd[@]} -eq 0 ] || cp $out/macos/*.app.tar.gz $out/macos/*.app.tar.gz.sig target/desktop/
   ls -la target/desktop
   exit 0
 fi

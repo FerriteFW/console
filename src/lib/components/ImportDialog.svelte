@@ -14,6 +14,8 @@
   const clashes = $derived(imp ? imp.channels.filter((c) => channels.table.channels.some((t) => t.number === c.number)).length : 0);
   const nz = $derived(imp ? chirpNewZone($state.snapshot(imp.channels), $state.snapshot(channels.table), zoneName) : null);
   const byComment = $derived(imp ? imp.channels.filter((c) => c.zone !== null).length : 0);
+  /** Merge or replace: the channels that name no zone, which go in the zone CHIRP. */
+  const loose = $derived(imp ? imp.channels.length - byComment : 0);
   const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
   // A new file: its zone name, and the default way in.
@@ -73,6 +75,9 @@
       </div>
       <label class="opt"><input type="radio" name="how" value="merge" checked={how === "merge"} onchange={() => (how = "merge")} /> Merge by number: {clashes} of the table's channels replaced, the rest kept</label>
       <label class="opt"><input type="radio" name="how" value="replace" checked={how === "replace"} onchange={() => (how = "replace")} /> Replace every channel in the table</label>
+      {#if how !== "zone" && loose}
+        <p class="plan">{plural(loose, "channel")} whose Comment names no zone go in the zone CHIRP.</p>
+      {/if}
       {#if over.length}
         <div class="more" role="alert">
           {#each over as o (o.number)}

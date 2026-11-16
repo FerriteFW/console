@@ -929,7 +929,9 @@ export class Link {
               const p = ops[i + k].payloads[0];
               body.set([p[1], p[2], 0], 1 + k * 3);
             }
-            const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+            // each delete is a flash write on the radio: 79 took black 4.3 s (Nov 16, 2026), past the 2 s a cable
+            // request waits, and Console said the radio had stopped answering
+            const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body, deleteWaitMs(this.timeout(), dels));
             if (status !== 0) {
               const done = rest.length ? rest[0] : 0;
               throw new WriteError(ops[i + done], i + done, new RadioError(P.msg.WRITE_MANY, status, rest.slice(1)));
@@ -963,6 +965,12 @@ export class Link {
       }
     });
   }
+}
+
+/** How long a frame of `n` channel deletes may take to answer: the request's own wait, and 100 ms a delete (black
+ *  took 55 ms each: Nov 16, 2026). */
+export function deleteWaitMs(base: number, n: number): number {
+  return base + n * 100;
 }
 
 /** A WRITE whose record fits one part: [what, index, offset 0, total, bytes] with the whole record in it. */

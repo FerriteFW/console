@@ -2,7 +2,7 @@
 // A release's files, from tools/desktop-build.sh's target/desktop/ (DEVELOPING.md, "Releases"):
 //   node tools/release-files.mjs --ffw ferrite-0.9.0.ffw [--protocol 1]
 // -> target/desktop/release/: the installers under their release names, the update bundles and their signatures,
-// Tauri's latest.json (Console's own updates, UPD-26: macOS and the Linux AppImage; Windows' portable .exe has none and
+// Tauri's latest.json (Console's own updates, UPD-26: macOS, Apple silicon and Intel, and the Linux AppImage; Windows' portable .exe has none and
 // links to the download) and feed.json (UPD-25, format `ferrite-feed-1`: the latest Ferrite and Console), which goes
 // to ferritefw.dev/releases/latest.json with the .ffw beside it.
 import { createHash } from "node:crypto";
@@ -29,11 +29,11 @@ const one = (re, what) => {
 };
 const put = (src, name) => (copyFileSync(join(from, src), join(out, name)), name);
 
-const dmg = put(one(new RegExp(`_${version}_.*\\.dmg$`), "the .dmg"), `Ferrite-Console-${version}-macos-arm64.dmg`);
+const dmg = put(one(new RegExp(`_${version}_.*\\.dmg$`), "the .dmg"), `Ferrite-Console-${version}-macos-universal.dmg`);
 const appimage = put(one(new RegExp(`_${version}_.*\\.AppImage$`), "the AppImage"), `Ferrite-Console-${version}-linux-x86_64.AppImage`);
 const rpm = put(one(new RegExp(`-${version}-.*\\.rpm$`), "the .rpm"), `Ferrite-Console-${version}-linux-x86_64.rpm`);
 const exe = put(one(/portable\.exe$/, "the portable .exe"), `Ferrite-Console-${version}-windows-x64-portable.exe`);
-const app = put(one(/\.app\.tar\.gz$/, "the macOS update bundle"), `Ferrite-Console-${version}-macos-arm64.app.tar.gz`);
+const app = put(one(/\.app\.tar\.gz$/, "the macOS update bundle"), `Ferrite-Console-${version}-macos-universal.app.tar.gz`);
 const sig = (f) => readFileSync(join(from, f), "utf8").trim();
 const appSig = sig(one(/\.app\.tar\.gz\.sig$/, "its signature"));
 const imgSig = sig(one(new RegExp(`_${version}_.*\\.AppImage\\.sig$`), "the AppImage's signature"));
@@ -46,7 +46,9 @@ writeFileSync(
       notes: `Ferrite Console ${version}: https://github.com/FerriteFW/console/releases/tag/${tag}`,
       pub_date: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
       platforms: {
+        // one universal app (Apple silicon and Intel): the same bundle for both
         "darwin-aarch64": { signature: appSig, url: `${dl}/${app}` },
+        "darwin-x86_64": { signature: appSig, url: `${dl}/${app}` },
         "linux-x86_64": { signature: imgSig, url: `${dl}/${appimage}` },
       },
     },
