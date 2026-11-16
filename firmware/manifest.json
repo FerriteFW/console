@@ -1,0 +1,9 @@
+{
+ "reader": {
+  "version": "ferrite-reader v0.9.0",
+  "file": "ferrite-reader.btf",
+  "sha256": "f1215bf239e60db33637e5ef4d3e1d269b36fbb767de99e74686601fd7e0d494",
+  "bytes": 37888,
+  "minisig": "untrusted comment: signature from minisign secret key\nRUQbhRdY9EcsW4C6NTmjNB7fyMMTcRZkZCrLfhbB/zpKz8OolDhLoTRJnPVELMPLfYpKVBlyu9HsDc/LmeY0B8GlXPCHEaXtigU=\ntrusted comment: Ferrite v0.9.0 42780f8\nXHc2rlh2Qr6spdQ3V4zygCAbj/gLZ9vACoUOETowoXwkC4/zOJLvS409+MKKjgP9VvbJKRFgYPH9eQArKH6NCw==\n"
+ }
+}
