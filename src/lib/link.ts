@@ -35,6 +35,12 @@ import { sleep, type Transport } from "./transport/types";
 
 export const CLIENT_NAME = "Ferrite Console";
 
+/** Windows (the app or a browser): its serial stack and Console struggle above 115200, so the cable stays there. */
+export const IS_WINDOWS = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+
+/** The rates Console raises the cable to, best first (LINK-13.3); none on Windows, which stays at 115200. */
+export const cableFastRates = (): number[] => (IS_WINDOWS ? [] : P.timing.cable_fast_rates);
+
 export class RadioError extends Error {
   constructor(
     readonly ty: number,
@@ -481,7 +487,7 @@ export class Link {
    * port switched and HELLO at the new rate within 1 s. A refusal tries the next rate; a HELLO that doesn't come
    * back puts the port back at 115200, waits out the radio's own fall-back, and HELLOs there. The rate in use.
    */
-  raiseBaud(rates: number[] = P.timing.cable_fast_rates): Promise<number> {
+  raiseBaud(rates: number[] = cableFastRates()): Promise<number> {
     const t = this.t;
     if (!t.setBaud) return Promise.resolve(t.baud ?? 0);
     const { BAUD, HELLO } = P.msg;

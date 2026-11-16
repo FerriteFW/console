@@ -19,6 +19,7 @@
 - The faster cable rate is on by default. A refusal leaves 115200 and says so.
 - The cable tops out at 460800 on the Mac's CH340. At 921600 the radio switches but never answers.
 - Since Oct 23, 2026 the cable runs at 230400 (ferrite decision 266): long transfers at 460800 lost bytes through a USB extension. 230400 is the safe rate for everything.
+- Since Nov 16, 2026 Console keeps the cable at 115200 on Windows (the app and browsers): Windows and Console struggled above it. Backups there use fdumpz at 115200 too. Other platforms are unchanged.
 
 ## Events and Live View (Oct 20, 2026)
 

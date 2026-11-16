@@ -48,7 +48,7 @@ import {
 import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
-import { Link, TimeoutError } from "./link";
+import { IS_WINDOWS, Link, TimeoutError } from "./link";
 import { radio } from "./radio.svelte";
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
@@ -705,13 +705,13 @@ class Install {
     throw new Error("The reader didn't start. Turn the radio off and on, then start the backup again.");
   }
 
-  /** The whole chip: the Rust reader's fdumpz at 230400 (BACKUP-9.6, ferrite decision 265) when the reader image
+  /** The whole chip: the Rust reader's fdumpz at 230400 (115200 on Windows) (BACKUP-9.6, ferrite decision 265) when the reader image
    * has it, else (hwtest's reader, or a reader that answers `?`) fdump from the fastest rate down (flashdump.py's
    * read_range). */
   private async readChip(size: number): Promise<Uint8Array> {
     let last: Error | null = null;
     if (this.readerFile && readerHasFdumpz(this.readerFile.bytes)) {
-      const rate = this.t!.setBaud ? FDUMPZ_BAUD : READER_RATES[READER_RATES.length - 1];
+      const rate = this.t!.setBaud && !IS_WINDOWS ? FDUMPZ_BAUD : READER_RATES[READER_RATES.length - 1];
       for (let tries = 0; tries < 2; tries++) {
         try {
           return await this.fdump(size, rate, true);
@@ -726,7 +726,7 @@ class Install {
       }
       if (!(last instanceof NoFdumpz)) throw this.readFailed(last);
     }
-    for (const rate of this.t!.setBaud ? READER_RATES : [READER_RATES[READER_RATES.length - 1]]) {
+    for (const rate of this.t!.setBaud && !IS_WINDOWS ? READER_RATES : [READER_RATES[READER_RATES.length - 1]]) {
       try {
         return await this.fdump(size, rate, false);
       } catch (e) {
