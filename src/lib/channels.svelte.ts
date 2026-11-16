@@ -3,7 +3,7 @@
 // first, then the diff, then the write session on confirm), CHIRP CSV in and out, backup files out and back in.
 // Unwritten edits are kept in IndexedDB (restored on the next visit); each table edit can be undone (`undo`).
 // Every record layout, check, diff and conversion is the Rust core's; this file only moves them and the files.
-import { saveDownload } from "./download";
+import { saveAs, saveDownload } from "./download";
 import {
   P,
   backupFile,
@@ -586,8 +586,9 @@ class Channels {
   async exportChirp() {
     this.error = "";
     try {
-      const to = await download(`${this.fileBase()}-chirp.csv`, chirpExport(this.table), "text/csv");
-      this.source = `Exported as CHIRP CSV: ${to}`;
+      // The desktop app asks where (the save dialog); cancelled: nothing said
+      const to = await saveAs(`${this.fileBase()}-chirp.csv`, new Blob([chirpExport(this.table)], { type: "text/csv" }));
+      if (to) this.source = `Exported as CHIRP CSV: ${to}`;
     } catch (e) {
       this.error = `CHIRP export: ${(e as Error).message ?? e}`;
     }

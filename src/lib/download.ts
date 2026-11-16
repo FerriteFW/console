@@ -21,3 +21,15 @@ export async function saveDownload(name: string, blob: Blob): Promise<string> {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
   return name;
 }
+
+/** Saves `blob` where the owner picks: the desktop app's save dialog (null when cancelled), or a browser download
+ *  (the browser's own setting decides whether it asks). The name it went as. */
+export async function saveAs(name: string, blob: Blob): Promise<string | null> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const path = await invoke<string | null>("save_file", bytes, { headers: { "x-name": name } });
+    return path ? (path.split(/[\\/]/).pop() ?? name) : null;
+  }
+  return saveDownload(name, blob);
+}
