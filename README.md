@@ -2,7 +2,7 @@
 
 The companion app for [Ferrite](https://github.com/FerriteFW/ferrite), the free firmware for the [Radtel RT-950 Pro](https://www.radtels.com/products/radtel-rt-950-pro-27mhz-tx-rx-10w-walkie-talkie-am-fm-usb-lsb-cw-receive-gps-aprs-wireless-bluetooth-phone-programming-noaa-two-way-radio?ref=FERRITEFW&variant=44669996794064) (affiliate link: buying through it supports Ferrite at no extra cost to you).
 
-> **Status: alpha (0.8),** released together with Ferrite 0.8.
+> **Status: 0.9, the first public release,** released together with Ferrite 0.9.
 
 ## Start here
 

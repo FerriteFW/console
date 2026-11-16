@@ -1,13 +1,13 @@
 // UPD-25, UPD-26 (ferrite decision 394): newer releases from the internet, so a new Ferrite needs no new Console and
-// Console can update itself. Off until the releases are public (Alex, Nov 13, 2026: "we can write it in, but cant use
-// it yet"): with UPDATES_ON false nothing is fetched and nothing shows.
+// Console can update itself. On since 0.9.0, the first public release (written Nov 13, 2026, and off until then).
+// With UPDATES_ON false nothing is fetched and nothing shows.
 import { P } from "./core";
 import { isTauri } from "./transport/native";
 import { olderThan } from "./version";
 import { isFeed, newerIn, type Feed } from "./feed";
 import { CONSOLE_VERSION } from "./codeplug.svelte";
 
-export const UPDATES_ON = false;
+export const UPDATES_ON = true;
 
 /** UPD-25: the feed naming the latest Ferrite (and Console), served with CORS so the web build can read it too. */
 export const FEED = "https://ferritefw.dev/releases/latest.json";

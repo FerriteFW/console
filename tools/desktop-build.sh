@@ -12,7 +12,7 @@
 set -euo pipefail
 # DEBUG=1: every command as it runs, and ssh's own connection log.
 [ -n "${DEBUG:-}" ] && set -x
-host=${FERRITE_XEON:-infamy@192.168.7.162}
+host=${FERRITE_XEON:-xeon}
 what=all
 while [ $# -gt 0 ]; do
   case $1 in
@@ -22,6 +22,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 here=$(cd "$(dirname "$0")/.." && pwd)
+# Console's own updates (UPD-26): a release build signs the update bundles (the macOS .app.tar.gz, the Linux AppImage)
+# with the updater key (never the firmware key): the file ~/.tauri/ferrite-console-updater.key, its password in the
+# keychain. UNSIGNED=1, or no key here, builds without them. tools/release-files.mjs then writes latest.json.
+updkey=${TAURI_UPDATER_KEY:-$HOME/.tauri/ferrite-console-updater.key}
+upd=()
+if [ -z "${UNSIGNED:-}" ] && [ -f "$updkey" ]; then
+  TAURI_SIGNING_PRIVATE_KEY=$(cat "$updkey")
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(security find-generic-password -s ferrite-console-updater -w)
+  export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+  upd=(--config '{"bundle":{"createUpdaterArtifacts":true}}')
+fi
 # The third-party notices About shows must match what this build links (tools/thirdparty.py).
 python3 "$here/tools/thirdparty.py" --check
 if [ "$what" = mac ]; then
@@ -41,9 +52,9 @@ if [ "$what" = mac ]; then
   fi
   # unsigned: the variable left out (an empty one makes Tauri sign with an identity named "", which fails)
   if [ -n "$identity" ]; then
-    APPLE_SIGNING_IDENTITY="$identity" npx tauri build --bundles app,dmg 2>&1 | tail -n 8
+    APPLE_SIGNING_IDENTITY="$identity" npx tauri build --bundles app,dmg ${upd[@]+"${upd[@]}"} 2>&1 | tail -n 8
   else
-    env -u APPLE_SIGNING_IDENTITY npx tauri build --bundles app,dmg 2>&1 | tail -n 8
+    env -u APPLE_SIGNING_IDENTITY npx tauri build --bundles app,dmg ${upd[@]+"${upd[@]}"} 2>&1 | tail -n 8
   fi
   dmg=$(ls target/release/bundle/dmg/*.dmg | head -n 1)
   if [ -n "$identity" ]; then
@@ -56,6 +67,7 @@ if [ "$what" = mac ]; then
   mkdir -p target/desktop
   rm -rf "target/desktop/Ferrite Console.app"
   cp -R target/release/bundle/macos/*.app "$dmg" target/desktop/
+  [ ${#upd[@]} -eq 0 ] || cp target/release/bundle/macos/*.app.tar.gz target/release/bundle/macos/*.app.tar.gz.sig target/desktop/
   ls -la target/desktop
   exit 0
 fi
@@ -75,10 +87,20 @@ git -C "$here" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite-console"
 # FIRMWARE="RELEASE.ffw READER.btf" bundles a signed release (its .minisig files beside); else ../ferrite/target's.
 node "$here/scripts/bundle-firmware.mjs" ${FIRMWARE:-} >/dev/null
 COPYFILE_DISABLE=1 tar -C "$here" -c public/firmware | $ssh "$host" "rm -rf $dir/ferrite-console/public/firmware && tar -x -C $dir/ferrite-console"
+# The updater key goes over as an env file only the build reads (mode 600), deleted when the build ends.
+if [ ${#upd[@]} -gt 0 ]; then
+  printf 'TAURI_SIGNING_PRIVATE_KEY=%s\nTAURI_SIGNING_PRIVATE_KEY_PASSWORD=%s\n' "$TAURI_SIGNING_PRIVATE_KEY" "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" |
+    $ssh "$host" "umask 077 && cat > $dir/updater.env"
+else
+  $ssh "$host" "rm -f $dir/updater.env"
+fi
 $ssh "$host" bash -s -- "$dir" "$what" <<'REMOTE'
 set -euo pipefail
 dir=$HOME/$1 what=$2
 cd "$dir"
+envf=() upd=""
+if [ -f updater.env ]; then envf=(--env-file "$dir/updater.env"); upd=" --config '{\"bundle\":{\"createUpdaterArtifacts\":true}}'"; fi
+trap 'rm -f "$dir/updater.env"' EXIT
 # Two build boxes: Linux on Ubuntu 22.04 (tools/desktop/linux: the oldest glibc to support), Windows on Debian 13
 # (tools/desktop: NSIS 3.11 for the installer). Each its own cargo target folder: build scripts compiled against one
 # glibc don't run on the other.
@@ -86,16 +108,17 @@ cd "$dir"
 [ "$what" = linux ] || docker build -q -t ferrite-console-desktop "$dir/ferrite-console/tools/desktop" >/dev/null
 docker volume create ferrite-console-xwin >/dev/null
 run() { # IMAGE TARGET-DIR COMMAND
-  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e XWIN_CACHE_DIR=/xwin -e CARGO_TARGET_DIR="/src/ferrite-console/$2" \
+  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e XWIN_CACHE_DIR=/xwin -e CARGO_TARGET_DIR="/src/ferrite-console/$2" ${envf[@]+"${envf[@]}"} \
     -v "$dir:/src" -v ferrite-console-xwin:/xwin -w /src/ferrite-console "$1" bash -c "npm ci --no-audit --no-fund --silent && $3"
 }
 docker run --rm -v ferrite-console-xwin:/xwin alpine chmod 777 /xwin
 out=$dir/out; rm -rf "$out"; mkdir -p "$out"
 if [ "$what" != windows ]; then
   rm -rf ferrite-console/target-linux/release/bundle # only this build's installers, not every older version's
-  run ferrite-console-desktop-linux target-linux 'npx tauri build 2>&1 | tail -n 15'
+  run ferrite-console-desktop-linux target-linux "npx tauri build$upd 2>&1 | tail -n 15"
   cp ferrite-console/target-linux/release/bundle/deb/*.deb ferrite-console/target-linux/release/bundle/rpm/*.rpm \
-     ferrite-console/target-linux/release/bundle/appimage/*.AppImage "$out/" 2>/dev/null || true
+     ferrite-console/target-linux/release/bundle/appimage/*.AppImage ferrite-console/target-linux/release/bundle/appimage/*.AppImage.sig \
+     "$out/" 2>/dev/null || true
 fi
 if [ "$what" != linux ]; then
   rm -rf ferrite-console/target/x86_64-pc-windows-msvc/release/bundle

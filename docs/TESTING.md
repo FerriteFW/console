@@ -61,7 +61,7 @@ Open `target/release/bundle/macos/Ferrite Console.app` (unsigned: right-click �
 1. Connect › Cable: a list pops up under the bar. The CH340 (`usbserial-…`) is first. Pick it: "230400 baud".
 2. Run the Cable checks above. Unplug: the bar says so. Disconnect: `term.py` answers at 115200.
 3. Connect › Bluetooth: macOS asks for Bluetooth access once. Allow it.
-4. The list shows each radio by its ID, strongest first. Clear is `5F9EEB12-…`, black `E5A6A6FF-…`. Pick one.
+4. The list shows each radio by its ID, strongest first. Pick one.
 5. Run the Bluetooth checks above. Cancel and Esc close the list without an error.
 6. Write a channel table: the backup file lands in ~/Downloads (the webview's downloads are the open question).
 
