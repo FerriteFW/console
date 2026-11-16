@@ -4,7 +4,7 @@
 // carries the APRS events the APRS pages ask for.
 import { debugLog } from "./debuglog";
 import { LiveClient, loadCore, P, parseEvent, parseUi, stateMerge, stateParse, tunePayload, type AprsEvent, type Hello, type Info, type RadioNow, type TuneOp, type Ui } from "./core";
-import { Link, RadioError, TimeoutError } from "./link";
+import { IS_WINDOWS, Link, RadioError, TimeoutError } from "./link";
 import { mismatch, type Mismatch } from "./mismatch.ts";
 import { provider, type Transport, type TransportKind } from "./transport";
 import { BridgeTransport } from "./transport/bridge";
@@ -327,11 +327,11 @@ class Radio {
       if (rate) this.note = rate > 9600 ? "Bluetooth at 115200" : "Bluetooth at 9600";
     }
     if (this.t?.setBaud) {
-      // LINK-13.3: the cable at 230400, else 115200 (ferrite decision 266).
+      // LINK-13.3: the cable at 230400, else 115200 (ferrite decision 266); Windows stays at 115200.
       try {
         const rate = await link.raiseBaud();
         this.baud = rate;
-        this.note = rate > 115200 ? `${rate} baud` : "115200 baud (the radio kept its rate)";
+        this.note = rate > 115200 ? `${rate} baud` : IS_WINDOWS ? "115200 baud" : "115200 baud (the radio kept its rate)";
       } catch (e) {
         this.baud = this.t.baud ?? null;
         this.note = `115200 baud (${(e as Error).message})`;

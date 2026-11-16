@@ -4,7 +4,7 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 
 ## Cable
 
-1. Connect › Cable, pick the CH340. Expect "230400 baud".
+1. Connect › Cable, pick the CH340. Expect "230400 baud" ("115200 baud" on Windows).
 2. Radio panel: firmware, build, callsign, unique ID match About (MENU 0 9 9).
 3. The screen matches the radio's home.
 4. MENU opens quick settings; ▲▼ move; BACK returns. Hold MENU: advanced settings. Hold #: key lock.
@@ -58,7 +58,7 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 
 Open `target/release/bundle/macos/Ferrite Console.app` (unsigned: right-click › Open the first time). Close `term.py` first.
 
-1. Connect › Cable: a list pops up under the bar. The CH340 (`usbserial-…`) is first. Pick it: "230400 baud".
+1. Connect › Cable: a list pops up under the bar. The CH340 (`usbserial-…`) is first. Pick it: "230400 baud" ("115200 baud" on Windows).
 2. Run the Cable checks above. Unplug: the bar says so. Disconnect: `term.py` answers at 115200.
 3. Connect › Bluetooth: macOS asks for Bluetooth access once. Allow it.
 4. The list shows each radio by its ID, strongest first. Pick one.
