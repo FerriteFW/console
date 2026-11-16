@@ -17,7 +17,7 @@ import {
 } from "../../src/lib/sstv.ts";
 
 test("sstv: slot addresses (SSTV-4)", () => {
-  assert.equal(slotAddr(0), 0x0c0000);
+  assert.equal(slotAddr(0), 0x15d000);
   assert.equal(slotAddr(1), 0x0e9000);
   assert.equal(slotAddr(5), 0x18d000);
   assert.equal(slotAddr(5) + 0x29000 - 1, 0x1b5fff);

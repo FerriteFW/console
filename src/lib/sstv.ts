@@ -1,14 +1,14 @@
-// SSTV pictures on the radio (ferrite manual chapter 27a, SSTV-4, decision 403): six slots in the SPI flash, each a
-// 64-byte header and 320 x 256 pixels in RGB565. Slots 0 and 1 hold pictures to send (Console writes them), 2 to 5 the
-// four newest received. Pure: the slots' addresses, the header both ways, the pixels both ways, the cover crop, and
+// SSTV pictures on the radio (ferrite manual chapter 27a, SSTV-4, decisions 403 and 404): four slots in the SPI flash,
+// past the stock bootloader's fonts (0x0E0000-0x15CFFF, never written), each a 64-byte header and 320 x 256 pixels in
+// RGB565. Slot 0 holds the picture to send (Console writes it), 1 to 3 the three newest received. Pure: the slots' addresses, the header both ways, the pixels both ways, the cover crop, and
 // the raw writes (`DATA_WRITE` ERASE and PROGRAM, LINK-60) that put a picture in a slot.
 
-export const BASE = 0x0c0000;
+export const BASE = 0x15d000;
 export const SLOT_SIZE = 0x29000;
-export const SLOTS = 6;
-/** Slots 0 and 1: pictures to send; 2 to 5: received. */
-export const SEND_SLOTS = [0, 1];
-export const RECEIVED_SLOTS = [2, 3, 4, 5];
+export const SLOTS = 4;
+/** Slot 0: the picture to send; 1 to 3: received. */
+export const SEND_SLOTS = [0];
+export const RECEIVED_SLOTS = [1, 2, 3];
 export const SECTOR = 4096;
 export const SECTORS = SLOT_SIZE / SECTOR; // 41
 export const PIXELS_AT = 0x1000;
@@ -164,7 +164,7 @@ function programs(addr: number, bytes: Uint8Array): Op[] {
 }
 
 /**
- * SSTV-4.5: a picture to send into slot `k` (0 or 1): the slot's 41 sectors erased, the pixels programmed, the header
+ * SSTV-4.5: a picture to send into slot `k` (0): the slot's 41 sectors erased, the pixels programmed, the header
  * last (so a cut write leaves an empty slot, never a header over half a picture).
  */
 export function writePlan(k: number, px: Uint8Array, h: Header): { body: Op[]; header: Op[] } {
