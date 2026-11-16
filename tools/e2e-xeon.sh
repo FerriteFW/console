@@ -4,7 +4,7 @@
 # the root CLAUDE.md). Usage: tools/e2e-xeon.sh [--dir DIR] [--host USER@HOST] [-v] [playwright args...]
 # DIR is relative to the home directory there (default code/rt950pro/ferrite-console; keep it next to ferrite/).
 set -euo pipefail
-host=${FERRITE_XEON:-infamy@192.168.7.162}
+host=${FERRITE_XEON:-xeon}
 dir=code/rt950pro/ferrite-console
 full=0
 while [ $# -gt 0 ]; do

@@ -16,4 +16,4 @@ We'd rather have an issue than an AI-generated pull request.
 - A pull request from a tool without that context is hard to review and tends to miss why things are the way they are.
 - The same idea as an issue gets in faster, and you're credited for it.
 
-Code contributions will also need a contributor licence agreement, coming before the repositories go public.
+**Pull requests aren't accepted yet.** Code contributions will need a contributor licence agreement (CLA), which isn't ready. Until then, please open an issue: that's the fastest way in.

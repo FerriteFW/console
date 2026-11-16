@@ -54,15 +54,17 @@ FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh all --host USER@HOST   
 ```
 
 - `FIRMWARE` names the Ferrite release to build in (its signed `.ffw` and the signed reader, `.minisig` beside it). Without it, `../ferrite/target`'s local build goes in.
-- The build box is reached over ssh and needs Docker; without `--host` it's ours.
+- The build box is reached over ssh and needs Docker: `--host`, or `FERRITE_XEON`, or else an ssh host named `xeon`.
 - It first checks `public/THIRD-PARTY-LICENSES.md` (About's third-party licences) against what the app links; after a dependency change run `python3 tools/thirdparty.py` and commit the file.
-- Updates (UPD-25, UPD-26; off until the releases are public: `UPDATES_ON` in `src/lib/updates.svelte.ts`). To turn
-  them on: (1) each Ferrite release also publishes the feed (format `ferrite-feed-1`, `src/lib/feed.ts`) and its .ffw
-  where `FEED` points, with CORS; (2) set `bundle.createUpdaterArtifacts` in `src-tauri/tauri.conf.json` and give the
-  builds the updater key: `TAURI_SIGNING_PRIVATE_KEY=~/.tauri/ferrite-console-updater.key` and
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` from the keychain (`security find-generic-password -s ferrite-console-updater -w`);
-  never the firmware key; (3) attach Tauri's `latest.json` and the update bundles to the Console release; (4) set
-  `UPDATES_ON`. The public key is in `tauri.conf.json`.
+- Updates (UPD-25, UPD-26; on since 0.9.0, `UPDATES_ON` in `src/lib/updates.svelte.ts`). A release build signs
+  Console's update bundles (the macOS `.app.tar.gz`, the Linux AppImage) with the updater key: the file
+  `~/.tauri/ferrite-console-updater.key`, its password in the keychain (`ferrite-console-updater`); never the firmware
+  key. `UNSIGNED=1`, or no key on the Mac, builds without them. The public key is in `tauri.conf.json`.
+- Releases: after `mac` and `all`, `node tools/release-files.mjs --ffw ferrite-X.Y.Z.ffw` writes `target/desktop/release/`:
+  the installers under their release names, the update bundle, Tauri's `latest.json` (attach all of them to the
+  GitHub release: the updater reads `releases/latest/download/latest.json`), and `feed.json` with the `.ffw`: these
+  two go on ferritefw.dev as `releases/latest.json` and `releases/ferrite-X.Y.Z.ffw` (the website repo's
+  `src/releases/`), where `FEED` points. Windows' portable `.exe` doesn't update itself: it links to the download.
 - Out: `target/desktop/`. A release ships the `.dmg`, the `.AppImage` and the Windows portable `.exe`.
 - The Mac build is signed with the team's Developer ID and notarized: it needs the "Developer ID Application" certificate in the keychain and the notarization profile `FerriteConsole` (`xcrun notarytool store-credentials FerriteConsole --team-id TEAM --apple-id APPLE_ID`, once). `UNSIGNED=1` builds without. The Linux and Windows builds aren't signed.
 
