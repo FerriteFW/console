@@ -53,7 +53,7 @@
       <button class="btn" disabled={!connected || !!c.busy} onclick={() => c.read()}>Read from radio</button>
       <button class="btn" disabled={!connected || !!c.busy} onclick={() => fileInput.click()}>Import CSV…</button>
       <input bind:this={fileInput} type="file" accept=".csv,text/csv" hidden onchange={pick} />
-      <button class="btn" disabled={!c.loaded} onclick={() => download("contacts.csv", csv(), "text/csv")}>Save CSV</button>
+      <button class="btn" disabled={!c.loaded} onclick={() => void download("contacts.csv", csv(), "text/csv").catch((e) => console.error("contacts CSV:", e))}>Save CSV</button>
     </div>
     <input type="search" placeholder="Find a contact" aria-label="Find a contact" bind:value={search} />
   </div>

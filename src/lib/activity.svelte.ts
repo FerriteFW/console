@@ -96,7 +96,7 @@ class Activity {
     const times = rows.map((r) => (r.at === null ? "" : new Date(r.at).toLocaleString())); // INBOX-6.1: unknown left blank
     const strip = rows.map(({ at: _at, ...r }) => r);
     const who = (radio.info?.callsign || "radio").replace(/[^A-Za-z0-9-]/g, "");
-    download(`ferrite-${who}-${stamp()}-event-log.csv`, logCsv(strip, times), "text/csv");
+    void download(`ferrite-${who}-${stamp()}-event-log.csv`, logCsv(strip, times), "text/csv").catch((e) => console.error("event log CSV:", e));
   }
 }
 

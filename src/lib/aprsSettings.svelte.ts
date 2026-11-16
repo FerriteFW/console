@@ -126,7 +126,7 @@ class AprsSettings {
   async backupRadio(): Promise<{ record: Uint8Array; extras: Extras; name: string }> {
     const { record, extras } = await this.readRadio();
     const name = `${this.fileBase()}-backup.json`;
-    download(name, aprsBackup(this.settingsRec, record, extras, new Date().toISOString(), this.meta()), "application/json");
+    await download(name, aprsBackup(this.settingsRec, record, extras, new Date().toISOString(), this.meta()), "application/json");
     return { record, extras, name };
   }
 

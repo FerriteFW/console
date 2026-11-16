@@ -1,3 +1,4 @@
+import { saveDownload } from "./download";
 // The drawn screen as a PNG at the radio's 240 x 320 (or 2x): the Live View's screen element rasterised through an
 // SVG foreignObject, with the page's own stylesheets, its colour tokens and Ferrite's fonts embedded, so the image is
 // what the Live View shows, not a redraw of it.
@@ -94,15 +95,9 @@ export function pngName(screenId: string | undefined, d = new Date()): string {
   return `ferrite-${id}-${stamp}.png`;
 }
 
-export function download(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+/** The PNG to the downloads (the desktop app: its Downloads folder, download.ts). */
+export function download(blob: Blob, name: string): Promise<string> {
+  return saveDownload(name, blob);
 }
 
 /** Copies the PNG to the clipboard (where the browser allows it). */
