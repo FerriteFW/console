@@ -385,6 +385,15 @@ class Channels {
     this.error = "";
     this.write = { step: "backup" };
     try {
+      // A scan stopped first: a scanning radio answers late, and the write stopped part way through (Nov 16, 2026).
+      const link = radio.connectedLink;
+      if (link) {
+        try {
+          await link.stopScans();
+        } catch (e) {
+          throw new Error(`stopping the scan: ${(e as Error).message}`);
+        }
+      }
       const { set: fresh, home: freshHome, presets: freshPresets, name } = await this.backupRadio();
       const plan = writePlan(fresh, this.table);
       // Range presets: only to a radio that gave them, and only when the table's differ from what it holds now.
