@@ -179,6 +179,38 @@ async fn transport_close(app: State<'_, App>) -> Result<(), String> {
     Ok(())
 }
 
+/// A "download" in the desktop app (the webview drops `<a download>` links: CHIRP export did nothing, Nov 16, 2026):
+/// the bytes to the user's Downloads folder under `x-name`, as a browser saves one (" (1)", " (2)" ... when the name
+/// is taken), with no dialog, read back. The path.
+#[tauri::command]
+async fn save_download(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    use tauri::Manager;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("No file bytes.".into());
+    };
+    let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).unwrap_or("ferrite.bin");
+    let name = std::path::Path::new(name).file_name().and_then(|n| n.to_str()).unwrap_or("ferrite.bin").to_string();
+    let dir = app.path().download_dir().map_err(|e| format!("No Downloads folder: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make {}: {e}", dir.display()))?;
+    let path = free_name(&dir, &name);
+    std::fs::write(&path, bytes).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+    let back = std::fs::read(&path).map_err(|e| format!("Couldn't read {} back: {e}", path.display()))?;
+    if back != *bytes {
+        return Err(format!("{} doesn't read back as written.", path.display()));
+    }
+    Ok(path.display().to_string())
+}
+
+/// `name` in `dir`, or "stem (1).ext", "stem (2).ext" ... when it's taken.
+fn free_name(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = name.rsplit_once('.').map_or((name, String::new()), |(s, e)| (s, format!(".{e}")));
+    (1..).map(|k| dir.join(format!("{stem} ({k}){ext}"))).find(|p| !p.exists()).unwrap()
+}
+
 #[tauri::command]
 async fn save_file(request: tauri::ipc::Request<'_>) -> Result<Option<String>, String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
@@ -255,7 +287,8 @@ pub fn run() {
             core_protocol,
             debug_state,
             debug_log,
-            save_file
+            save_file,
+            save_download
         ])
         .run(tauri::generate_context!())
         .expect("error while running Ferrite Console");

@@ -739,10 +739,14 @@ impl FirmwareUpdate {
     pub fn reader(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
         install::reader_update(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
     }
+    /// The restorer image (BACKUP-13), as it is.
+    pub fn restorer(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
+        install::restorer_update(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
+    }
     /// A stock `.BTF` for the way back (BACKUP-8), padded over stock's marker sector's first page with the marker
     /// read at backup time put back when there is one (BACKUP-12).
-    pub fn stock(btf: &[u8], marker: Option<Vec<u8>>) -> Result<FirmwareUpdate, JsError> {
-        install::stock_update(btf, marker.as_deref()).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
+    pub fn stock(btf: &[u8], marker: Option<Vec<u8>>, icons: Option<Vec<u8>>) -> Result<FirmwareUpdate, JsError> {
+        install::stock_update(btf, marker.as_deref(), icons.as_deref()).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
     }
     /// A Ferrite image, with the owner's SSB patch bundled when given (INST-11).
     pub fn ferrite(btf: &[u8], patch: Option<Vec<u8>>) -> Result<FirmwareUpdate, JsError> {
@@ -826,10 +830,14 @@ pub fn backup_check(b: &[u8]) -> String {
     json(&install::check_backup(b))
 }
 
-/// An image check `{blocks, image_len, version, crc32, sha256, problems}` for `kind` "reader" or "stock".
+/// An image check `{blocks, image_len, version, crc32, sha256, problems}` for `kind` "reader", "restorer" or "stock".
 #[wasm_bindgen]
 pub fn image_check(kind: &str, btf: &[u8]) -> String {
-    json(&if kind == "reader" { install::check_reader(btf) } else { install::check_stock(btf) })
+    json(&match kind {
+        "reader" => install::check_reader(btf),
+        "restorer" => install::check_restorer(btf),
+        _ => install::check_stock(btf),
+    })
 }
 
 /// The reader console's lines: `flash` -> `{id, vendor, size}`, `sys` -> `{uid}`, `flashcrc` -> `{crc, size}`; null
@@ -925,6 +933,18 @@ pub fn reader_has_fdumpz(btf: &[u8]) -> bool {
 #[wasm_bindgen]
 pub fn backup_name(uid: &str, date: &str, marker: Option<Vec<u8>>) -> String {
     install::backup_name(uid, date, marker.as_deref())
+}
+
+/// BACKUP-12.3: the reader's `mdump` of stock's menu icons, checked line by line; None when it doesn't add up.
+#[wasm_bindgen]
+pub fn parse_mdump_icons(text: &str) -> Option<Vec<u8>> {
+    install::parse_mdump_range(text, install::ICONS_ADDR, install::ICONS_LEN)
+}
+
+/// BACKUP-12.3: whether bytes from the icon area are stock's tiles (not erased, not a Ferrite image's code).
+#[wasm_bindgen]
+pub fn icons_plausible(b: &[u8]) -> bool {
+    install::icons_plausible(b)
 }
 
 /// The marker sector's 16 bytes from the reader's `mdump 0x080F0000 16` answer, or nothing (BACKUP-12.1).

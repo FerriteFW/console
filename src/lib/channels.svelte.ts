@@ -3,6 +3,8 @@
 // first, then the diff, then the write session on confirm), CHIRP CSV in and out, backup files out and back in.
 // Unwritten edits are kept in IndexedDB (restored on the next visit); each table edit can be undone (`undo`).
 // Every record layout, check, diff and conversion is the Rust core's; this file only moves them and the files.
+import { saveAs, saveDownload } from "./download";
+import { debugLog } from "./debuglog";
 import {
   P,
   backupFile,
@@ -82,16 +84,24 @@ const presetRecord = (p: Preset | undefined) => p && { name: p.name, low: p.low,
 /** A preset as the table's changes count it: its record and its skip list (SCAN-10). */
 const presetFields = (p: Preset | undefined) => p && { ...presetRecord(p), skips: p.skips ?? [] };
 
-/** A file to the user's downloads. */
-export function download(name: string, text: string, type: string) {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+/** For the debug log: which zones and channels the read back has differently from the table (the first 12, their
+ *  fields). */
+function readBackDiff(back: ChannelSet, want: ChannelSet): string {
+  const out: string[] = [];
+  const fields = (a: Record<string, unknown> | undefined, b: Record<string, unknown> | undefined) =>
+    a && b ? Object.keys({ ...a, ...b }).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).map((k) => `${k} ${JSON.stringify(a[k])}->${JSON.stringify(b[k])}`).join(", ") : a ? "missing in the table" : "missing on the radio";
+  const by = <T extends { number: number }>(xs: T[]) => new Map(xs.map((x) => [x.number, x]));
+  for (const [what, a, b] of [["zone", by(back.zones), by(want.zones)], ["channel", by(back.channels), by(want.channels)]] as const) {
+    const nums = [...new Set([...a.keys(), ...b.keys()])].sort((x, y) => x - y);
+    const bad = nums.filter((n) => JSON.stringify(a.get(n)) !== JSON.stringify(b.get(n)));
+    if (bad.length) out.push(`${bad.length} ${what}s: ${bad.slice(0, 12).map((n) => `${n} (${fields(a.get(n) as never, b.get(n) as never)})`).join("; ")}`);
+  }
+  return out.join(" | ") || "(no record differs: the order or a field Console adds)";
+}
+
+/** A file to the user's downloads (the desktop app: its Downloads folder, download.ts); where it went. */
+export function download(name: string, text: string, type: string): Promise<string> {
+  return saveDownload(name, new Blob([text], { type }));
 }
 
 /** The channels part's JSON, as far as Console counts it (core/src/plan.rs `Backup`). */
@@ -329,8 +339,8 @@ class Channels {
   async backupRadio(): Promise<ReadResult & { name: string }> {
     const { set, home, presets } = await this.readRadio();
     const name = `${this.fileBase()}-backup.json`;
-    download(name, backupFile(set, new Date().toISOString(), this.radioMeta()), "application/json");
-    if (presets?.length) download(`${this.fileBase()}-presets.json`, presetsFile(presets, new Date().toISOString(), this.radioMeta()), "application/json");
+    await download(name, backupFile(set, new Date().toISOString(), this.radioMeta()), "application/json");
+    if (presets?.length) await download(`${this.fileBase()}-presets.json`, presetsFile(presets, new Date().toISOString(), this.radioMeta()), "application/json");
     return { set, home, presets, name };
   }
 
@@ -385,6 +395,15 @@ class Channels {
     this.error = "";
     this.write = { step: "backup" };
     try {
+      // A scan stopped first: a scanning radio answers late, and the write stopped part way through (Nov 16, 2026).
+      const link = radio.connectedLink;
+      if (link) {
+        try {
+          await link.stopScans();
+        } catch (e) {
+          throw new Error(`stopping the scan: ${(e as Error).message}`);
+        }
+      }
       const { set: fresh, home: freshHome, presets: freshPresets, name } = await this.backupRadio();
       const plan = writePlan(fresh, this.table);
       // Range presets: only to a radio that gave them, and only when the table's differ from what it holds now.
@@ -416,6 +435,7 @@ class Channels {
     if (!w || w.step !== "review" || !link || w.plan.problems.length) return;
     const { plan, home, presets } = w;
     this.write = { step: "writing", plan, home, done: 0, presets };
+    debugLog(`write: ${plan.ops.length} ops (${plan.changes.length} changes), ${plan.positions.length} positions, presets ${presets?.ops.length ?? 0}, home ${home ? "yes" : "no"}; via ${radio.kind} ${radio.baud ?? ""}`);
     let error = "";
     let written = writeCount(w);
     radio.busy = "Writing channels";
@@ -472,7 +492,9 @@ class Channels {
       }
     } catch (e) {
       error = (e as Error).message;
-      written = e instanceof WriteError ? e.done : plan.ops.length;
+      // what the progress reached when it isn't a WriteError (it said "55 of 55" for a write stopped part way)
+      written = e instanceof WriteError ? e.done : this.write?.step === "writing" ? this.write.done : 0;
+      debugLog(`write: STOPPED after ${written} of ${writeCount(w)}: ${error}${e instanceof WriteError ? ` (at ${e.op.what} ${e.op.number})` : ""}`);
     } finally {
       radio.busy = "";
     }
@@ -484,6 +506,8 @@ class Channels {
       const cmp = presetFields;
       const presetsSame = !backPresets || sameJson(backPresets.map(cmp), ($state.snapshot(this.presets) as Preset[]).map((p) => cmp(this.tidy(p))));
       verified = !error && sameJson(back, this.table) && (this.home === undefined || backHome === this.home) && presetsSame;
+      if (!verified) debugLog(`write: read back DIFFERS: ${readBackDiff(back, this.table)}${presetsSame ? "" : "; range presets differ"}${this.home !== undefined && backHome !== this.home ? `; home ${backHome} not ${this.home}` : ""}`);
+      else debugLog("write: read back matches");
       if (backPresets) this.basePresets = backPresets;
       if (!error) {
         this.table = clone(back);
@@ -508,8 +532,10 @@ class Channels {
     this.error = "";
     try {
       this.imported = { ...chirpImport(text, this.table.zones), file };
+      debugLog(`import ${file}: ${this.imported.channels.length} channels, ${this.imported.skipped} skipped, ${this.imported.notes.length} notes; header "${text.split(/\r?\n/)[0].slice(0, 200)}"`);
     } catch (e) {
       this.error = `${file}: ${(e as Error).message}`;
+      debugLog(`import ${file}: refused: ${(e as Error).message}; header "${text.split(/\r?\n/)[0].slice(0, 200)}"`);
     }
   }
 
@@ -589,8 +615,15 @@ class Channels {
     this.notes = a.notes;
   }
 
-  exportChirp() {
-    download(`${this.fileBase()}-chirp.csv`, chirpExport(this.table), "text/csv");
+  async exportChirp() {
+    this.error = "";
+    try {
+      // The desktop app asks where (the save dialog); cancelled: nothing said
+      const to = await saveAs(`${this.fileBase()}-chirp.csv`, new Blob([chirpExport(this.table)], { type: "text/csv" }));
+      if (to) this.source = `Exported as CHIRP CSV: ${to}`;
+    } catch (e) {
+      this.error = `CHIRP export: ${(e as Error).message ?? e}`;
+    }
   }
 
   // ---- range presets (MENU 0 1 4) ----

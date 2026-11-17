@@ -21,7 +21,9 @@ import {
   parseTextChunk,
   recordReader,
   statusText,
+  stateParse,
   subscribePayload,
+  tunePayload,
   type Answer,
   type Hello,
   type Info,
@@ -32,6 +34,12 @@ import {
   type Station,
 } from "./core";
 import { sleep, type Transport } from "./transport/types";
+import { debugLog } from "./debuglog";
+
+/** A message type's name for the debug log ("WRITE_MANY"). */
+const msgName = (ty: number) => Object.entries(P.msg).find(([, v]) => v === ty)?.[0] ?? `0x${ty.toString(16)}`;
+/** Asked every few hundred ms while Live View runs: logged only when they fail. */
+const quiet = (ty: number) => ty === P.msg.UI || ty === P.msg.STATE;
 
 export const CLIENT_NAME = "Ferrite Console";
 
@@ -199,10 +207,16 @@ export class Link {
         this.waiters.set(seq, { ty, seq, resolve });
         setTimeout(() => resolve(null), timeoutMs);
       });
+      const sent = performance.now();
       await this.t.write(this.session.request(ty, payload, performance.now()));
       const a = await got;
       if (this.closed) throw new Error("not connected");
-      if (a) return { status: a.status, rest: new Uint8Array(a.rest) };
+      if (a) {
+        if (!quiet(ty) || a.status !== 0)
+          debugLog(`link ${msgName(ty)} #${seq} ${payload.length} B: status ${a.status} in ${(performance.now() - sent).toFixed(0)} ms`);
+        return { status: a.status, rest: new Uint8Array(a.rest) };
+      }
+      debugLog(`link ${msgName(ty)} #${seq} ${payload.length} B: NO ANSWER in ${timeoutMs} ms`);
       this.waiters.delete(seq);
       // A frame sent just after a restart or 10 s of quiet can go to the terminal (TERM-2): a read-only request is
       // sent once more after a 0x00. Never a KEY, CMD, MORE or write: those would act twice or skip a chunk.
@@ -257,6 +271,21 @@ export class Link {
     });
   }
 
+  /**
+   * HELLO without compression, and compression kept off: for Back to stock, whose loop on the radio (firmware
+   * `tasks/restore.rs`) reads plain frames only. Compressed, the first PROGRAM (133 bytes) was never answered and the
+   * restore stopped after one block (black, Nov 16, 2026: "The radio stopped answering during the restore").
+   */
+  async helloPlain(): Promise<Hello> {
+    return this.exclusive(async () => {
+      const h = this.noteHello(await this.okRaw(P.msg.HELLO, helloPayloadPlain(CLIENT_NAME)));
+      this.caps &= ~P.caps.LZ;
+      this.session.set_lz(false);
+      debugLog("link HELLO plain: compression off");
+      return h;
+    });
+  }
+
   /** LINK-35.2, LINK-51: a HELLO answer's caps; compression on from here when it granted it (both windows new). */
   private noteHello(rest: Uint8Array): Hello {
     const h = parseHello(rest);
@@ -277,6 +306,7 @@ export class Link {
   /** LINK-51: after a lost frame while compressed, a HELLO starts both ends' windows over. */
   private async resync() {
     if (!(this.caps & P.caps.LZ)) return;
+    debugLog("link resync (HELLO)");
     await sleep(300);
     const { status, rest } = await this.askRaw(P.msg.HELLO, this.helloAgain(), undefined, false);
     if (status === 0) this.noteHello(rest);
@@ -635,24 +665,37 @@ export class Link {
         setTimeout(() => resolve(null), this.timeout() * 2);
       });
       void this.t.write(this.session.request(P.msg.WRITE_MANY, f.body, performance.now()));
-      return { f, got };
+      debugLog(`link WRITE_MANY #${seq} (windowed) ops ${f.at}-${f.at + f.run - 1}, ${f.body.length} B`);
+      return { f, got, seq };
     };
     const flight: ReturnType<typeof send>[] = [];
     let k = 0;
-    let stop: { at: number } | null = null;
+    let stop: { at: number; lost?: boolean } | null = null;
     while (k < frames.length || flight.length) {
       while (!stop && k < frames.length && flight.length < 2) flight.push(send(frames[k++]));
-      const { f, got } = flight.shift()!;
+      const { f, got, seq } = flight.shift()!;
       const a = await got;
       if (this.closed) throw new Error("not connected");
-      if (stop) continue; // after a refusal: only draining what's in flight
-      if (!a) throw new TimeoutError(`No answer from the radio in ${((this.timeout() * 2) / 1000).toFixed(0)} s.`);
+      debugLog(`link WRITE_MANY #${seq} (windowed): ${a ? `status ${a.status}, applied ${a.status === 0 ? f.run : (a.rest[0] ?? 0)}` : "NO ANSWER"}${stop ? " (draining)" : ""}`);
+      if (stop) {
+        if (!a) this.waiters.delete(seq);
+        continue; // after a refusal or a lost frame: only draining what's in flight
+      }
+      if (!a) {
+        // A frame (or its answer) lost: whether it was applied isn't known, but writing a record again changes
+        // nothing, so the rest goes one frame at a time from this frame's first op, after a resync (LINK-51: a lost
+        // frame leaves the compression windows apart). Before, the write stopped here with 5 channels written.
+        this.waiters.delete(seq);
+        stop = { at: f.at, lost: true };
+        continue;
+      }
       const applied = a.status === 0 ? f.run : a.rest.length ? a.rest[0] : 0;
       progress(f.at + applied);
       if (a.status !== 0) stop = { at: f.at + applied };
     }
     if (!stop) return frames.length ? frames[frames.length - 1].at + frames[frames.length - 1].run : i;
     // the rest one frame at a time, from the first op the radio didn't apply (busy asked again, a refusal thrown)
+    if (stop.lost) await this.resync();
     let at = stop.at;
     while (at < frames[frames.length - 1].at + frames[frames.length - 1].run) {
       const run = manyRun(ops, at);
@@ -697,6 +740,33 @@ export class Link {
    * its 8-byte record, or 0 bytes to clear it. 21 to a frame (MAX_PAYLOAD 240); `busy` goes again from the first
    * not applied; a refusal throws with the radio's reason. `progress(done)` as frames are answered.
    */
+  /**
+   * Stops every slot's scan before a write (LINK-67's state, LINK-68's TUNE scan stop): a scanning radio answers the
+   * link late (LINK-38), and a write stopped part way through. Waits up to 2 s for the radio to say they stopped.
+   * The slots it stopped ("A", "B", "C").
+   */
+  stopScans(): Promise<string[]> {
+    return this.exclusive(async () => {
+      const scanning = () => this.scanningRaw();
+      const was = await scanning();
+      for (const s of was) await this.okRaw(P.msg.TUNE, tunePayload("ABC".indexOf(s.slot), "scan", 0));
+      for (const end = performance.now() + 2_000; was.length && (await scanning()).length; ) {
+        if (performance.now() > end) throw new Error("the radio is still scanning: stop the scan on the radio, then write again");
+        await sleep(100);
+      }
+      return was.map((s) => s.slot);
+    });
+  }
+
+  /** The slots scanning now ("A", "B", "C"; LINK-67's state). */
+  scanningSlots(): Promise<string[]> {
+    return this.exclusive(async () => (await this.scanningRaw()).map((s) => s.slot));
+  }
+
+  private async scanningRaw() {
+    return (stateParse(await this.okRaw(P.msg.STATE))?.slots ?? []).filter((s) => s.scanning);
+  }
+
   writePositions(recs: { index: number; record: Uint8Array }[], progress?: (done: number) => void): Promise<void> {
     return this.writeRecords(P.what.POSITION, recs, progress);
   }
@@ -781,12 +851,15 @@ export class Link {
           taken++;
           progress?.(at, out.size);
         };
+        const t0 = performance.now();
         try {
           frames = await this.streamRaw(P.msg.READ_MANY, p, each);
         } catch (e) {
+          debugLog(`link READ_MANY what ${what} from ${at}: ${e instanceof StreamGap ? `GAP after ${e.got.length} frames, asked again` : `FAILED: ${(e as Error).message}`}`);
           if (!(e instanceof StreamGap)) throw e;
           [frames, whole] = [e.got, false];
         }
+        debugLog(`link READ_MANY what ${what} ${first}-${end - 1}: ${frames.length} frames, ${out.size} records in ${(performance.now() - t0).toFixed(0)} ms${whole ? "" : " (a gap)"}`);
         // Any frames not seen by `each` (none normally) are taken now; the error frame (0xff) is not a record.
         for (const f of frames.slice(taken)) {
           if (f[0] === 0xff) continue;

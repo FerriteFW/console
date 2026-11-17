@@ -4,6 +4,7 @@
 // one file; Open… loads each part a file holds into its page as unwritten changes (Write to radio, per page, puts
 // it on the radio). The older per-page `-backup.json` files still open, each into its own page. In the desktop app
 // the file goes through the native save dialog (the shell's `save_file`); in a browser it downloads.
+import { saveAs } from "./download";
 import { aprsBackup, backupFile, loadCore, presetsFile, presetsRestore, settingsCodeplugPart } from "./core";
 import { aprsSettings } from "./aprsSettings.svelte";
 import { channels, type ChannelsFile } from "./channels.svelte";
@@ -59,23 +60,7 @@ export function gather(saved: string): Parts {
 }
 
 /** The file to disk: the desktop app's save dialog (null when cancelled) or a browser download. The name it went as. */
-export async function saveBlob(name: string, blob: Blob): Promise<string | null> {
-  if (isTauri()) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    const path = await invoke<string | null>("save_file", bytes, { headers: { "x-name": name } });
-    return path ? (path.split(/[\\/]/).pop() ?? name) : null;
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  return name;
-}
+export const saveBlob = saveAs;
 
 /** Parts as a .ferrite file, saved: the notice's text ("" when the save dialog was cancelled). */
 export async function saveParts(parts: Parts, what = "Saved"): Promise<string> {

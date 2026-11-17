@@ -12,6 +12,7 @@
 //      clears the mark): the radio restarts on the new layout, and Console connects again and checks it says so.
 // Started again after an interruption, it begins at 3 from the kept copy (never reading the half-written chip).
 // Firmware Update runs it as part of an update whose new firmware stores another layout (firmware.svelte.ts).
+import { debugLog } from "./debuglog";
 import { saveBlob } from "./codeplug.svelte";
 import { erasedCrc, dataCrc32, loadCore, MigrateCopy, MigratePlan, migrateRegions, P, type MigrateSummary } from "./core";
 import { Eta } from "./eta";
@@ -46,8 +47,24 @@ const RESTART_WAIT_MS = 40_000;
 
 class Migrate {
   stage = $state<MigrateStage>("idle");
-  message = $state("");
-  error = $state("");
+  #message = $state("");
+  #error = $state("");
+  /** What it's doing now; each change goes to the debug log (debuglog.ts), so a report has the steps. */
+  get message() {
+    return this.#message;
+  }
+  set message(v: string) {
+    if (v && v !== this.#message) debugLog(`data move: ${v}`);
+    this.#message = v;
+  }
+  /** What went wrong; to the debug log too. */
+  get error() {
+    return this.#error;
+  }
+  set error(v: string) {
+    if (v && v !== this.#error) debugLog(`data move ERROR: ${v}`);
+    this.#error = v;
+  }
   /** Progress of the step running: bytes read, or steps written. */
   done = $state(0);
   total = $state(0);

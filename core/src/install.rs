@@ -35,6 +35,8 @@ pub const SECTOR: usize = 0x1000;
 pub const UPDATE: usize = UPDATE_AREA.start as usize;
 /// Text only a reader image holds (its help line for the binary dump: ferrite's reader and hwtest alike).
 pub const READER_MARK: &[u8] = b"fdump <addr> <len>";
+/// The restorer image's mark (ferrite restorer/src/main.rs, BACKUP-13): Back to stock for a radio not running Ferrite.
+pub const RESTORER_MARK: &[u8] = b"Ferrite restorer: BACK13";
 /// The link's `STOCK_RESTORE` (ferrite decision 261) and its ops.
 pub const STOCK_RESTORE: u8 = 0x60;
 pub const OP_START: u8 = 0;
@@ -236,7 +238,10 @@ pub fn name_marker(name: &str) -> Option<Vec<u8>> {
 /// bootloader erases it (no Ferrite code is left in the word stock reads), with the saved 16 bytes put back at its
 /// start when they hold a stock marker; anything else stays erased (stock then shows its default model name). An
 /// image already that long is left as it is. ferrite's `btf.stock_restore_image`.
-pub fn stock_restore_image(img: &[u8], marker: Option<&[u8]>) -> Vec<u8> {
+///
+/// With stock's menu icons (BACKUP-12.3: read at backup time, [`icons_plausible`]) they go into the padding at
+/// [`ICONS_OFF`], where stock draws them from; without, that area stays erased and the menu tiles draw blank.
+pub fn stock_restore_image(img: &[u8], marker: Option<&[u8]>, icons: Option<&[u8]>) -> Vec<u8> {
     let end = MARKER_OFF + MARKER_PAGE;
     let mut out = img.to_vec();
     if out.len() >= end {
@@ -246,7 +251,61 @@ pub fn stock_restore_image(img: &[u8], marker: Option<&[u8]>) -> Vec<u8> {
     if let Some(m) = marker.filter(|m| img.len() <= MARKER_OFF && marker_word(m).is_some()) {
         out[MARKER_OFF..MARKER_OFF + MARKER_LEN].copy_from_slice(&m[..MARKER_LEN]);
     }
+    if let Some(i) = icons.filter(|i| img.len() <= ICONS_OFF && icons_plausible(i)) {
+        out[ICONS_OFF..ICONS_OFF + ICONS_LEN].copy_from_slice(i);
+    }
     out
+}
+
+// ---- stock's menu icons (BACKUP-12.3, ferrite decision 406) ----
+
+/// Stock's main-menu tiles: 24 RGB565 images of 58 x 58 (12, then the same 12 highlighted) in MCU flash from
+/// 0x08080000, past the end of every stock image (V0.29 ends at 0x08060F20). Stock draws them from there (V0.29
+/// 0x08018130, its literal at 0x08018358; V0.27 0x08017DCC) and never writes them: the factory does. Every Ferrite
+/// image reaches past 0x08080000 and so writes over them; a stock `.BTF` doesn't bring them back.
+pub const ICONS_ADDR: u32 = 0x0808_0000;
+pub const ICONS_LEN: usize = 24 * 58 * 58 * 2;
+/// Their image offset (0x7D000).
+pub const ICONS_OFF: usize = (ICONS_ADDR - APP_BASE) as usize;
+/// The reader's read of them (`mdump`, read only, 32 bytes a line).
+pub const MDUMP_ICONS: &str = "mdump 0x08080000 161472\r";
+
+/// A ranged `mdump`'s bytes from `addr`, `len` of them: every line (`ADDR:` hex `*` sum) checked by its sum and in
+/// order from `addr` with no gap. None when one is missing, out of order or doesn't add up.
+pub fn parse_mdump_range(text: &str, addr: u32, len: usize) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(len);
+    for line in text.split(['\r', '\n']) {
+        let Some((a, rest)) = line.trim().split_once(':') else { continue };
+        let Ok(at) = u32::from_str_radix(a, 16) else { continue };
+        let Some((hexs, sum)) = rest.split_once('*') else { continue };
+        if at != addr + out.len() as u32 || hexs.len() % 2 != 0 {
+            return None;
+        }
+        let b: Vec<u8> = (0..hexs.len() / 2).map(|i| u8::from_str_radix(&hexs[2 * i..2 * i + 2], 16).ok()).collect::<Option<_>>()?;
+        let sum = u8::from_str_radix(sum.get(..2)?, 16).ok()?;
+        if b.iter().fold(0u8, |a, &x| a.wrapping_add(x)) != sum {
+            return None;
+        }
+        out.extend_from_slice(&b);
+        if out.len() >= len {
+            out.truncate(len);
+            return Some(out);
+        }
+    }
+    None
+}
+
+/// Whether bytes read from the icon area look like stock's tiles rather than erased flash or a Ferrite image's code
+/// left there: pictures repeat a pixel along a row far more than Thumb code repeats a halfword. Ferrite 0.8.0's and
+/// 0.9.0's images at this offset repeat 0.1 % of their halfwords; the bar is 5 %, which a tile with any flat
+/// background passes many times over.
+pub fn icons_plausible(b: &[u8]) -> bool {
+    if b.len() != ICONS_LEN || b.iter().all(|&x| x == 0xFF) {
+        return false;
+    }
+    let px: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let same = px.windows(2).filter(|w| w[0] == w[1] && w[0] != 0xFFFF).count();
+    same * 20 > px.len()
 }
 
 /// The radio ID a backup's file name carries ([`backup_name`]), grouped, or None (a renamed file).
@@ -572,6 +631,25 @@ pub fn check_reader(btf: &[u8]) -> ImageCheck {
     .0
 }
 
+/// The restorer image (BACKUP-13): its own mark, never Ferrite or the reader, below the stock marker sector.
+pub fn check_restorer(btf: &[u8]) -> ImageCheck {
+    image_check(btf, APP_MAX, |img| {
+        (!find(img, RESTORER_MARK) || find(img, FERRITE_MARK) || find(img, READER_MARK))
+            .then(|| "not the restorer image".into())
+    })
+    .0
+}
+
+/// The restorer's update: the file as it is (as the reader's).
+pub fn restorer_update(btf: &[u8]) -> Result<Update, Vec<String>> {
+    let c = check_restorer(btf);
+    if c.problems.is_empty() {
+        Ok(Update::raw(btf.to_vec()))
+    } else {
+        Err(c.problems)
+    }
+}
+
 /// Whether a reader image speaks `fdumpz` (the Rust reader, BACKUP-9.6; hwtest's doesn't): its help line.
 pub fn reader_has_fdumpz(btf: &[u8]) -> bool {
     unpack(btf).map(|(img, _)| find(&img, READER_Z_MARK)).unwrap_or(false)
@@ -584,6 +662,8 @@ pub fn check_stock(btf: &[u8]) -> ImageCheck {
             Some("this is a Ferrite image, not stock firmware".into())
         } else if find(img, READER_MARK) {
             Some("this is the reader image, not stock firmware".into())
+        } else if find(img, RESTORER_MARK) {
+            Some("this is the restorer image, not stock firmware".into())
         } else {
             None
         }
@@ -604,13 +684,13 @@ pub fn reader_update(btf: &[u8]) -> Result<Update, Vec<String>> {
 /// The stock `.BTF`'s update (BACKUP-8): its image padded over stock's marker sector's first page with the marker
 /// read at backup time put back ([`stock_restore_image`], BACKUP-12), packed again with the zero key (the bytes that
 /// land are the stock file's own), as flash.py sends it.
-pub fn stock_update(btf: &[u8], marker: Option<&[u8]>) -> Result<Update, Vec<String>> {
+pub fn stock_update(btf: &[u8], marker: Option<&[u8]>, icons: Option<&[u8]>) -> Result<Update, Vec<String>> {
     let c = check_stock(btf);
     if !c.problems.is_empty() {
         return Err(c.problems);
     }
     let img = unpack(btf).map_err(|e| vec![e])?.0;
-    Ok(Update::raw(pack(&stock_restore_image(&img, marker))))
+    Ok(Update::raw(pack(&stock_restore_image(&img, marker, icons))))
 }
 
 // ---- SSB (ssbpatch.py) ----
@@ -1125,7 +1205,7 @@ mod tests {
         assert!(check_stock(&stock).problems.is_empty());
         assert!(!check_stock(&fer).problems.is_empty());
         assert!(!check_stock(&reader).problems.is_empty());
-        let sent = stock_update(&stock, None).unwrap();
+        let sent = stock_update(&stock, None, None).unwrap();
         let back = unpack(sent.data()).unwrap().0;
         assert_eq!(back.len(), MARKER_OFF + MARKER_PAGE, "stock goes padded over the marker's page (BACKUP-12)");
         let own = unpack(&stock).unwrap().0;
@@ -1386,6 +1466,47 @@ mod tests {
 
     /// BACKUP-12.2: the way back covers 0x080F0000's first page (0xFF), the saved stock marker at its start; anything
     /// else saved leaves it erased; the whole file within the bootloader's limit; a long image goes as it is.
+    /// BACKUP-12.3: a ranged mdump read whole and checked; stock's tiles go into the padding, a Ferrite image's code
+    /// or erased flash don't.
+    #[test]
+    fn menu_icons() {
+        // Tiles: a flat background with a square in each; code: a halfword pattern that never repeats.
+        let mut tiles = Vec::with_capacity(ICONS_LEN);
+        for t in 0..24u16 {
+            for y in 0..58 {
+                for x in 0..58 {
+                    let px: u16 = if (16..42).contains(&x) && (16..42).contains(&y) { 0xF800 ^ t } else { 0x0841 };
+                    tiles.extend_from_slice(&px.to_le_bytes());
+                }
+            }
+        }
+        assert!(icons_plausible(&tiles));
+        let code: Vec<u8> = (0..ICONS_LEN as u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+        assert!(!icons_plausible(&code));
+        assert!(!icons_plausible(&vec![0xFF; ICONS_LEN]));
+        assert!(!icons_plausible(&tiles[..ICONS_LEN - 2]));
+        // The reader's lines, 32 bytes each.
+        let mut text = String::from("mdump 0x08080000 161472\r\n");
+        for (k, c) in tiles.chunks(32).enumerate() {
+            let sum = c.iter().fold(0u8, |a, &x| a.wrapping_add(x));
+            text += &format!("{:X}:{}*{:02X}\r\n", ICONS_ADDR + 32 * k as u32, c.iter().map(|b| format!("{b:02X}")).collect::<String>(), sum);
+        }
+        text += "dump: end\r\n> ";
+        assert_eq!(parse_mdump_range(&text, ICONS_ADDR, ICONS_LEN).as_deref(), Some(&tiles[..]));
+        assert_eq!(parse_mdump_range(&text.replacen("*", "*0", 1), ICONS_ADDR, ICONS_LEN), None); // a bad sum
+        let gap: String = text.lines().enumerate().filter(|(i, _)| *i != 9).map(|(_, l)| format!("{l}\n")).collect();
+        assert_eq!(parse_mdump_range(&gap, ICONS_ADDR, ICONS_LEN), None); // a line missing
+        // Into the stock image's padding at 0x7D000; code isn't.
+        let img = vec![0x11u8; 0x1000];
+        let r = stock_restore_image(&img, None, Some(&tiles));
+        assert_eq!(&r[ICONS_OFF..ICONS_OFF + ICONS_LEN], &tiles[..]);
+        assert!(r[0x1000..ICONS_OFF].iter().all(|&b| b == 0xFF));
+        let r = stock_restore_image(&img, None, Some(&code));
+        assert!(r[ICONS_OFF..ICONS_OFF + ICONS_LEN].iter().all(|&b| b == 0xFF));
+        assert_eq!(ICONS_OFF, 0x7D000);
+        assert_eq!(ICONS_LEN, 161_472);
+    }
+
     #[test]
     fn stock_restore_covers_the_marker_page() {
         let img = image(380_000, b"V0.29");
@@ -1393,7 +1514,7 @@ mod tests {
         uv[..4].copy_from_slice(b"BJ90");
         let ff = vec![0xFF; 16];
         for (m, want) in [(None, &ff), (Some(&ff), &ff), (Some(&uv), &uv), (Some(&vec![0u8; 16]), &ff)] {
-            let r = stock_restore_image(&img, m.map(|v| &v[..]));
+            let r = stock_restore_image(&img, m.map(|v| &v[..]), None);
             assert_eq!(r.len(), MARKER_OFF + MARKER_PAGE);
             assert_eq!(&r[..img.len()], &img[..]);
             assert!(r[img.len()..MARKER_OFF].iter().all(|&b| b == 0xFF));
@@ -1402,11 +1523,11 @@ mod tests {
             assert!(check_image(&r, BOOT_MAX).is_empty());
         }
         let stock = pack(&img);
-        let u = stock_update(&stock, Some(&uv)).unwrap();
+        let u = stock_update(&stock, Some(&uv), None).unwrap();
         assert_eq!(u.blocks(), (MARKER_OFF + MARKER_PAGE + 1024) / 1024, "951 blocks, through 0x080F07FF");
         let back = unpack(u.data()).unwrap().0;
         assert_eq!(&back[MARKER_OFF..MARKER_OFF + 4], b"BJ90");
         let long = vec![1u8; MARKER_OFF + MARKER_PAGE];
-        assert_eq!(stock_restore_image(&long, Some(&uv)), long);
+        assert_eq!(stock_restore_image(&long, Some(&uv), None), long);
     }
 }

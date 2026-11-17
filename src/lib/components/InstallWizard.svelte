@@ -1,4 +1,5 @@
 <script lang="ts">
+  let iconsNote = $state("");
   // Install as a full-screen wizard (Alex, Oct 29): Connect → Back up → SSB → Install → Done, one step on screen.
   // The flow and every gate are install.svelte.ts's (decision 261; BACKUP-2: nothing writes until the backup is
   // verified and saved): this only shows the step the flow is at. It can't be closed while the radio is busy.
@@ -159,6 +160,18 @@
           <dd>{I.chip}</dd>
           <dt>Model marker</dt>
           <dd data-k="marker">{markerText(I.marker, I.markerRead)}</dd>
+          <dt>Menu icons</dt>
+          <dd data-k="icons">
+            {#if !I.icons}
+              not read by this reader
+            {:else if I.iconsStock}
+              stock's, kept with this backup (Back to stock puts them back)
+              <button class="btn quiet" onclick={async () => (iconsNote = (await I.saveIcons()) ? "Saved." : "")}>Save them as a file…</button>
+              {iconsNote}
+            {:else}
+              not stock's: an earlier Ferrite install wrote over them (Back to stock needs them from a file)
+            {/if}
+          </dd>
           <dt>Checked</dt>
           <dd data-k="verified">CRC {I.check.crc32} matches the radio's</dd>
           <dt>SHA-256</dt>

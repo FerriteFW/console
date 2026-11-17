@@ -13,6 +13,9 @@
 //! - Modes FM, NFM, AM, WFM (BCR-33), USB, LSB, CW; others (DV, DMR ...) are skipped with a note.
 //! - Latitude and Longitude (or Lat, Long, Lon, Lng), as some RepeaterBook exports have, are the channel's position
 //!   (LINK-53); CHIRP has no such column, so an export leaves positions out.
+//! - The stock radio's channel list as other tools save it (`Index,Name,RX MHz,TX MHz,Duplex,Offset,RX Tone,TX Tone,
+//!   Bandwidth,Power,Mode,...,Scan,...,Zone`; a user's file, Nov 16, 2026) is read too: [`from_stock_list`] turns
+//!   each row into CHIRP's columns first, so it gets the same checks and notes.
 //!
 //! An import goes into the table one of three ways (the dialog picks): merge by number, replace every channel, or
 //! [`into_new_zone`]: the file's channels, in their order, at free numbers in a new zone (a RepeaterBook or CHIRP
@@ -244,12 +247,106 @@ fn power_of(s: &str) -> &'static str {
     }
 }
 
-/// A CHIRP CSV file to channels. `zones` (the table's) let a Comment name a zone.
+/// A tone of the stock list (`OFF`, `88.5`, `D023N`, `D023I`) as CHIRP's: ("Tone", the CTCSS) or ("DTCS", the code,
+/// polarity N or R); None for none.
+fn stock_tone(t: &str) -> Option<(&'static str, String, char)> {
+    let t = t.trim();
+    let up = t.to_ascii_uppercase();
+    if t.is_empty() || up == "OFF" || up == "NONE" {
+        return None;
+    }
+    if let Some(d) = up.strip_prefix('D') {
+        return Some(match d.strip_suffix('N') {
+            Some(code) => ("DTCS", code.to_string(), 'N'),
+            None => match d.strip_suffix(['I', 'R']) {
+                Some(code) => ("DTCS", code.to_string(), 'R'),
+                None => ("DTCS", d.to_string(), 'N'),
+            },
+        });
+    }
+    Some(("Tone", t.to_string(), 'N'))
+}
+
+/// The stock radio's channel list (`Index`, `RX MHz`, `TX MHz`, `RX Tone`/`TX Tone`, `Bandwidth` Wide/Narrow, `Scan`
+/// true/false, `Zone`) as CHIRP's rows, or None when `rows` isn't one. A TX frequency apart from RX with no Duplex is
+/// a split; tones go as CHIRP's Cross (either side may be none); Scan false is skip; the Zone is the Comment (a zone
+/// of that name takes the channel).
+pub fn from_stock_list(rows: &[Vec<String>]) -> Option<Vec<Vec<String>>> {
+    let head = rows.first()?;
+    let col = |name: &str| head.iter().position(|h| h.trim().eq_ignore_ascii_case(name));
+    let rx_col = col("RX MHz")?;
+    let get = |r: &[String], name: &str| col(name).and_then(|i| r.get(i)).map_or(String::new(), |s| s.trim().to_string());
+    let mut out = vec![COLUMNS.iter().map(|c| c.to_string()).collect::<Vec<_>>()];
+    for r in &rows[1..] {
+        let rx = r.get(rx_col).map_or("", |s| s.trim()).to_string();
+        let tx = get(r, "TX MHz");
+        let (mut duplex, mut offset) = (get(r, "Duplex"), get(r, "Offset"));
+        if duplex.is_empty() && parse_mhz(&tx).is_some() && parse_mhz(&tx) != parse_mhz(&rx) {
+            (duplex, offset) = ("split".into(), tx.clone());
+        }
+        let (t_tx, t_rx) = (stock_tone(&get(r, "TX Tone")), stock_tone(&get(r, "RX Tone")));
+        let mut f = [String::new(), String::new(), String::new(), String::new()]; // rToneFreq, cToneFreq, DtcsCode, RxDtcsCode
+        let mut pol = ['N', 'N'];
+        if let Some((k, v, p)) = &t_tx {
+            if *k == "Tone" {
+                f[0] = v.clone();
+            } else {
+                (f[2], pol[0]) = (v.clone(), *p);
+            }
+        }
+        if let Some((k, v, p)) = &t_rx {
+            if *k == "Tone" {
+                f[1] = v.clone();
+            } else {
+                (f[3], pol[1]) = (v.clone(), *p);
+            }
+        }
+        let (tone, cross) = match (&t_tx, &t_rx) {
+            (None, None) => (String::new(), String::new()),
+            (a, b) => ("Cross".to_string(), format!("{}->{}", a.as_ref().map_or("", |t| t.0), b.as_ref().map_or("", |t| t.0))),
+        };
+        let mode = get(r, "Mode");
+        let narrow = get(r, "Bandwidth").to_ascii_lowercase().starts_with('n');
+        let mode = if mode.eq_ignore_ascii_case("FM") && narrow { "NFM".to_string() } else { mode };
+        let skip = if get(r, "Scan").eq_ignore_ascii_case("false") { "S" } else { "" };
+        let [r_tone, c_tone, dtcs, rx_dtcs] = f;
+        out.push(vec![
+            get(r, "Index"),
+            get(r, "Name"),
+            rx,
+            duplex,
+            offset,
+            tone,
+            r_tone,
+            c_tone,
+            dtcs,
+            pol.iter().collect(),
+            rx_dtcs,
+            cross,
+            mode,
+            String::new(),
+            skip.into(),
+            get(r, "Power"),
+            get(r, "Zone"),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ]);
+    }
+    Some(out)
+}
+
+/// A CHIRP CSV file (or the stock radio's channel list, [`from_stock_list`]) to channels. `zones` (the table's) let
+/// a Comment name a zone.
 pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
     let rows = parse_csv(text);
+    let rows = from_stock_list(&rows).unwrap_or(rows);
     let Some(head) = rows.first() else { return Err("the file is empty".into()) };
     let col = |name: &str| head.iter().position(|h| h.trim().eq_ignore_ascii_case(name));
-    let Some(fcol) = col("Frequency") else { return Err("not a CHIRP CSV file: no Frequency column".into()) };
+    let Some(fcol) = col("Frequency") else {
+        return Err("not a channel list Console reads: a CHIRP CSV file (a Frequency column) or the stock radio's list (RX MHz)".into());
+    };
     let cols: Vec<Option<usize>> = COLUMNS.iter().map(|c| col(c)).collect();
     let get = |r: &[String], name: &str| -> String {
         let i = COLUMNS.iter().position(|c| *c == name).and_then(|i| cols[i]);
@@ -272,10 +369,10 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
             continue;
         };
         let number = match locs[k] {
-            Some(l) => l + shift,
+            Some(l) => l.saturating_add(shift),
             None => next,
         };
-        next = number + 1;
+        next = number.saturating_add(1);
         if !(1..=MAX_CHANNELS as u32).contains(&number) {
             note(format!("location {number}: the radio has channels 1 to {MAX_CHANNELS}: skipped"));
             out.skipped += 1;
@@ -529,6 +626,38 @@ mod tests {
 6,Listen,162.550000,off,0.000000,,88.5,88.5,023,NN,023,Tone->Tone,FM,25.00,,Low,,,,,\r\n\
 7,Broadcast,101.100000,,0.000000,,88.5,88.5,023,NN,023,Tone->Tone,WFM,100.00,,Low,,,,,\r\n\
 8,A very long channel name,146.550000,,0.000000,TSQL-R,88.5,88.5,023,NN,023,Tone->Tone,FM,7.00,,Low,,,,,\r\n";
+
+    /// The stock radio's channel list as other tools save it (made-up rows, the columns of a user's file, Nov 16,
+    /// 2026): RX and TX MHz, tones as OFF, CTCSS or D023N/D023I, Bandwidth, Scan, Zone.
+    #[test]
+    fn stock_list() {
+        let file = "Index,Name,RX MHz,TX MHz,Duplex,Offset,RX Tone,TX Tone,Bandwidth,Power,Mode,Encrypt,Scrambler,Busy Lock,Scan,FHSS,FHSS Code,Signal Group,PTT ID,Zone\r\n\
+1,Simplex,146.52000,146.52000,,0.000,OFF,OFF,Wide,High,FM,0,0,false,true,false,,0,0,Local\r\n\
+2,Rpt minus,146.94000,146.34000,-,0.600,OFF,100.0,Wide,Low,FM,0,0,false,true,false,,0,0,Repeaters\r\n\
+3,TSQL,443.47500,448.47500,+,5.000,123.0,123.0,Narrow,Mid,FM,0,0,false,false,false,,0,0,\r\n\
+4,DCS inv,152.97500,152.97500,,0.000,D054I,D054N,Wide,High,FM,0,0,false,true,false,,0,0,Nowhere\r\n\
+5,Split,145.80000,437.80000,,0,OFF,OFF,Wide,High,FM,0,0,false,true,false,,0,0,\r\n\
+7,No TX col,146.08500,,,0,OFF,110.9,Wide,High,FM,0,0,false,true,false,,0,0,\r\n\
+8,UHF*1,447.00000,447.00000,,0.000,OFF,OFF,Wide,High,FM,0,0,false,false,false,,0,0,\r\n";
+        let i = import(file, &zones()).unwrap();
+        assert_eq!((i.channels.len(), i.skipped), (7, 0), "{:?}", i.notes);
+        assert_eq!(i.notes, ["line 8: name \"UHF*1\": characters a channel name can't hold became -"]);
+        let by = |n: u16| i.channels.iter().find(|c| c.number == n).unwrap();
+        let c = by(1);
+        assert_eq!((c.rx.as_str(), c.duplex.as_str(), c.tx_tone.as_str(), c.rx_tone.as_str(), c.zone), ("146.52000", "", "off", "off", Some(0)));
+        let c = by(2);
+        assert_eq!((c.duplex.as_str(), c.offset.as_str(), c.tx_tone.as_str(), c.rx_tone.as_str(), c.power.as_str(), c.zone), ("-", "0.60000", "100.0", "off", "Low", Some(1)));
+        let c = by(3);
+        assert_eq!((c.duplex.as_str(), c.tx_tone.as_str(), c.rx_tone.as_str(), c.mode.as_str(), c.power.as_str(), c.skip), ("+", "123.0", "123.0", "NFM", "Mid", true));
+        let c = by(4);
+        assert_eq!((c.tx_tone.as_str(), c.rx_tone.as_str(), c.zone), ("D054N", "D054I", None));
+        let c = by(5);
+        assert_eq!((c.duplex.as_str(), c.offset.as_str()), ("split", "437.80000"));
+        assert_eq!((by(7).duplex.as_str(), by(7).tx_tone.as_str()), ("", "110.9"));
+        assert_eq!((by(8).name.as_str(), by(8).skip), ("UHF-1", true));
+        // Not a list Console reads: says what it reads.
+        assert!(import("Foo,Bar\r\n1,2\r\n", &[]).unwrap_err().contains("RX MHz"));
+    }
 
     fn zones() -> Vec<ZoneView> {
         vec![ZoneView::new(1, "Local"), ZoneView::new(2, "Repeaters")]

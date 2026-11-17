@@ -2,6 +2,7 @@
 // and its dump (the Rust reader's fdumpz with coded chunks, BACKUP-9.6; hwtest's fdump), and Ferrite's STOCK_RESTORE; the simulator answers HELLO. The backup, saving it, the SSB patch
 // from a synthetic stock file, the install; back to stock; the refusals. Never on a radio: Alex runs the radio checks
 // by hand (docs/TESTING.md).
+import { createZip, readZip } from "../../src/lib/zip";
 import { type Page, type Route } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -192,10 +193,16 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   await shot(page, info, "71-install-backup");
 
   const [dl] = await Promise.all([page.waitForEvent("download"), b.getByRole("button", { name: "Save the backup…" }).click()]);
-  expect(dl.suggestedFilename()).toMatch(/^rt950pro-backup-[0-9A-Z]{20}-\d{8}-UV85\.bin$/); // the marker travels in the name
-  const saved = readFileSync(await dl.path());
+  expect(dl.suggestedFilename()).toMatch(/^rt950pro-backup-[0-9A-Z]{20}-\d{8}-UV85\.fbin$/); // the marker travels in the name
+  // Decision 407: one zip, the SPI flash as spi.bin and a manifest (no icons.bin: the fake radio's area is erased).
+  const z = await readZip(readFileSync(await dl.path()));
+  const saved = Buffer.from(z.get("spi.bin")!);
   expect(saved.length).toBe(2 << 20);
   expect(sha(saved)).toBe(sha(flash));
+  const mf = JSON.parse(new TextDecoder().decode(z.get("manifest.json")!));
+  expect(mf).toMatchObject({ format: "ferrite-backup", version: 1, marker: "55563835" + "ff".repeat(12), icons: null });
+  expect(mf.spi.sha256).toBe(sha(flash));
+  expect(z.has("icons.bin")).toBe(false);
   await b.getByRole("button", { name: "I have saved it" }).click();
   await expect(b.locator('[data-k="saved"]')).toContainText("saved");
   await expect(step(page)).toHaveText("SSB");
@@ -236,10 +243,24 @@ test("install: Chrome's save dialog saves the backup once and reads it back", as
   let downloads = 0;
   page.on("download", () => downloads++);
   await b.getByRole("button", { name: "Save the backup…" }).click();
-  await expect(b.locator('[data-k="saved"]')).toContainText(/saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}\.bin/);
+  await expect(b.locator('[data-k="saved"]')).toContainText(/saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}\.fbin/);
   expect(await page.evaluate(() => (window as unknown as { __writes: number }).__writes)).toBe(1);
   expect(downloads).toBe(0);
   await expect(step(page)).toHaveText("SSB");
+});
+
+test("install: a copy that passes every chunk but not the radio's CRC is read again at 115200, and then kept", async ({ page }) => {
+  // An Intel Mac's report (Nov 16, 2026): "SPI flash CRC" on the backup. The first read here differs by one byte.
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, chip());
+  setMode({ flash: flashPath, wrong_first_dump: true });
+  await serveRelease(page);
+  await open(page);
+  await backUp(page);
+  const d = dumpResult() as { z: boolean; rates: number[] };
+  expect(d.z).toBe(true);
+  expect(d.rates).toEqual([230400, 115200]);
+  await expect(wizard(page).getByText(/read twice/)).toHaveCount(0);
 });
 
 test("install: a pending phone update is refused after the backup; a bad checksum isn't used", async ({ page }) => {
@@ -307,6 +328,125 @@ test("back to stock: the backup into Ferrite's ranges, never calibration or the 
   const rs = results();
   expect(rs[rs.length - 1].sha256).toBe(sha(pack(padded)));
   expect(rs[rs.length - 1].blocks).toBe(951);
+});
+
+/** Stock's menu tiles as a radio that never had Ferrite holds them (BACKUP-12.3): 24 of 58 x 58, a flat background. */
+function tiles(): Buffer {
+  const b = Buffer.alloc(161_472);
+  for (let t = 0, o = 0; t < 24; t++)
+    for (let y = 0; y < 58; y++)
+      for (let x = 0; x < 58; x++, o += 2) b.writeUInt16LE(x >= 16 && x < 42 && y >= 16 && y < 42 ? 0xf800 ^ t : 0x0841, o);
+  return b;
+}
+
+test("menu icons: the backup reads stock's tiles and keeps them for back to stock", async ({ page }) => {
+  // BACKUP-12.3 (ferrite decision 406): stock draws its main menu's tiles from MCU 0x08080000, which every Ferrite
+  // image writes over; a stock .BTF doesn't bring them back (black, Nov 16, 2026).
+  const flash = chip(false, 4);
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, flash);
+  const icons = tiles();
+  const iconsPath = join(dir(), "icons.bin");
+  writeFileSync(iconsPath, icons);
+  setMode({ flash: flashPath, icons: iconsPath });
+  await serveRelease(page);
+  await open(page);
+  await backUp(page);
+  await expect(wizard(page).locator('[data-k="icons"]')).toContainText("stock's, kept with this backup");
+  // Decision 407: the saved .fbin carries them.
+  const [dl] = await Promise.all([page.waitForEvent("download"), wizard(page).getByRole("button", { name: "Save the backup…" }).click()]);
+  const z = await readZip(readFileSync(await dl.path()));
+  expect(sha(Buffer.from(z.get("icons.bin")!))).toBe(sha(icons));
+  expect(JSON.parse(new TextDecoder().decode(z.get("manifest.json")!)).icons.sha256).toBe(sha(icons));
+
+});
+
+test("menu icons: back to stock puts an icons file's tiles back at 0x08080000", async ({ page }) => {
+  const flash = chip(false, 4);
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, flash);
+  setMode({ flash: flashPath });
+  await serveRelease(page);
+  await open(page, false, "restore");
+  const back = card(page, "Back to stock");
+  const icons = tiles();
+  await page.getByLabel("Backup file").setInputFiles({ name: "backup-BJ90.bin", mimeType: "application/octet-stream", buffer: flash });
+  await page.getByLabel("Stock firmware for Back to stock").setInputFiles({ name: "stock.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
+  await page.getByLabel("Menu icons file").setInputFiles({ name: "rt950pro-menu-icons-X.bin", mimeType: "application/octet-stream", buffer: icons });
+  await expect(back.locator('[data-k="restore-icons"]')).toHaveText("From the icons file: they go back too.");
+  await back.getByRole("button", { name: "Back to stock" }).click();
+  const confirm = back.getByRole("group", { name: "Confirm the radio" });
+  await expect(confirm).toBeVisible({ timeout: 20_000 });
+  await confirm.getByLabel("This radio's ID").fill(HERE);
+  await back.getByRole("button", { name: "Back to stock" }).click();
+  await expect(page.getByRole("region", { name: "Back on stock" })).toBeVisible({ timeout: 120_000 });
+  // The stock image padded through 0x080F07FF: the marker, and the tiles at image offset 0x7D000.
+  const padded = Buffer.alloc(0xed800, 0xff);
+  readFileSync(new URL("../../core/tests/fixtures/ssb-synthetic.bin", import.meta.url)).copy(padded);
+  icons.copy(padded, 0x7d000);
+  padded.write("BJ90", 0xed000, "latin1");
+  const rs = results();
+  expect(rs[rs.length - 1].sha256).toBe(sha(pack(padded)));
+});
+
+test("back to stock from one .fbin: the backup, the radio's ID and the menu icons from the file", async ({ page }) => {
+  // Decision 407: no ID to type (the manifest's), the tiles back at 0x7D000, the marker from the manifest.
+  const flash = chip(false, 4);
+  const icons = tiles();
+  const manifest = {
+    format: "ferrite-backup",
+    version: 1,
+    radio_id: HERE,
+    saved: "2026-11-16T20:00:00Z",
+    console: "0.9.3",
+    chip: "Zbit 5E4016, 4096 KB",
+    spi: { file: "spi.bin", bytes: flash.length, sha256: sha(flash), crc32: "0" },
+    marker: "55563835" + "ff".repeat(12),
+    icons: { file: "icons.bin", bytes: icons.length, sha256: sha(icons) },
+  };
+  const file = Buffer.from(
+    await (
+      await createZip([
+        { name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(manifest)) },
+        { name: "spi.bin", data: flash },
+        { name: "icons.bin", data: icons },
+      ])
+    ).arrayBuffer(),
+  );
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, flash);
+  setMode({ flash: flashPath });
+  await serveRelease(page);
+  await open(page, false, "restore");
+  const back = card(page, "Back to stock");
+  await page.getByLabel("Backup file").setInputFiles({ name: "rt950pro-backup-X-20261116.fbin", mimeType: "application/zip", buffer: file });
+  await page.getByLabel("Stock firmware for Back to stock").setInputFiles({ name: "stock.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
+  await expect(back.locator('[data-k="restore-icons"]')).toHaveText("Kept with this backup: they go back too.");
+  await expect(back.locator('[data-k="restore-marker"]')).toContainText("UV85 goes back");
+  await back.getByRole("button", { name: "Back to stock" }).click();
+  await expect(page.getByRole("region", { name: "Back on stock" })).toBeVisible({ timeout: 120_000 });
+  const padded = Buffer.alloc(0xed800, 0xff);
+  readFileSync(new URL("../../core/tests/fixtures/ssb-synthetic.bin", import.meta.url)).copy(padded);
+  icons.copy(padded, 0x7d000);
+  padded.write("UV85", 0xed000, "latin1");
+  const rs = results();
+  expect(rs[rs.length - 1].sha256).toBe(sha(pack(padded)));
+  // A damaged one is refused before anything: its spi.bin isn't the manifest's.
+  const bad = Buffer.from(await (await createZip([{ name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(manifest)) }, { name: "spi.bin", data: chip(false, 2) }])).arrayBuffer());
+  await page.getByLabel("Backup file").setInputFiles({ name: "bad.fbin", mimeType: "application/zip", buffer: bad });
+  await expect(back.locator('[data-k="restore-block"]')).toContainText("doesn't match its manifest");
+});
+
+test("menu icons: a file of them is taken for back to stock; a file that isn't them is refused", async ({ page }) => {
+  setMode({ flash: join(dir(), "none.bin") });
+  await serveRelease(page);
+  await open(page, false, "restore");
+  const back = card(page, "Back to stock");
+  await expect(back.locator('[data-k="restore-icons"]')).toContainText("the tiles stay blank on stock");
+  await page.getByLabel("Menu icons file").setInputFiles({ name: "code.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(161_472, 0x5a).map((x, i) => (x + i * 7) & 0xff) });
+  await expect(back).toContainText("code.bin isn't stock's menu icons");
+  await page.getByLabel("Menu icons file").setInputFiles({ name: "rt950pro-menu-icons-X.bin", mimeType: "application/octet-stream", buffer: tiles() });
+  await expect(back.locator('[data-k="restore-icons"]')).toHaveText("From the icons file: they go back too.");
 });
 
 test("back to stock: another radio's backup is refused though its calibration is the same", async ({ page }) => {

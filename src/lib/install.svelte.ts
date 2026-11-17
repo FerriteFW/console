@@ -12,6 +12,9 @@
 //   the update area: core/src/install.rs), then the stock .BTF through the bootloader, padded over stock's marker
 //   sector's first page with the marker the backup read put back (BACKUP-12, ferrite decision 338).
 import { debugLog } from "./debuglog";
+import { saveAs } from "./download";
+import { createZip, readZip } from "./zip";
+import { CONSOLE_VERSION } from "./codeplug.svelte";
 import { ACK, askRestart, BootPort, bootRate, CMD_PROBE, sendAll } from "./bootflash";
 import {
   backupCheck,
@@ -21,7 +24,11 @@ import {
   firmwareCheck,
   FirmwareUpdate,
   Fdump,
+  iconsPlausible,
+  ICONS_LEN,
   imageCheck,
+  MDUMP_ICONS,
+  parseMdumpIcons,
   loadCore,
   markerWord,
   nameMarker,
@@ -76,6 +83,9 @@ export type Release = { version: string; file: string; sha256: string; minisig?:
 type Manifest = { ferrite?: Release; reader?: Release };
 
 class Abort extends Error {}
+/** Back to stock found no Ferrite on the radio: the page offers the restorer (BACKUP-13). */
+class NotFerrite extends Error {}
+
 /** The reader answered `?` to fdumpz (hwtest's): plain fdump instead. */
 class NoFdumpz extends Error {}
 
@@ -177,6 +187,13 @@ const keep = {
   drop: () => keep.run("readwrite", (s) => s.delete("stock")),
 };
 
+/** BACKUP-12.3: stock's menu icons each backup this browser took read, by its SHA-256 (IndexedDB, as the stock file;
+ * best effort). They aren't in the backup file: Install also offers them as a file of their own. */
+const iconStore = {
+  get: (sha: string) => keep.run<Uint8Array | undefined>("readonly", (s) => s.get(`icons-${sha}`)).then((v) => v ?? null),
+  put: (sha: string, b: Uint8Array) => keep.run("readwrite", (s) => s.put(b, `icons-${sha}`)),
+};
+
 /** Which radio each backup this browser took is from: its SHA-256 -> the radio ID (decision 263). The file name
  * carries the ID too; this covers a renamed file. Best effort: a private window or cleared storage forgets it. */
 const ids = {
@@ -223,6 +240,66 @@ const markers = {
   },
 };
 
+// ---- the backup file (.fbin, decision 407): one zip with everything the way back needs ----
+
+/** BACKUP-2.1: the backup file's manifest. `spi.bin` is the whole SPI flash as the reader read it (what a `.bin`
+ *  backup held before 0.9.3); `icons.bin` stock's menu tiles from MCU 0x08080000 when they were stock's
+ *  (BACKUP-12.3); the marker the 16 bytes at 0x080F0000 in hex (BACKUP-12.1). */
+type FbinManifest = {
+  format: "ferrite-backup";
+  version: 1;
+  radio_id: string;
+  saved: string;
+  console: string;
+  chip: string;
+  spi: { file: "spi.bin"; bytes: number; sha256: string; crc32: string };
+  marker: string | null;
+  icons: { file: "icons.bin"; bytes: number; sha256: string } | null;
+};
+
+const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
+/** The `.fbin` bytes for a backup. */
+async function fbin(spi: Uint8Array, crc32: string, sha: string, uid: string, chip: string, marker: Uint8Array | null, icons: Uint8Array | null): Promise<Uint8Array> {
+  const m: FbinManifest = {
+    format: "ferrite-backup",
+    version: 1,
+    radio_id: uid,
+    saved: new Date().toISOString(),
+    console: CONSOLE_VERSION,
+    chip,
+    spi: { file: "spi.bin", bytes: spi.length, sha256: sha, crc32 },
+    marker: marker ? hexOf(marker) : null,
+    icons: icons ? { file: "icons.bin", bytes: icons.length, sha256: sha256Hex(icons) } : null,
+  };
+  const entries = [
+    { name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(m, null, 1) + "\n") },
+    { name: "spi.bin", data: spi },
+    ...(icons ? [{ name: "icons.bin", data: icons }] : []),
+  ];
+  return new Uint8Array(await (await createZip(entries)).arrayBuffer());
+}
+
+/** A `.fbin` opened: its parts, each checked against the manifest; or the reason it isn't one. */
+export async function openFbin(b: Uint8Array): Promise<{ spi: Uint8Array; manifest: FbinManifest; marker: Uint8Array | null; icons: Uint8Array | null }> {
+  const z = await readZip(b).catch(() => {
+    throw new Error("not a Ferrite backup (.fbin): the zip doesn't read");
+  });
+  const mf = z.get("manifest.json");
+  const spi = z.get("spi.bin");
+  if (!mf || !spi) throw new Error("not a Ferrite backup (.fbin): no manifest.json or spi.bin");
+  const manifest = JSON.parse(new TextDecoder().decode(mf)) as FbinManifest;
+  if (manifest.format !== "ferrite-backup") throw new Error("not a Ferrite backup (.fbin)");
+  if (sha256Hex(spi) !== manifest.spi.sha256) throw new Error("its spi.bin doesn't match its manifest (a damaged file)");
+  const icons = z.get("icons.bin") ?? null;
+  if (icons && (!manifest.icons || sha256Hex(icons) !== manifest.icons.sha256)) throw new Error("its icons.bin doesn't match its manifest (a damaged file)");
+  const marker = manifest.marker && /^[0-9a-f]{32}$/.test(manifest.marker) ? Uint8Array.from(manifest.marker.match(/../g)!.map((x) => parseInt(x, 16))) : null;
+  return { spi, manifest, marker, icons };
+}
+
+/** A zip's first bytes. */
+const isZip = (b: Uint8Array) => b.length > 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04;
+
 /** What the marker bytes say, for the backup's facts. */
 export function markerText(m: Uint8Array | null, read: boolean): string {
   if (!read) return "not read by this reader: assumed blank (stock shows its default model name after Back to stock)";
@@ -250,8 +327,24 @@ class Install {
   // 2. Back up
   backupStep = $state<Step>("idle");
   /** What runs now, in words. */
-  message = $state("");
-  error = $state("");
+  #message = $state("");
+  #error = $state("");
+  /** What it's doing now; each change goes to the debug log (debuglog.ts), so a report has the steps. */
+  get message() {
+    return this.#message;
+  }
+  set message(v: string) {
+    if (v && v !== this.#message) debugLog(`install: ${v}`);
+    this.#message = v;
+  }
+  /** What went wrong; to the debug log too. */
+  get error() {
+    return this.#error;
+  }
+  set error(v: string) {
+    if (v && v !== this.#error) debugLog(`install ERROR: ${v}`);
+    this.#error = v;
+  }
   /** Which card the error belongs to. */
   errorAt = $state<"connect" | "backup" | "install" | "restore" | "">("");
   done = $state(0);
@@ -261,8 +354,14 @@ class Install {
   /** BACKUP-12.1: stock's marker sector's first 16 bytes as the reader read them (null: not read). */
   marker = $state<Uint8Array | null>(null);
   markerRead = $state(false);
+  /** BACKUP-12.3: stock's menu icons as the reader read them (null: not read), and whether they are stock's tiles
+   *  (not a Ferrite image's code left over them by an earlier install). */
+  icons = $state<Uint8Array | null>(null);
+  iconsStock = $state(false);
   check = $state<BackupCheck | null>(null);
   backupName = $state("");
+  /** The `.fbin` as saved (decision 407): built once the backup is checked; what Save writes and reads back. */
+  backupFile = $state<Uint8Array | null>(null);
   /** The owner saved the backup and said so (or the desktop app saved it and read it back). */
   saved = $state(false);
   savedWhere = $state("");
@@ -288,6 +387,9 @@ class Install {
   /** The Ferrite file as picked or bundled (a .ffw is checked again when the developer option changes). */
   private ferriteOrig: { p: Picked; source: "bundled" | "file"; minisig: string | null } | null = null;
   private ffw: FfwFile | null = null;
+  /** BACKUP-13: the restorer image (bundled, signed by Ferrite's CI) for Back to stock when Ferrite isn't running. */
+  restorerFile = $state<Picked | null>(null);
+  restorerProblem = $state("");
   readerFile = $state<Picked | null>(null);
   readerCheck = $state<ImageCheck | null>(null);
   readerSource = $state<"bundled" | "file" | "">("");
@@ -301,6 +403,14 @@ class Install {
   restoreBackupUid = $state<string | null>(null);
   /** BACKUP-12: the marker sector bytes the backup read (this browser's record, or the file name's word), or null. */
   restoreMarker = $state<Uint8Array | null>(null);
+  /** BACKUP-12.3: the menu icons Back to stock puts back (this browser's record of the backup's, or a file), and from where. */
+  restoreIcons = $state<Uint8Array | null>(null);
+  restoreIconsFrom = $state<"" | "backup" | "file">("");
+  restoreIconsError = $state("");
+  /** BACKUP-13: the last Back to stock found no Ferrite answering: the page offers the restorer. */
+  restoreNoFerrite = $state(false);
+  /** A backup file that didn't open (a damaged .fbin). */
+  restoreFileError = $state("");
   /** Console doesn't know the backup's radio: the owner types this radio's ID (this one) to go on. */
   restoreConfirmUid = $state<string | null>(null);
   restoreTyped = $state("");
@@ -358,6 +468,16 @@ class Install {
     if (m.reader) {
       const b = await this.fetchChecked(m.reader);
       if (b) this.setReader({ name: m.reader.file, bytes: b }, "bundled", m.reader.minisig ?? null);
+    }
+    if (m.restorer) {
+      const b = await this.fetchChecked(m.restorer);
+      if (b) {
+        const c = imageCheck("restorer", b);
+        const sig = signatureOf(b, m.restorer.minisig ?? null);
+        if (sig.kind === "bad") c.problems.push(signatureText(sig));
+        this.restorerFile = c.problems.length ? null : { name: m.restorer.file, bytes: b };
+        this.restorerProblem = c.problems.join(" ");
+      }
     }
   }
 
@@ -434,7 +554,7 @@ class Install {
 
   /** Ferrite takes a .ffw, or a .btf with its .minisig (signature.ts), as the reader does; stock and backup the
    *  first file. */
-  async pickFile(kind: "ferrite" | "reader" | "stock" | "backup", files: File[]) {
+  async pickFile(kind: "ferrite" | "reader" | "stock" | "backup" | "icons", files: File[]) {
     await loadCore();
     const ffwFile = kind === "ferrite" ? files.find((f) => /\.ffw$/i.test(f.name)) : undefined;
     if (ffwFile) {
@@ -453,14 +573,45 @@ class Install {
     }
     const f = files[0];
     const p = { name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) };
+    if (kind === "icons") {
+      // BACKUP-12.3: a menu-icons file (Install's "Save the menu icons", this radio's or another's).
+      const ok = p.bytes.length === ICONS_LEN && iconsPlausible(p.bytes);
+      this.restoreIconsError = ok ? "" : `${p.name} isn't stock's menu icons (${ICONS_LEN} bytes of tiles expected).`;
+      if (ok) [this.restoreIcons, this.restoreIconsFrom] = [p.bytes, "file"];
+      return;
+    }
     if (kind === "stock") {
       this.pickStock(p);
       if (this.keepStock) await keep.put(p);
     } else {
+      // A .fbin (decision 407): the SPI flash, the radio's ID, the marker and the menu icons in one file.
+      let fromFbin: Awaited<ReturnType<typeof openFbin>> | null = null;
+      if (isZip(p.bytes)) {
+        try {
+          fromFbin = await openFbin(p.bytes);
+        } catch (e) {
+          this.restoreBackup = null;
+          this.restoreBackupCheck = null;
+          this.restoreFileError = `${p.name}: ${(e as Error).message}.`;
+          return;
+        }
+        p.bytes = fromFbin.spi;
+      }
+      this.restoreFileError = "";
       this.restoreBackup = p;
       this.restoreBackupCheck = backupCheck(p.bytes);
       this.restoreBackupUid = ids.get(this.restoreBackupCheck.sha256) ?? nameUid(p.name);
       this.restoreMarker = markers.get(this.restoreBackupCheck.sha256) ?? nameMarker(p.name);
+      if (fromFbin) {
+        this.restoreBackupUid = fromFbin.manifest.radio_id || this.restoreBackupUid;
+        this.restoreMarker = fromFbin.marker ?? this.restoreMarker;
+      }
+      // The icons: an icons file picked stays; else the .fbin's, else this browser's record of the backup's.
+      if (this.restoreIconsFrom !== "file") {
+        const mine = fromFbin?.icons && iconsPlausible(fromFbin.icons) ? fromFbin.icons : await iconStore.get(this.restoreBackupCheck.sha256);
+        this.restoreIcons = mine;
+        this.restoreIconsFrom = mine ? "backup" : "";
+      }
       this.restoreConfirmUid = null;
       this.restoreTyped = "";
       this.restoreSummary = null;
@@ -661,24 +812,42 @@ class Install {
       const md = await w.waitFor(/80F0000:[0-9A-F]{32}\*[0-9A-F]{2}|\?  \(help\)|mdump: [^\r\n]*/, 3000, this.held);
       this.marker = md ? parseMdump(md[0]) : null;
       this.markerRead = !!this.marker;
-      const data = await this.readChip(chip.size);
+      // BACKUP-12.3: stock's menu icons (MCU 0x08080000, 161 KB), which every Ferrite image writes over: read only,
+      // about 35 s. Taken whole through the sink (the text keeps 8 KB).
+      this.message = "Reading stock's menu icons (about 35 s)…";
+      this.icons = await this.readIcons(w);
+      this.iconsStock = !!this.icons && iconsPlausible(this.icons);
+      debugLog(`backup: menu icons ${this.icons ? `read, ${this.iconsStock ? "stock's tiles" : "not stock's (Ferrite's code or blank)"}` : "not read"}`);
+      let data = await this.readChip(chip.size);
       this.message = "Checking: the radio's own CRC of the whole chip (about a minute)…";
       w.clear();
       await w.write("flashcrc\r");
       const crc = await w.waitFor(/flash crc32 [0-9A-F]{8} over \d+ KB/, 240_000, this.held);
       const radioCrc = crc && readerLine<{ crc: number; size: number }>("flashcrc", crc[0]);
       if (!radioCrc) throw new Error("The radio didn't answer flashcrc. Start the backup again.");
-      const c = backupCheck(data);
-      const mine = parseInt(c.crc32, 16);
-      if (radioCrc.crc !== mine || radioCrc.size !== data.length)
+      let c = backupCheck(data);
+      const theirs = radioCrc.crc.toString(16).toUpperCase().padStart(8, "0");
+      const same = () => radioCrc.crc === parseInt(c.crc32, 16) && radioCrc.size === data.length;
+      debugLog(`backup: chip ${this.chip}; read ${data.length} B, CRC ${c.crc32}; the radio's ${theirs} over ${radioCrc.size} B`);
+      if (!same()) {
+        // A read that doesn't match the chip (an Intel Mac's report, Nov 16, 2026): once more at 115200, the slowest
+        // and safest rate, before giving up. The radio's CRC stays as it was (the chip doesn't change under the reader).
+        this.message = "The copy didn't match the radio's: reading the chip again, more slowly…";
+        data = await this.readChip(chip.size, true);
+        c = backupCheck(data);
+        debugLog(`backup: read again at 115200: ${data.length} B, CRC ${c.crc32}`);
+      }
+      if (!same())
         throw new Error(
-          `The radio says CRC ${radioCrc.crc.toString(16).toUpperCase().padStart(8, "0")} over ${radioCrc.size / 1024} KB; the read is ${c.crc32}. Start the backup again.`,
+          `The radio says CRC ${theirs} over ${radioCrc.size / 1024} KB; the read is ${c.crc32} over ${data.length / 1024} KB, read twice. Start the backup again.`,
         );
       this.backup = data;
       this.check = c;
-      this.backupName = backupName(this.uid, today(), this.marker);
+      this.backupName = backupName(this.uid, today(), this.marker).replace(/\.bin$/, ".fbin");
+      this.backupFile = await fbin(data, c.crc32, c.sha256, this.uid, this.chip, this.marker, this.iconsStock ? this.icons : null);
       ids.put(c.sha256, this.uid);
       if (this.marker) markers.put(c.sha256, this.marker);
+      if (this.icons && this.iconsStock) await iconStore.put(c.sha256, this.icons);
       this.message = "";
       this.backupStep = c.problems.some((p) => !p.startsWith("a stock phone")) ? "failed" : "done";
       if (this.backupStep === "failed") {
@@ -705,13 +874,46 @@ class Install {
     throw new Error("The reader didn't start. Turn the radio off and on, then start the backup again.");
   }
 
+  /** BACKUP-12.3: the menu icons this backup read, as a file of their own (for Back to stock on another computer, or
+   *  for another radio whose icons an earlier Ferrite install wrote over). The name it went as, or null. */
+  async saveIcons(): Promise<string | null> {
+    if (!this.icons || !this.iconsStock) return null;
+    const uid = (this.uid || "radio").replace(/\s+/g, "");
+    return saveAs(`rt950pro-menu-icons-${uid}.bin`, new Blob([this.icons as BlobPart], { type: "application/octet-stream" }));
+  }
+
+  /** BACKUP-12.3: the reader's `mdump` of the icon area, checked line by line; null when it doesn't come whole (an
+   *  older reader, a lost line: the backup goes on without them). */
+  private async readIcons(w: Wire): Promise<Uint8Array | null> {
+    let text = "";
+    let done = false;
+    w.sink = (b) => {
+      text += latin1(b);
+      done ||= /dump: end|mdump: [^\r\n]*only|\?  \(help\)/.test(text.slice(-200));
+    };
+    try {
+      await w.write(MDUMP_ICONS);
+      const end = performance.now() + 90_000;
+      while (!done && performance.now() < end) {
+        this.held();
+        await sleep(200);
+      }
+    } finally {
+      w.sink = null;
+      w.clear();
+    }
+    return done ? parseMdumpIcons(text) : null;
+  }
+
   /** The whole chip: the Rust reader's fdumpz at 230400 (115200 on Windows) (BACKUP-9.6, ferrite decision 265) when the reader image
    * has it, else (hwtest's reader, or a reader that answers `?`) fdump from the fastest rate down (flashdump.py's
    * read_range). */
-  private async readChip(size: number): Promise<Uint8Array> {
+  private async readChip(size: number, slow = false): Promise<Uint8Array> {
     let last: Error | null = null;
+    const fast = !!this.t!.setBaud && !IS_WINDOWS && !slow;
+    debugLog(`backup: reading ${size} B, ${fast ? "fast" : "at 115200"}`);
     if (this.readerFile && readerHasFdumpz(this.readerFile.bytes)) {
-      const rate = this.t!.setBaud && !IS_WINDOWS ? FDUMPZ_BAUD : READER_RATES[READER_RATES.length - 1];
+      const rate = fast ? FDUMPZ_BAUD : READER_RATES[READER_RATES.length - 1];
       for (let tries = 0; tries < 2; tries++) {
         try {
           return await this.fdump(size, rate, true);
@@ -726,7 +928,7 @@ class Install {
       }
       if (!(last instanceof NoFdumpz)) throw this.readFailed(last);
     }
-    for (const rate of this.t!.setBaud && !IS_WINDOWS ? READER_RATES : [READER_RATES[READER_RATES.length - 1]]) {
+    for (const rate of fast ? READER_RATES : [READER_RATES[READER_RATES.length - 1]]) {
       try {
         return await this.fdump(size, rate, false);
       } catch (e) {
@@ -832,12 +1034,12 @@ class Install {
   /** BACKUP-2: the desktop app's save dialog (the file read back), Chrome's save dialog (read back too), or the
    * browser's download the owner confirms. Once: a download already started isn't started again by this. */
   async save() {
-    if (!this.backup || this.saving) return;
+    if (!this.backup || !this.backupFile || this.saving) return;
     this.saveError = "";
     if (isTauri()) {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
-        const path = await invoke<string | null>("save_file", this.backup, { headers: { "x-name": this.backupName } });
+        const path = await invoke<string | null>("save_file", this.backupFile, { headers: { "x-name": this.backupName } });
         if (path) {
           this.savedWhere = path;
           this.saved = true;
@@ -847,17 +1049,17 @@ class Install {
       }
       return;
     }
-    const blob = new Blob([this.backup as BlobPart], { type: "application/octet-stream" });
+    const blob = new Blob([this.backupFile as BlobPart], { type: "application/zip" });
     const pick = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
     if (pick) {
       this.saving = true;
       try {
-        const h = await pick({ suggestedName: this.backupName, types: [{ description: "Radio backup", accept: { "application/octet-stream": [".bin"] } }] });
+        const h = await pick({ suggestedName: this.backupName, types: [{ description: "Radio backup", accept: { "application/zip": [".fbin"] } }] });
         const w = await h.createWritable();
         await w.write(blob);
         await w.close();
         const back = new Uint8Array(await (await h.getFile()).arrayBuffer());
-        if (back.length === this.backup.length && sha256Hex(back) === this.check?.sha256) {
+        if (back.length === this.backupFile.length && sha256Hex(back) === sha256Hex(this.backupFile)) {
           this.savedWhere = h.name;
           this.saved = true;
         } else this.saveError = `${h.name} didn't read back as this backup. Save it again.`;
@@ -875,7 +1077,7 @@ class Install {
 
   /** The browser's download, again, when the owner asks for it. */
   downloadAgain() {
-    if (this.backup) this.download(new Blob([this.backup as BlobPart], { type: "application/octet-stream" }));
+    if (this.backupFile) this.download(new Blob([this.backupFile as BlobPart], { type: "application/zip" }));
   }
 
   private saving = false;
@@ -902,7 +1104,9 @@ class Install {
   async checkSaved(f: File) {
     const b = new Uint8Array(await f.arrayBuffer());
     await loadCore();
-    if (this.backup && b.length === this.backup.length && sha256Hex(b) === this.check?.sha256) {
+    // The .fbin as saved, or (opened) one whose spi.bin is this backup.
+    const spi = isZip(b) ? await openFbin(b).then((f) => f.spi).catch(() => null) : b;
+    if (this.backup && spi && spi.length === this.backup.length && sha256Hex(spi) === this.check?.sha256) {
       this.saved = true;
       this.savedWhere = f.name;
       this.saveError = "";
@@ -1011,6 +1215,7 @@ class Install {
 
   get restoreBlock(): string {
     const b = this.restoreBackupCheck;
+    if (this.restoreFileError) return this.restoreFileError;
     if (!this.restoreBackup || !b) return "Drop in your backup.";
     const bad = b.problems.filter((p) => !p.startsWith("a stock phone"));
     if (bad.length) return bad.join(" ");
@@ -1021,20 +1226,63 @@ class Install {
   }
 
   /** BACKUP-7, BACKUP-8: the backup into Ferrite's ranges over the link, then the stock .BTF. */
-  async restore() {
+  /** BACKUP-13: the restorer's `START` answer, asked until `ms` runs out (it answers once it has started); null if
+   *  nothing answers. Plain frames: the link never says HELLO to it. */
+  private async restorerStart(link: Link, ms: number): Promise<{ status: number; rest: Uint8Array } | null> {
+    const end = performance.now() + ms;
+    while (performance.now() < end) {
+      this.held();
+      try {
+        const a = await link.ask(STOCK_RESTORE, new Uint8Array([OP_START]), 1500);
+        if (a.status === 0) return a;
+      } catch (e) {
+        if (!(e instanceof TimeoutError)) throw e;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * BACKUP-7, BACKUP-8: Back to stock. `viaRestorer` (BACKUP-13): the radio isn't running Ferrite (stock, nicFW, a
+   * Ferrite that won't start): the restorer image goes on through the bootloader first (unless it is already
+   * running), and the same restore follows from its `START`.
+   */
+  async restore(viaRestorer = false) {
     if (this.running || this.restoreBlock) return;
+    if (viaRestorer && !this.restorerFile) {
+      this.fail("restore", new Error(`This copy of Console has no restorer image${this.restorerProblem ? ` (${this.restorerProblem})` : ""}.`));
+      return;
+    }
     this.restoreStep = "running";
     this.restoreWrote = false;
     this.error = "";
     this.errorAt = "";
     const t = this.t!;
-    const link = new Link(t);
+    let link = new Link(t);
     let plan: InstanceType<typeof RestorePlan> | null = null;
     try {
+      let started: { status: number; rest: Uint8Array } | null = null;
+      if (viaRestorer) {
+        this.message = "Is the restorer running already?";
+        await link.open();
+        started = await this.restorerStart(link, 2500);
+        if (!started) {
+          link.close();
+          this.wire!.attach();
+          await this.flash(FirmwareUpdate.restorer(this.restorerFile!.bytes), "the restorer");
+          this.message = "Waiting for the restorer to start…";
+          link = new Link(t);
+          await link.open();
+          started = await this.restorerStart(link, 15_000);
+          if (!started) throw new Error("The restorer didn't answer. Turn the radio off and on, then start Back to stock again.");
+        }
+      }
+      if (!started) {
       this.message = "Asking the radio (it must run Ferrite)…";
       await link.open();
-      await link.hello().catch(() => {
-        throw new Error("The radio doesn't answer as Ferrite. Back to stock needs Ferrite running; check the cable and that the radio is on.");
+      // Plain frames: the radio's restore loop reads no compressed ones (it stopped after one block, Nov 16, 2026).
+      await link.helloPlain().catch(() => {
+        throw new NotFerrite("The radio doesn't answer as Ferrite: check the cable and that it is on. If it runs stock, nicFW, or a Ferrite that won't start, use “Start from the bootloader”.");
       });
       // Decision 263, before anything stops: the backup must be this radio's by its MCU ID (INFO's; calibration can
       // be the same on two radios). The START answer's ID is checked again by the plan.
@@ -1044,7 +1292,9 @@ class Install {
         this.restoreConfirmUid = pre.confirm_uid;
         if (pre.problems.length) throw new Error(`${pre.problems.join(" ")} Nothing was written.`);
       }
-      const { status, rest } = await link.ask(STOCK_RESTORE, new Uint8Array([OP_START]), 10_000);
+      started = await link.ask(STOCK_RESTORE, new Uint8Array([OP_START]), 10_000);
+      }
+      const { status, rest } = started;
       if (status === 2) throw new Error("This Ferrite is older than the way back: update it first (Firmware Update), then try again.");
       if (status !== 0) throw new Error(`The radio refused: ${statusText(status, rest)}.`);
       const start = restoreStart(rest);
@@ -1092,7 +1342,7 @@ class Install {
       if (fin.status !== 0) throw new Error(`The radio refused to finish: ${statusText(fin.status)}.`);
       link.close();
       this.wire!.attach();
-      await this.flash(FirmwareUpdate.stock(this.stock!.bytes, this.restoreMarker ?? undefined), "stock firmware", false);
+      await this.flash(FirmwareUpdate.stock(this.stock!.bytes, this.restoreMarker ?? undefined, this.restoreIcons ?? undefined), "stock firmware", false);
       this.backOnStock();
     } catch (e) {
       link.close();
@@ -1110,7 +1360,7 @@ class Install {
     this.error = "";
     this.errorAt = "";
     try {
-      await this.flash(FirmwareUpdate.stock(this.stock.bytes, this.restoreMarker ?? undefined), "stock firmware");
+      await this.flash(FirmwareUpdate.stock(this.stock.bytes, this.restoreMarker ?? undefined, this.restoreIcons ?? undefined), "stock firmware");
       this.backOnStock();
     } catch (e) {
       this.fail("restore", e);
@@ -1119,6 +1369,7 @@ class Install {
 
   private fail(which: "backup" | "install" | "restore", e: unknown) {
     const msg = (e as Error)?.message ?? String(e);
+    if (which === "restore") this.restoreNoFerrite = e instanceof NotFerrite;
     if (which === "backup") this.backupStep = "failed";
     else if (which === "install") this.installStep = "failed";
     else this.restoreStep = "failed";

@@ -14,13 +14,13 @@
   const elsewhere = $derived(!I.connected && radio.phase !== "idle" && radio.phase !== "updating");
   const cableOk = $derived(radio.available().cable === true);
 
-  async function picked(kind: "stock" | "backup", e: Event) {
+  async function picked(kind: "stock" | "backup" | "icons", e: Event) {
     const el = e.currentTarget as HTMLInputElement;
     const files = Array.from(el.files ?? []);
     el.value = "";
     if (files.length) await I.pickFile(kind, files);
   }
-  async function dropped(kind: "stock" | "backup", e: DragEvent) {
+  async function dropped(kind: "stock" | "backup" | "icons", e: DragEvent) {
     e.preventDefault();
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length) await I.pickFile(kind, files);
@@ -34,13 +34,13 @@
 <div class="page">
   <section class="card" aria-label="Back to stock">
     <h1>Back to stock</h1>
-    <p>For a radio on Ferrite that should go back to its stock firmware. Console writes your backup back (never calibration or the update area), then installs your stock firmware. The radio must be running Ferrite and on the cable.</p>
+    <p>For a radio that should go back to its stock firmware. Console writes your backup back (never calibration or the update area), then installs your stock firmware. A radio running Ferrite does it itself; one on stock, nicFW, or a Ferrite that won't start gets a small restorer through the bootloader first (“Start from the bootloader”).</p>
 
     <h2>1. Your files</h2>
     <div class="two">
       <label class="drop" ondragover={(e) => e.preventDefault()} ondrop={(e) => dropped("backup", e)}>
-        <input type="file" accept=".bin" hidden aria-label="Backup file" onchange={(e) => picked("backup", e)} />
-        <span class="what">Your backup (.bin)</span>
+        <input type="file" accept=".fbin,.bin" hidden aria-label="Backup file" onchange={(e) => picked("backup", e)} />
+        <span class="what">Your backup (.fbin, or an older .bin)</span>
         <span>{I.restoreBackup ? I.restoreBackup.name : "Drop it here, or click to choose"}</span>
       </label>
       <label class="drop" ondragover={(e) => e.preventDefault()} ondrop={(e) => dropped("stock", e)}>
@@ -49,6 +49,20 @@
         <span>{I.stock ? I.stock.name : "From the radio maker's website: drop it here, or click"}</span>
       </label>
     </div>
+    <label class="drop icons" ondragover={(e) => e.preventDefault()} ondrop={(e) => dropped("icons", e)}>
+      <input type="file" accept=".bin" hidden aria-label="Menu icons file" onchange={(e) => picked("icons", e)} />
+      <span class="what">Stock's menu icons (optional)</span>
+      <span data-k="restore-icons">
+        {#if I.restoreIconsFrom === "backup"}
+          Kept with this backup: they go back too.
+        {:else if I.restoreIconsFrom === "file"}
+          From the icons file: they go back too.
+        {:else}
+          Not with this backup (an older .bin, or a radio that had Ferrite before it). Stock's main-menu tiles are in the radio's own flash, which every Ferrite install writes over: without an icons file (Install's "Save them as a file…", from a radio that never had Ferrite) the tiles stay blank on stock. Drop one here.
+        {/if}
+      </span>
+    </label>
+    {#if I.restoreIconsError}<p class="warn">{I.restoreIconsError}</p>{/if}
     {#if I.restoreBackup && I.restoreBackupCheck && !I.restoreBackupCheck.problems.filter((p) => !p.startsWith("a stock phone")).length}
       <p class="sub" data-k="restore-id">
         {I.restoreBackupUid ? `Backup of radio ID ${I.restoreBackupUid}.` : "Console doesn't know which radio this backup is from: the radio's ID is asked for first."}
@@ -104,6 +118,12 @@
       </div>
     {/if}
     {#if I.error && I.errorAt === "restore"}<div class="banner" role="alert">{I.error}</div>{/if}
+    {#if I.restoreStep !== "running" && I.restoreStep !== "done"}
+      <div class="row" data-k="via-restorer">
+        <button class="btn" class:primary={I.restoreNoFerrite} disabled={!!I.restoreBlock || I.running || !I.connected || !I.restorerFile} onclick={() => I.restore(true)}>Start from the bootloader</button>
+        <span class="sub">Not running Ferrite: turn the radio off and on when Console asks.{#if !I.restorerFile} (This copy of Console has no restorer image.){/if}</span>
+      </div>
+    {/if}
     {#if I.restoreStep === "failed" && I.restoreWrote}
       <div class="banner warn">
         <p>Part of the backup is written. Don't let Ferrite start again (it would set up its storage over it). Turn the radio off, hold the two lower side keys and turn it on, then:</p>
