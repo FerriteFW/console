@@ -242,6 +242,20 @@ test("install: Chrome's save dialog saves the backup once and reads it back", as
   await expect(step(page)).toHaveText("SSB");
 });
 
+test("install: a copy that passes every chunk but not the radio's CRC is read again at 115200, and then kept", async ({ page }) => {
+  // An Intel Mac's report (Nov 16, 2026): "SPI flash CRC" on the backup. The first read here differs by one byte.
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, chip());
+  setMode({ flash: flashPath, wrong_first_dump: true });
+  await serveRelease(page);
+  await open(page);
+  await backUp(page);
+  const d = dumpResult() as { z: boolean; rates: number[] };
+  expect(d.z).toBe(true);
+  expect(d.rates).toEqual([230400, 115200]);
+  await expect(wizard(page).getByText(/read twice/)).toHaveCount(0);
+});
+
 test("install: a pending phone update is refused after the backup; a bad checksum isn't used", async ({ page }) => {
   const flashPath = join(dir(), "flash-pending.bin");
   writeFileSync(flashPath, chip(true));

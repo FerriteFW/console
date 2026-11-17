@@ -232,7 +232,9 @@ class FakeReader:
     """hwtest's console and its fdump, fed bytes (no threads, no rates: the bridge's TCP has none); with `z` (the
     Rust reader's image), fdumpz too (BACKUP-9.6), unless MODE.json says "no_fdumpz" (answered `?`, as hwtest).
     "corrupt_every": N spoils every Nth frame once (NAKed); "cut_every": N sends every Nth frame once 100 bytes short
-    (Console asks again once the frame's time is up)."""
+    (Console asks again once the frame's time is up); "wrong_first_dump": the first whole read serves a copy with one
+    byte flipped, its frames and CRCs consistent with it, so only `flashcrc` tells (an Intel Mac's report, Nov 16,
+    2026)."""
 
     def __init__(self, mode, log=lambda *a: None, mode_path=None, z=False):
         self.mode, self.log, self.mode_path = mode, log, mode_path
@@ -248,6 +250,9 @@ class FakeReader:
         self.next = None
         self.done = False
         self.frames = 0
+        self.dumps = 0  # whole reads started, and their rates (MODE.dump.json)
+        self.rates = []
+        self.served = self.flash
 
     def console(self, text):
         return text.replace("\n", "\r\n").encode()
@@ -298,6 +303,14 @@ class FakeReader:
                 return self.console("fdump: range outside the chip\n")
             self.dump = [addr, n, 0, False, False]
             self.dump_z = z
+            self.dumps += 1
+            rate = int(w[3]) if len(w) > 3 else 230400 if z else 500000
+            self.rates.append(rate)
+            self.served = self.flash
+            if self.mode.get("wrong_first_dump") and self.dumps == 1:
+                b = bytearray(self.flash)
+                b[len(b) // 2] ^= 0x10
+                self.served = bytes(b)
             self.sync = b""
             self.log(f"fakereader: {w[0]} {addr:06X}+{n:X}")
             rate = w[3] if len(w) > 3 else 230400 if z else 500000
@@ -312,15 +325,15 @@ class FakeReader:
         """MODE.dump.json: how the dump went (fdumpz or not, its chunk modes), for the tests."""
         if self.mode_path:
             with open(result_path(self.mode_path).replace(".result.json", ".dump.json"), "w") as f:
-                json.dump({"z": self.dump_z, "kinds": {str(k): v for k, v in self.kinds.items()}}, f)
+                json.dump({"z": self.dump_z, "kinds": {str(k): v for k, v in self.kinds.items()}, "rates": self.rates}, f)
 
     def frame(self):
         addr, n, off, _, _ = self.dump
         if off >= n:
-            end = struct.pack("<IIII", addr, n, zlib.crc32(self.flash[addr:addr + n]), 0)
+            end = struct.pack("<IIII", addr, n, zlib.crc32(self.served[addr:addr + n]), 0)
             return fd_frame(b"E", addr, end)
         k = min(self.step(), n - off)
-        chunk = self.flash[addr + off:addr + off + k]
+        chunk = self.served[addr + off:addr + off + k]
         if self.dump_z:
             coded = zcode(chunk)
             self.kinds[coded[0]] = self.kinds.get(coded[0], 0) + 1
@@ -354,7 +367,7 @@ class FakeReader:
                 out += self.frame()
             elif c == FD_ACK:
                 if d[2] >= d[1]:
-                    crc = zlib.crc32(self.flash[d[0]:d[0] + d[1]])
+                    crc = zlib.crc32(self.served[d[0]:d[0] + d[1]])
                     self.dump = None
                     self.log(f"fakereader: fdump end (chunk modes {self.kinds})")
                     self.write_kinds()

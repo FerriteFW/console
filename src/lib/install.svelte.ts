@@ -661,18 +661,28 @@ class Install {
       const md = await w.waitFor(/80F0000:[0-9A-F]{32}\*[0-9A-F]{2}|\?  \(help\)|mdump: [^\r\n]*/, 3000, this.held);
       this.marker = md ? parseMdump(md[0]) : null;
       this.markerRead = !!this.marker;
-      const data = await this.readChip(chip.size);
+      let data = await this.readChip(chip.size);
       this.message = "Checking: the radio's own CRC of the whole chip (about a minute)…";
       w.clear();
       await w.write("flashcrc\r");
       const crc = await w.waitFor(/flash crc32 [0-9A-F]{8} over \d+ KB/, 240_000, this.held);
       const radioCrc = crc && readerLine<{ crc: number; size: number }>("flashcrc", crc[0]);
       if (!radioCrc) throw new Error("The radio didn't answer flashcrc. Start the backup again.");
-      const c = backupCheck(data);
-      const mine = parseInt(c.crc32, 16);
-      if (radioCrc.crc !== mine || radioCrc.size !== data.length)
+      let c = backupCheck(data);
+      const theirs = radioCrc.crc.toString(16).toUpperCase().padStart(8, "0");
+      const same = () => radioCrc.crc === parseInt(c.crc32, 16) && radioCrc.size === data.length;
+      debugLog(`backup: chip ${this.chip}; read ${data.length} B, CRC ${c.crc32}; the radio's ${theirs} over ${radioCrc.size} B`);
+      if (!same()) {
+        // A read that doesn't match the chip (an Intel Mac's report, Nov 16, 2026): once more at 115200, the slowest
+        // and safest rate, before giving up. The radio's CRC stays as it was (the chip doesn't change under the reader).
+        this.message = "The copy didn't match the radio's: reading the chip again, more slowly…";
+        data = await this.readChip(chip.size, true);
+        c = backupCheck(data);
+        debugLog(`backup: read again at 115200: ${data.length} B, CRC ${c.crc32}`);
+      }
+      if (!same())
         throw new Error(
-          `The radio says CRC ${radioCrc.crc.toString(16).toUpperCase().padStart(8, "0")} over ${radioCrc.size / 1024} KB; the read is ${c.crc32}. Start the backup again.`,
+          `The radio says CRC ${theirs} over ${radioCrc.size / 1024} KB; the read is ${c.crc32} over ${data.length / 1024} KB, read twice. Start the backup again.`,
         );
       this.backup = data;
       this.check = c;
@@ -708,10 +718,12 @@ class Install {
   /** The whole chip: the Rust reader's fdumpz at 230400 (115200 on Windows) (BACKUP-9.6, ferrite decision 265) when the reader image
    * has it, else (hwtest's reader, or a reader that answers `?`) fdump from the fastest rate down (flashdump.py's
    * read_range). */
-  private async readChip(size: number): Promise<Uint8Array> {
+  private async readChip(size: number, slow = false): Promise<Uint8Array> {
     let last: Error | null = null;
+    const fast = !!this.t!.setBaud && !IS_WINDOWS && !slow;
+    debugLog(`backup: reading ${size} B, ${fast ? "fast" : "at 115200"}`);
     if (this.readerFile && readerHasFdumpz(this.readerFile.bytes)) {
-      const rate = this.t!.setBaud && !IS_WINDOWS ? FDUMPZ_BAUD : READER_RATES[READER_RATES.length - 1];
+      const rate = fast ? FDUMPZ_BAUD : READER_RATES[READER_RATES.length - 1];
       for (let tries = 0; tries < 2; tries++) {
         try {
           return await this.fdump(size, rate, true);
@@ -726,7 +738,7 @@ class Install {
       }
       if (!(last instanceof NoFdumpz)) throw this.readFailed(last);
     }
-    for (const rate of this.t!.setBaud && !IS_WINDOWS ? READER_RATES : [READER_RATES[READER_RATES.length - 1]]) {
+    for (const rate of fast ? READER_RATES : [READER_RATES[READER_RATES.length - 1]]) {
       try {
         return await this.fdump(size, rate, false);
       } catch (e) {
