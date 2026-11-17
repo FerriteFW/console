@@ -25,7 +25,7 @@ import { signatureOf, signatureText, splitPicked, type Signed } from "./signatur
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
 import { newerFirmware } from "./updates.svelte";
-import { migrate } from "./migrate.svelte";
+import { LAYOUT_MOVING, markFrom, migrate } from "./migrate.svelte";
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
 
@@ -454,7 +454,12 @@ class Firmware {
     if (radio.phase === "outdated") throw new Error(`The radio restarted, but ${radio.mismatch?.text ?? "it speaks another link protocol."}`);
     if (radio.phase !== "connected") throw new Error(radio.error || "Connecting again failed.");
     const l = radio.hello?.layouts;
-    if (l && l.firmware !== l.chip) {
+    // An earlier update's SPI parts cut before their stamp leave the radio "half moved" (255) with nothing moved: the
+    // mark says it began from this layout. Then the parts below finish it (their stamp clears the mark); no data move.
+    const partsOnly =
+      !!l && l.chip === LAYOUT_MOVING && !!radio.connectedLink && (await markFrom(radio.connectedLink).catch(() => null)) === l.firmware;
+    if (partsOnly) debugLog("update: the radio says 255, but its mark began from this layout: only the SPI parts were cut; writing them finishes it");
+    if (l && l.firmware !== l.chip && !partsOnly) {
       // UPD-16, LINK-62: the new firmware stores another layout: the data moves now, as part of the update.
       this.stage = "migrating";
       this.message = `The new firmware keeps its data in layout ${l.firmware}: moving yours from layout ${l.chip}…`;
@@ -494,6 +499,14 @@ class Firmware {
       await radio.handBack(got.t);
     }
     if (radio.phase !== "connected") throw new Error(radio.error || "Connecting again failed after the SPI parts.");
+  }
+
+  /** After a failure that left the radio connected (not in its bootloader): ready to install again. The wizard
+   *  reopened on the old failure with only Close, so "Install again" could never start (Nov 17, 2026). */
+  again() {
+    if (this.running || radio.phase === "updating") return;
+    this.error = "";
+    this.stage = this.check && this.check.problems.length === 0 ? "ready" : "pick";
   }
 
   private fail(e: unknown, resumable: boolean) {

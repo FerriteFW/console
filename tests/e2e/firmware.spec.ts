@@ -281,3 +281,35 @@ test("firmware: a .ffw: unsigned only with the developer option; the image, then
   expect(r.errors).toEqual([]);
   expect(r.sha256).toBe(sha(btf));
 });
+
+test("firmware: SPI parts cut part way leave the radio half moved (255); installing again finishes it with no data move", async ({ page }) => {
+  // An Intel Mac's update (Nov 17, 2026): the parts' raw writes stopped answering; the radio then said 255 and
+  // "Finish the update" asked for a copy of data that was never moved. The mark says the writes began from this
+  // layout, so the update goes straight to the parts, whose stamp clears it.
+  test.setTimeout(240_000);
+  setMode({});
+  const btf = testBtf(16);
+  await openConsole(page, "firmware");
+  await connect(page);
+  await page.getByText("Advanced: install a file (.ffw or .btf)").click();
+  await page.getByLabel("Allow unsigned files").check();
+  await pickFile(page, "ferrite-test.ffw", testFfw(btf));
+  // The cable drops everything Console sends for 20 s once the parts are being written.
+  await page.evaluate(() => {
+    const w = window as any;
+    const t = w.ferrite.radio.connectedLink.t;
+    const orig = t.write.bind(t);
+    t.write = (b: Uint8Array) => (w.__cutUntil && performance.now() < w.__cutUntil ? Promise.resolve() : orig(b));
+  });
+  await update(page);
+  // Some of the parts' raw writes go through first (his log: 44 answered), then the cut.
+  await expect.poll(() => page.evaluate(() => (window as any).ferrite.firmware.partsDone), { timeout: 90_000, intervals: [50] }).toBeGreaterThan(3);
+  await page.evaluate(() => ((window as any).__cutUntil = performance.now() + 20_000));
+  await expect(wizard(page)).toContainText("its SPI parts didn't go in", { timeout: 60_000 });
+  await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.hello?.layouts?.chip), { timeout: 20_000 }).toBe(255);
+  await wizard(page).getByRole("button", { name: "Close" }).click();
+  // Install again: no data move (it would need a copy), the parts, the stamp: the radio's layouts agree again.
+  await update(page);
+  await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 120_000 });
+  await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.hello?.layouts?.chip), { timeout: 20_000 }).toBe(3);
+});

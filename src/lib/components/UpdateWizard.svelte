@@ -25,6 +25,7 @@
   function close() {
     if (busy) return;
     if (firmware.stage === "done") firmware.clearFile();
+    if (firmware.stage === "failed") firmware.again();
     onclose();
   }
 
@@ -112,6 +113,7 @@
             {#if firmware.canResume && ok}<button class="btn primary" onclick={() => firmware.resume()}>Try again</button>{/if}
           {:else}
             <button class="btn" onclick={close}>Close</button>
+            {#if ok}<button class="btn primary" onclick={() => firmware.again()}>Install again</button>{/if}
           {/if}
         </div>
       {/if}
