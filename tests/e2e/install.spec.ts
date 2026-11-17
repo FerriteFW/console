@@ -2,6 +2,7 @@
 // and its dump (the Rust reader's fdumpz with coded chunks, BACKUP-9.6; hwtest's fdump), and Ferrite's STOCK_RESTORE; the simulator answers HELLO. The backup, saving it, the SSB patch
 // from a synthetic stock file, the install; back to stock; the refusals. Never on a radio: Alex runs the radio checks
 // by hand (docs/TESTING.md).
+import { createZip, readZip } from "../../src/lib/zip";
 import { type Page, type Route } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -192,10 +193,16 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   await shot(page, info, "71-install-backup");
 
   const [dl] = await Promise.all([page.waitForEvent("download"), b.getByRole("button", { name: "Save the backup…" }).click()]);
-  expect(dl.suggestedFilename()).toMatch(/^rt950pro-backup-[0-9A-Z]{20}-\d{8}-UV85\.bin$/); // the marker travels in the name
-  const saved = readFileSync(await dl.path());
+  expect(dl.suggestedFilename()).toMatch(/^rt950pro-backup-[0-9A-Z]{20}-\d{8}-UV85\.fbin$/); // the marker travels in the name
+  // Decision 407: one zip, the SPI flash as spi.bin and a manifest (no icons.bin: the fake radio's area is erased).
+  const z = await readZip(readFileSync(await dl.path()));
+  const saved = Buffer.from(z.get("spi.bin")!);
   expect(saved.length).toBe(2 << 20);
   expect(sha(saved)).toBe(sha(flash));
+  const mf = JSON.parse(new TextDecoder().decode(z.get("manifest.json")!));
+  expect(mf).toMatchObject({ format: "ferrite-backup", version: 1, marker: "55563835" + "ff".repeat(12), icons: null });
+  expect(mf.spi.sha256).toBe(sha(flash));
+  expect(z.has("icons.bin")).toBe(false);
   await b.getByRole("button", { name: "I have saved it" }).click();
   await expect(b.locator('[data-k="saved"]')).toContainText("saved");
   await expect(step(page)).toHaveText("SSB");
@@ -236,7 +243,7 @@ test("install: Chrome's save dialog saves the backup once and reads it back", as
   let downloads = 0;
   page.on("download", () => downloads++);
   await b.getByRole("button", { name: "Save the backup…" }).click();
-  await expect(b.locator('[data-k="saved"]')).toContainText(/saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}\.bin/);
+  await expect(b.locator('[data-k="saved"]')).toContainText(/saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}\.fbin/);
   expect(await page.evaluate(() => (window as unknown as { __writes: number }).__writes)).toBe(1);
   expect(downloads).toBe(0);
   await expect(step(page)).toHaveText("SSB");
@@ -346,6 +353,11 @@ test("menu icons: the backup reads stock's tiles and keeps them for back to stoc
   await open(page);
   await backUp(page);
   await expect(wizard(page).locator('[data-k="icons"]')).toContainText("stock's, kept with this backup");
+  // Decision 407: the saved .fbin carries them.
+  const [dl] = await Promise.all([page.waitForEvent("download"), wizard(page).getByRole("button", { name: "Save the backup…" }).click()]);
+  const z = await readZip(readFileSync(await dl.path()));
+  expect(sha(Buffer.from(z.get("icons.bin")!))).toBe(sha(icons));
+  expect(JSON.parse(new TextDecoder().decode(z.get("manifest.json")!)).icons.sha256).toBe(sha(icons));
 
 });
 
@@ -375,6 +387,54 @@ test("menu icons: back to stock puts an icons file's tiles back at 0x08080000", 
   padded.write("BJ90", 0xed000, "latin1");
   const rs = results();
   expect(rs[rs.length - 1].sha256).toBe(sha(pack(padded)));
+});
+
+test("back to stock from one .fbin: the backup, the radio's ID and the menu icons from the file", async ({ page }) => {
+  // Decision 407: no ID to type (the manifest's), the tiles back at 0x7D000, the marker from the manifest.
+  const flash = chip(false, 4);
+  const icons = tiles();
+  const manifest = {
+    format: "ferrite-backup",
+    version: 1,
+    radio_id: HERE,
+    saved: "2026-11-16T20:00:00Z",
+    console: "0.9.3",
+    chip: "Zbit 5E4016, 4096 KB",
+    spi: { file: "spi.bin", bytes: flash.length, sha256: sha(flash), crc32: "0" },
+    marker: "55563835" + "ff".repeat(12),
+    icons: { file: "icons.bin", bytes: icons.length, sha256: sha(icons) },
+  };
+  const file = Buffer.from(
+    await (
+      await createZip([
+        { name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(manifest)) },
+        { name: "spi.bin", data: flash },
+        { name: "icons.bin", data: icons },
+      ])
+    ).arrayBuffer(),
+  );
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, flash);
+  setMode({ flash: flashPath });
+  await serveRelease(page);
+  await open(page, false, "restore");
+  const back = card(page, "Back to stock");
+  await page.getByLabel("Backup file").setInputFiles({ name: "rt950pro-backup-X-20261116.fbin", mimeType: "application/zip", buffer: file });
+  await page.getByLabel("Stock firmware for Back to stock").setInputFiles({ name: "stock.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
+  await expect(back.locator('[data-k="restore-icons"]')).toHaveText("Kept with this backup: they go back too.");
+  await expect(back.locator('[data-k="restore-marker"]')).toContainText("UV85 goes back");
+  await back.getByRole("button", { name: "Back to stock" }).click();
+  await expect(page.getByRole("region", { name: "Back on stock" })).toBeVisible({ timeout: 120_000 });
+  const padded = Buffer.alloc(0xed800, 0xff);
+  readFileSync(new URL("../../core/tests/fixtures/ssb-synthetic.bin", import.meta.url)).copy(padded);
+  icons.copy(padded, 0x7d000);
+  padded.write("UV85", 0xed000, "latin1");
+  const rs = results();
+  expect(rs[rs.length - 1].sha256).toBe(sha(pack(padded)));
+  // A damaged one is refused before anything: its spi.bin isn't the manifest's.
+  const bad = Buffer.from(await (await createZip([{ name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(manifest)) }, { name: "spi.bin", data: chip(false, 2) }])).arrayBuffer());
+  await page.getByLabel("Backup file").setInputFiles({ name: "bad.fbin", mimeType: "application/zip", buffer: bad });
+  await expect(back.locator('[data-k="restore-block"]')).toContainText("doesn't match its manifest");
 });
 
 test("menu icons: a file of them is taken for back to stock; a file that isn't them is refused", async ({ page }) => {
