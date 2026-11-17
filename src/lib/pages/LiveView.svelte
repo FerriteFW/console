@@ -10,6 +10,7 @@
   import KeyboardHelp from "../components/KeyboardHelp.svelte";
   import LivePanel from "../components/LivePanel.svelte";
   import { radio } from "../radio.svelte";
+  import { cablePrefs } from "../cablePrefs.svelte";
   import { listen } from "../listen.svelte";
   import { presser, turn } from "../press.svelte";
   // The wheel over the screen alone (no keypad drawn) turns the knob too, as over the drawn radio.
@@ -239,6 +240,11 @@
     {#if recentTunes.note}<span class="meta ok" aria-live="polite">{recentTunes.note}</span>{/if}
     <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
     {#if roomy}<label title="Slots, stations heard and the radio's state beside the radio"><input type="checkbox" bind:checked={panelOn} /> Panel</label>{/if}
+    {#if radio.kind === "cable"}
+      <label title="The cable at 230400 baud instead of 115200: faster reads, writes and backups. Off is safer: some cables and computers lose bytes at 230400."
+        ><input type="checkbox" checked={cablePrefs.highSpeed} onchange={(e) => void radio.setHighSpeed((e.currentTarget as HTMLInputElement).checked)} /> High speed</label
+      >
+    {/if}
     <span class="spacer"></span>
     {#if shotNote}<span class="meta" aria-live="polite">{shotNote}</span>{/if}
     <span class="group">

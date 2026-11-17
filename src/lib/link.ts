@@ -43,11 +43,8 @@ const quiet = (ty: number) => ty === P.msg.UI || ty === P.msg.STATE;
 
 export const CLIENT_NAME = "Ferrite Console";
 
-/** Windows (the app or a browser): its serial stack and Console struggle above 115200, so the cable stays there. */
-export const IS_WINDOWS = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
-
-/** The rates Console raises the cable to, best first (LINK-13.3); none on Windows, which stays at 115200. */
-export const cableFastRates = (): number[] => (IS_WINDOWS ? [] : P.timing.cable_fast_rates);
+/** The rates Console raises the cable to with High speed on, best first (LINK-13.3, decision 408). */
+export const cableFastRates = (): number[] => P.timing.cable_fast_rates;
 
 export class RadioError extends Error {
   constructor(
@@ -93,6 +90,10 @@ export class Link {
   private streamW: StreamWaiter | null = null;
   /** LINK-15.1: the module's `!!!!` answer to the speed unlock is dropped, not fed to the session. */
   private dropUnlock = false;
+  /** Whether to ask for compression (LINK-35.2). Off on the cable (decision 408): 230400 has room enough, and a lost
+   *  frame with compression on leaves the two ends' windows apart until a resync; Bluetooth's ~280 B/s needs it. */
+  compress = true;
+
   /** LINK-35.2: HELLO's capability byte (`P.caps`: compression granted, receive audio on this port, line commands). */
   caps = 0;
   /** HELLO's protocol: `P.protocol`, or the radio can only be updated (decision 385; see `current`). */
@@ -265,7 +266,7 @@ export class Link {
    */
   async hello(): Promise<Hello> {
     return this.exclusive(async () => {
-      const h = this.noteHello(await this.okRaw(P.msg.HELLO, helloPayload(CLIENT_NAME)));
+      const h = this.noteHello(await this.okRaw(P.msg.HELLO, this.compress ? helloPayload(CLIENT_NAME) : helloPayloadPlain(CLIENT_NAME)));
       if (this.current) return h;
       return this.noteHello(await this.okRaw(P.msg.HELLO, helloPayloadPlain(CLIENT_NAME)));
     });
@@ -278,9 +279,8 @@ export class Link {
    */
   async helloPlain(): Promise<Hello> {
     return this.exclusive(async () => {
+      this.compress = false;
       const h = this.noteHello(await this.okRaw(P.msg.HELLO, helloPayloadPlain(CLIENT_NAME)));
-      this.caps &= ~P.caps.LZ;
-      this.session.set_lz(false);
       debugLog("link HELLO plain: compression off");
       return h;
     });
@@ -292,6 +292,7 @@ export class Link {
     if (!h) throw new Error("The radio's HELLO answer didn't parse.");
     this.protocol = h.protocol;
     this.caps = this.current ? h.caps : 0;
+    if (!this.compress) this.caps &= ~P.caps.LZ;
     this.layouts = h.layouts ?? null;
     this.session.set_lz((this.caps & P.caps.LZ) !== 0);
     return h;
@@ -300,7 +301,7 @@ export class Link {
   /** A HELLO after the first (a resync, a new rate): as the first, without compression from a radio on another
    *  protocol. */
   private helloAgain() {
-    return this.current ? helloPayload(CLIENT_NAME) : helloPayloadPlain(CLIENT_NAME);
+    return this.current && this.compress ? helloPayload(CLIENT_NAME) : helloPayloadPlain(CLIENT_NAME);
   }
 
   /** LINK-51: after a lost frame while compressed, a HELLO starts both ends' windows over. */

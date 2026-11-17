@@ -4,7 +4,8 @@
 // carries the APRS events the APRS pages ask for.
 import { debugLog } from "./debuglog";
 import { LiveClient, loadCore, P, parseEvent, parseUi, stateMerge, stateParse, tunePayload, type AprsEvent, type Hello, type Info, type RadioNow, type TuneOp, type Ui } from "./core";
-import { IS_WINDOWS, Link, RadioError, TimeoutError } from "./link";
+import { Link, RadioError, TimeoutError } from "./link";
+import { cablePrefs } from "./cablePrefs.svelte";
 import { mismatch, type Mismatch } from "./mismatch.ts";
 import { provider, type Transport, type TransportKind } from "./transport";
 import { BridgeTransport } from "./transport/bridge";
@@ -278,6 +279,8 @@ class Radio {
       this.label = t.label;
       this.reopen = t.reopen ? () => t.reopen!() : null;
       const link = new Link(t);
+      // Decision 408: no compression on the cable (a lost frame stalled the link until a resync); Bluetooth keeps it.
+      link.compress = t.kind !== "cable";
       this.link = link;
       t.onClose = (why) => {
         if (gen === this.generation) this.drop(why);
@@ -299,6 +302,33 @@ class Radio {
     } catch (e) {
       debugLog(`connect: failed: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
       if (gen === this.generation) await this.fail(e, quiet);
+    }
+  }
+
+  /** LINK-13.3: the cable raised to 230400 (High speed); the rate in use and the bar's note. */
+  private async raise(link: Link) {
+    try {
+      const rate = await link.raiseBaud();
+      this.baud = rate;
+      this.note = rate > 115200 ? `${rate} baud` : "115200 baud (the radio kept its rate)";
+    } catch (e) {
+      this.baud = this.t?.baud ?? null;
+      this.note = `115200 baud (${(e as Error).message})`;
+    }
+    debugLog(`cable: high speed on, ${this.note}`);
+  }
+
+  /** Live View's High speed (decision 408): kept for the next connect, and the connected cable switched now. */
+  async setHighSpeed(on: boolean) {
+    cablePrefs.highSpeed = on;
+    const link = this.link;
+    if (!link || this.phase !== "connected" || !this.t?.setBaud) return;
+    if (on) await this.raise(link);
+    else {
+      await link.lowerBaud().catch(() => {});
+      this.baud = this.t.baud ?? 115200;
+      this.note = "115200 baud";
+      debugLog("cable: high speed off, 115200 baud");
     }
   }
 
@@ -327,15 +357,10 @@ class Radio {
       if (rate) this.note = rate > 9600 ? "Bluetooth at 115200" : "Bluetooth at 9600";
     }
     if (this.t?.setBaud) {
-      // LINK-13.3: the cable at 230400, else 115200 (ferrite decision 266); Windows stays at 115200.
-      try {
-        const rate = await link.raiseBaud();
-        this.baud = rate;
-        this.note = rate > 115200 ? `${rate} baud` : IS_WINDOWS ? "115200 baud" : "115200 baud (the radio kept its rate)";
-      } catch (e) {
-        this.baud = this.t.baud ?? null;
-        this.note = `115200 baud (${(e as Error).message})`;
-      }
+      // LINK-13.3, decision 408: 115200 unless High speed is on (Live View), then 230400.
+      this.baud = this.t.baud ?? 115200;
+      this.note = "115200 baud";
+      if (cablePrefs.highSpeed) await this.raise(link);
     }
     if (gen !== this.generation) return;
     this.phase = "connected";

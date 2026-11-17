@@ -274,8 +274,11 @@ test("firmware: a .ffw: unsigned only with the developer option; the image, then
   await shot(page, info, "63-firmware-ffw-checked");
   await update(page);
   const done = page.getByRole("region", { name: "Update done" });
-  await expect(wizard(page)).toContainText(/SPI parts|Writing|Stamping/, { timeout: 60_000 });
-  await expect(done).toBeVisible({ timeout: 80_000 });
+  await expect(done).toBeVisible({ timeout: 120_000 });
+  // The parts went in (not a passing message to catch: without compression they are quick).
+  const parts = await page.evaluate(() => [(window as any).ferrite.firmware.partsDone, (window as any).ferrite.firmware.partsTotal]);
+  expect(parts[1]).toBeGreaterThan(0);
+  expect(parts[0]).toBe(parts[1]);
   await expect(page.getByRole("status")).toContainText("Connected: Bridge");
   const r = result();
   expect(r.errors).toEqual([]);

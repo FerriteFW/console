@@ -255,6 +255,8 @@ test("install: a copy that passes every chunk but not the radio's CRC is read ag
   writeFileSync(flashPath, chip());
   setMode({ flash: flashPath, wrong_first_dump: true });
   await serveRelease(page);
+  // High speed on (decision 408): the first read at 230400, the second at 115200.
+  await page.addInitScript(() => localStorage.setItem("ferrite-console-cable-high-speed", "on"));
   await open(page);
   await backUp(page);
   const d = dumpResult() as { z: boolean; rates: number[] };
