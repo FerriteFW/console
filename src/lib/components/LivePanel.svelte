@@ -134,7 +134,9 @@
       ? "Off"
       : radio.kind !== "cable"
         ? "Cable only"
-        : !listen.available
+        : !listen.fastEnough
+          ? "Needs High speed"
+          : !listen.available
           ? "This firmware doesn't send receive audio"
           : listen.on
             ? `On · ${hearing}`

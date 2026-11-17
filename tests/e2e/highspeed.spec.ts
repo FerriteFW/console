@@ -25,3 +25,16 @@ test("cable: 115200 and no compression to start; High speed raises it to 230400 
   await expect.poll(() => st(page)).toMatchObject({ baud: 115200, note: "115200 baud" });
   await disconnect(page);
 });
+
+test("listen: needs High speed (the audio is more than 115200 carries)", async ({ page }) => {
+  await openConsole(page, "live");
+  await page.evaluate(() => localStorage.removeItem("ferrite-console-cable-high-speed"));
+  await connect(page);
+  const listen = page.getByRole("toolbar", { name: "Display" }).getByRole("button", { name: "Listen" });
+  await expect(listen).toBeDisabled();
+  await expect(listen).toHaveAttribute("title", /needs High speed/);
+  await page.getByRole("toolbar", { name: "Display" }).getByLabel("High speed").check();
+  await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.baud)).toBe(230400);
+  await expect(listen).toBeEnabled();
+  await disconnect(page);
+});

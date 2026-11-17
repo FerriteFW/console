@@ -1,6 +1,9 @@
 // The programming cable through Chrome's Web Serial: 115200 8N1, raised with BAUD after HELLO (LINK-11, LINK-13.3).
 import type { Transport } from "./types";
 
+/** Web Serial's read errors after which the port gives a new stream (the spec's non-fatal ones). */
+const NON_FATAL = new Set(["BufferOverrunError", "FramingError", "ParityError", "BreakError"]);
+
 // Minimal Web Serial types (not in TypeScript's DOM library).
 type SerialPortLike = {
   open(o: { baudRate: number; dataBits?: number; stopBits?: number; parity?: string; bufferSize?: number }): Promise<void>;
@@ -81,21 +84,35 @@ export class WebSerialTransport implements Transport {
   }
 
   private async openAt(rate: number) {
-    await this.port.open({ baudRate: rate, dataBits: 8, stopBits: 1, parity: "none", bufferSize: 8192 });
+    // 64 KB: a JavaScript stall (inflating, a background tab) at 230400 overran 8 KB in about 350 ms
+    await this.port.open({ baudRate: rate, dataBits: 8, stopBits: 1, parity: "none", bufferSize: 65536 });
     this.baud = rate;
-    this.reader = this.port.readable!.getReader();
-    const reader = this.reader;
+    const port = this.port;
     this.loop = (async () => {
-      try {
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value && value.length) this.onData(value);
+      // A framing, parity, break or overrun error ends one stream only (Web Serial): the port hands out another, and
+      // reading goes on (a byte garbled at a rate switch ended the whole session; the serial-comms review, Nov 17).
+      while (!this.closing) {
+        const readable = port.readable;
+        if (!readable) return;
+        const reader = readable.getReader();
+        this.reader = reader;
+        try {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) return; // cancelled (shut)
+            if (value && value.length) this.onData(value);
+          }
+        } catch (e) {
+          const name = (e as { name?: string })?.name ?? "";
+          if (!this.closing && NON_FATAL.has(name)) {
+            void import("../debuglog").then((m) => m.debugLog(`cable: ${name} while reading: reading on`)).catch(() => {});
+            continue;
+          }
+          if (!this.closing) this.onClose(`The cable stopped: ${(e as Error).message}`);
+          return;
+        } finally {
+          reader.releaseLock();
         }
-      } catch (e) {
-        if (!this.closing) this.onClose(`The cable stopped: ${(e as Error).message}`);
-      } finally {
-        reader.releaseLock();
       }
     })();
   }

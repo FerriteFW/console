@@ -5,6 +5,7 @@ import { connect, disconnect, expect, openConsole, test } from "./helpers";
 test.afterEach(async ({ page }) => disconnect(page));
 
 test("listen: off at connect, blocks heard while on, off again", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("ferrite-console-cable-high-speed", "on")); // Listen needs 230400 (decision 408)
   await openConsole(page, "live");
   await connect(page);
   const btn = page.getByRole("button", { name: /^Listen/ });
@@ -19,6 +20,7 @@ test("listen: off at connect, blocks heard while on, off again", async ({ page }
 });
 
 test("listen: the health dot comes up a few seconds in, with its tooltip, and goes with Listen", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("ferrite-console-cable-high-speed", "on")); // Listen needs 230400 (decision 408)
   await openConsole(page, "live");
   await connect(page);
   await page.getByRole("button", { name: /^Listen/ }).click();
@@ -31,6 +33,7 @@ test("listen: the health dot comes up a few seconds in, with its tooltip, and go
 });
 
 test("listen: Record writes a WAV of what's heard (12 kHz 16-bit mono), time and size shown, Stop saves it", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("ferrite-console-cable-high-speed", "on")); // Listen needs 230400 (decision 408)
   await openConsole(page, "live");
   await connect(page);
   await expect(page.getByRole("button", { name: "Record" })).toHaveCount(0); // only while listening

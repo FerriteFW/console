@@ -46,3 +46,47 @@ test("webserial: a failed write rejects for its caller, and the next one still g
   await second;
   assert.deepEqual(sent, [[8]]);
 });
+
+/** A port whose readable errors with `name` once, then gives a stream with [7, 8]. */
+function readPort(name: string) {
+  let n = 0;
+  return {
+    async open() {},
+    getInfo: () => ({ usbVendorId: 0x1a86 }),
+    addEventListener() {},
+    get readable() {
+      n++;
+      if (n === 1)
+        return new ReadableStream<Uint8Array>({
+          start(c) {
+            setTimeout(() => {
+              c.enqueue(Uint8Array.of(1));
+              c.error(Object.assign(new Error("a bad byte"), { name }));
+            }, 10);
+          },
+        });
+      if (n === 2) return new ReadableStream<Uint8Array>({ start: (c) => void setTimeout(() => c.enqueue(Uint8Array.of(7, 8)), 10) });
+      return null;
+    },
+    writable: null,
+  };
+}
+
+test("webserial: a framing error ends one stream, and reading goes on with the next", async () => {
+  const t = await (WebSerialTransport as unknown as { fromPort(p: unknown): Promise<WebSerialTransport> }).fromPort(readPort("FramingError"));
+  const got: number[] = [];
+  let closed = "";
+  t.onData = (b) => got.push(...b);
+  t.onClose = (w) => (closed = w);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(got.slice(-2), [7, 8]); // (the 1 before the error may come before onData is set)
+  assert.equal(closed, "");
+});
+
+test("webserial: another read error closes the cable", async () => {
+  const t = await (WebSerialTransport as unknown as { fromPort(p: unknown): Promise<WebSerialTransport> }).fromPort(readPort("NetworkError"));
+  let closed = "";
+  t.onClose = (w) => (closed = w);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.match(closed, /The cable stopped: a bad byte/);
+});

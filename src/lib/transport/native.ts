@@ -105,9 +105,18 @@ export class NativeTransport implements Transport {
     return NativeTransport.openId(this.kind as "cable" | "bluetooth", this.id);
   }
 
-  async write(bytes: Uint8Array) {
-    const { invoke } = await api();
-    await invoke("transport_write", { bytes: Array.from(bytes) });
+  /** Writes one after another: each invoke is its own task in the shell, and two (the windowed WRITE_MANY frames)
+   *  could reach the port in either order (the serial-comms review, Nov 17, as Web Serial's queue for issue #33). */
+  private queue: Promise<void> = Promise.resolve();
+
+  write(bytes: Uint8Array): Promise<void> {
+    const run = async () => {
+      const { invoke } = await api();
+      await invoke("transport_write", { bytes: Array.from(bytes) });
+    };
+    const r = this.queue.then(run, run);
+    this.queue = r.catch(() => {});
+    return r;
   }
 
   async close() {

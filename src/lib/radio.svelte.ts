@@ -203,8 +203,12 @@ class Radio {
    * Firmware Update takes the cable from a connected session (or a radio on another protocol: decision 385): polling
    * stops; the link stays usable for REBOOT. The bar shows "Updating firmware" until `handBack` or `disconnect`.
    */
+  /** Called before an update or a data move takes the cable (Listen stops: listen.svelte.ts). */
+  beforeTake: (() => void)[] = [];
+
   takeForUpdate(): { t: Transport; link: Link } | null {
     if ((this.phase !== "connected" && this.phase !== "outdated") || !this.link || !this.t || this.kind !== "cable") return null;
+    for (const f of this.beforeTake) f();
     const gen = ++this.generation; // the poll loop stops
     this.wake?.();
     this.phase = "updating";
@@ -278,9 +282,11 @@ class Radio {
       this.kind = t.kind;
       this.label = t.label;
       this.reopen = t.reopen ? () => t.reopen!() : null;
-      const link = new Link(t);
-      // Decision 408: no compression on the cable (a lost frame stalled the link until a resync); Bluetooth keeps it.
-      link.compress = t.kind !== "cable";
+      const link = new Link(t); // decision 408: no compression on the cable (Link's own default)
+      link.onRate = (rate) => {
+        this.baud = rate;
+        this.note = `${rate} baud (the radio went back to it)`;
+      };
       this.link = link;
       t.onClose = (why) => {
         if (gen === this.generation) this.drop(why);
