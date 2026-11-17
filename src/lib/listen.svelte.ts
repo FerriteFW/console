@@ -162,6 +162,7 @@ class Listen {
   private async tick() {
     const link = this.link;
     if (!link || radio.connectedLink !== link) return void this.stop();
+    if (!this.fastEnough) return this.stopped("Listen stopped: the cable went back to 115200 baud"); // LINK-11.1
     const now = performance.now();
     if (now - this.anyAt >= SILENT_MS) {
       if (this.retried) return this.stopped("Listen stopped: the radio isn't sending audio");

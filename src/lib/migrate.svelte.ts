@@ -60,7 +60,7 @@ export async function markFrom(link: Link): Promise<number | null> {
     const v = new DataView(p.buffer);
     p[0] = 0;
     v.setUint32(1, at, true);
-    p[5] = 224;
+    p[5] = Math.min(224, MARK_AT + 0x1000 - at); // not into calibration (0xF000), which the radio refuses
     let b: Uint8Array;
     try {
       b = await link.data(P.msg.DATA_READ, p);

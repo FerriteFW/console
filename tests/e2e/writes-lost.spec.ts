@@ -15,10 +15,11 @@ async function lose(page: Page, dir: "out" | "in", n: number) {
       let k = 0;
       if (dir === "out") {
         const orig = t.write.bind(t);
-        t.write = (b: Uint8Array) => (w.__arm && ++k === n ? ((w.__arm = false), w.__lost++, Promise.resolve()) : orig(b));
+        // frames only (a 0x00 sync is one byte)
+        t.write = (b: Uint8Array) => (w.__arm && b.length > 2 && ++k === n ? ((w.__arm = false), w.__lost++, Promise.resolve()) : orig(b));
       } else {
         const orig = t.onData;
-        t.onData = (b: Uint8Array) => (w.__arm && ++k === n ? ((w.__arm = false), w.__lost++) : orig(b));
+        t.onData = (b: Uint8Array) => (w.__arm && b.length > 2 && ++k === n ? ((w.__arm = false), w.__lost++) : orig(b));
       }
     },
     [dir, n] as const,

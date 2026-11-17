@@ -459,6 +459,8 @@ class Firmware {
     const partsOnly =
       !!l && l.chip === LAYOUT_MOVING && !!radio.connectedLink && (await markFrom(radio.connectedLink).catch(() => null)) === l.firmware;
     if (partsOnly) debugLog("update: the radio says 255, but its mark began from this layout: only the SPI parts were cut; writing them finishes it");
+    if (partsOnly && (!this.ffw || this.ffw.is_empty()))
+      throw new Error("The radio's last update stopped while writing its SPI parts: install the full update file (.ffw), whose parts finish it.");
     if (l && l.firmware !== l.chip && !partsOnly) {
       // UPD-16, LINK-62: the new firmware stores another layout: the data moves now, as part of the update.
       this.stage = "migrating";

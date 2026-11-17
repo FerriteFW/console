@@ -40,7 +40,8 @@ import { debugLog } from "./debuglog";
 const msgName = (ty: number) => Object.entries(P.msg).find(([, v]) => v === ty)?.[0] ?? `0x${ty.toString(16)}`;
 /** Requests that may be sent twice: they read, or set what they set again (a lost answer's retry; BEGIN only says how
  *  many records follow, before any has gone). */
-const twiceOk = (ty: number) =>
+const twiceOk = (ty: number, payload: Uint8Array) =>
+  (ty !== P.msg.CLOCK || payload.length === 0) && // a CLOCK that sets the time goes once: again, it would be late
   [P.msg.INFO, P.msg.UI, P.msg.STATE, P.msg.READ, P.msg.READ_MANY, P.msg.USED, P.msg.BEGIN, P.msg.LOG_READ, P.msg.HEARD, P.msg.MSGS, P.msg.CLOCK, P.msg.SUBSCRIBE, P.msg.DATA_READ].includes(ty);
 /** Asked every few hundred ms while Live View runs: logged only when they fail. */
 const quiet = (ty: number) => ty === P.msg.UI || ty === P.msg.STATE;
@@ -238,17 +239,17 @@ export class Link {
       if (!resynced && this.caps & P.caps.LZ && ty !== HELLO) {
         resynced = true; // LINK-51: the windows may be apart: start them over, then ask again (if it may go twice)
         await this.resync();
-        if (twiceOk(ty)) continue;
+        if (twiceOk(ty, payload)) continue;
         throw new TimeoutError(`No answer from the radio in ${(timeoutMs / 1000).toFixed(0)} s.`);
       }
       // LINK-11.1: at a raised rate a framing error puts the radio back to 115200; Console found out only when the
       // poll gave up 20 s later, and every request meanwhile failed. Asked once: is the radio at 115200 now?
       if (!fellBack && ty !== HELLO && (await this.fallBack())) {
         fellBack = true;
-        if (twiceOk(ty)) continue;
+        if (twiceOk(ty, payload)) continue;
         throw new TimeoutError(`No answer from the radio in ${(timeoutMs / 1000).toFixed(0)} s (it had gone back to 115200 baud).`);
       }
-      if (!resynced && (ty === HELLO || twiceOk(ty))) {
+      if (!resynced && (ty === HELLO || twiceOk(ty, payload))) {
         resynced = true;
         await this.t.write(this.session.take_cable(performance.now()));
         continue;
@@ -329,26 +330,32 @@ export class Link {
   /** The rate in use changed by itself (LINK-11.1's fall-back): the bar says so. */
   onRate: (rate: number) => void = () => {};
 
-  /** LINK-11.1: at a raised rate, whether the radio went back to 115200: the port switched there and a HELLO; kept
-   *  when it answers (true), the port switched back when not. */
+  /**
+   * LINK-11.1: at a raised rate, a request unanswered: the radio may have gone back to 115200 (a framing error on its
+   * side). The PC goes there too and stays: probing at 115200 sends bytes a radio still at 230400 reads as a framing
+   * error, so after the probe it is at 115200 either way (switching back left the two ends apart: the second
+   * review, Nov 17). A HELLO there, a second after a pause if the first goes unanswered. True when one answers.
+   */
   private async fallBack(): Promise<boolean> {
     const t = this.t;
     const was = t.baud ?? P.timing.cable_baud;
     if (!t.setBaud || was <= P.timing.cable_baud || this.closed) return false;
     await t.setBaud(P.timing.cable_baud);
-    try {
-      await t.write(this.session.take_cable(performance.now()));
-      const { status, rest } = await this.askRaw(P.msg.HELLO, this.helloAgain(), 800, false);
-      if (status === 0) {
-        this.noteHello(rest);
-        debugLog(`link: the radio had gone back to 115200 (LINK-11.1): staying there`);
-        this.onRate(P.timing.cable_baud);
-        return true;
+    this.onRate(P.timing.cable_baud);
+    debugLog(`link: no answer at ${was}: going to 115200 (LINK-11.1)`);
+    for (let tries = 0; tries < 2; tries++) {
+      try {
+        await t.write(this.session.take_cable(performance.now()));
+        await sleep(100); // the radio's link task sees its own fall-back before the HELLO comes
+        const { status, rest } = await this.askRaw(P.msg.HELLO, this.helloAgain(), 800, false);
+        if (status === 0) {
+          this.noteHello(rest);
+          return true;
+        }
+      } catch {
+        /* once more */
       }
-    } catch {
-      /* not there either */
     }
-    await t.setBaud(was).catch(() => {});
     return false;
   }
 
@@ -804,7 +811,9 @@ export class Link {
         });
         const end = performance.now() + P.timing.busy_retry_ms;
         for (;;) {
-          const { status, rest } = await this.askTwice(body); // added or renamed by callsign: the same twice
+          // added or renamed by callsign: the same twice; a delete twice answers "not found", so not those frames
+          const hasDelete = part.some((r) => (r[22] & 1) !== 0);
+          const { status, rest } = hasDelete ? await this.askRaw(P.msg.WRITE_MANY, body) : await this.askTwice(body);
           if (status === 0) break;
           if (status === 7 && performance.now() < end) {
             await sleep(P.timing.busy_sleep_ms);

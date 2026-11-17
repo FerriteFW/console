@@ -367,6 +367,12 @@ class Radio {
       this.baud = this.t.baud ?? 115200;
       this.note = "115200 baud";
       if (cablePrefs.highSpeed) await this.raise(link);
+      // High speed changed while this connect ran (setHighSpeed waits for "connected"): as it says now
+      if (cablePrefs.highSpeed !== (this.baud ?? 115200) > 115200) {
+        if (cablePrefs.highSpeed) await this.raise(link);
+        else await link.lowerBaud().catch(() => {});
+        this.baud = this.t?.baud ?? this.baud;
+      }
     }
     if (gen !== this.generation) return;
     this.phase = "connected";

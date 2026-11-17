@@ -91,9 +91,14 @@ export class WebSerialTransport implements Transport {
     this.loop = (async () => {
       // A framing, parity, break or overrun error ends one stream only (Web Serial): the port hands out another, and
       // reading goes on (a byte garbled at a rate switch ended the whole session; the serial-comms review, Nov 17).
+      let errors = 0;
+      let since = 0;
       while (!this.closing) {
         const readable = port.readable;
-        if (!readable) return;
+        if (!readable) {
+          if (!this.closing) this.onClose("The cable stopped: the port gives no more data.");
+          return;
+        }
         const reader = readable.getReader();
         this.reader = reader;
         try {
@@ -104,7 +109,10 @@ export class WebSerialTransport implements Transport {
           }
         } catch (e) {
           const name = (e as { name?: string })?.name ?? "";
-          if (!this.closing && NON_FATAL.has(name)) {
+          // a line held in break, or a lasting rate mismatch, errors without end: give up after 20 in a second
+          const now = Date.now();
+          if (now - since > 1000) [since, errors] = [now, 0];
+          if (!this.closing && NON_FATAL.has(name) && ++errors <= 20) {
             void import("../debuglog").then((m) => m.debugLog(`cable: ${name} while reading: reading on`)).catch(() => {});
             continue;
           }
