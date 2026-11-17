@@ -253,7 +253,7 @@
             </button>
             <hr />
             <button role="menuitem" disabled={busy} onclick={() => choose(() => chirpInput.click())}>
-              <b>Import CHIRP / RepeaterBook…</b><span>A CHIRP CSV file: new zone, merge or replace</span>
+              <b>Import CHIRP / RepeaterBook…</b><span>A CHIRP CSV file (or a stock channel list): new zone, merge or replace</span>
             </button>
             <button role="menuitem" disabled={busy || !t.channels.length} onclick={() => choose(() => channels.exportChirp())}>
               <b>Export CHIRP…</b><span>The table as a CHIRP CSV file</span>
