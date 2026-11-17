@@ -739,6 +739,10 @@ impl FirmwareUpdate {
     pub fn reader(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
         install::reader_update(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
     }
+    /// The restorer image (BACKUP-13), as it is.
+    pub fn restorer(btf: &[u8]) -> Result<FirmwareUpdate, JsError> {
+        install::restorer_update(btf).map(FirmwareUpdate).map_err(|p| JsError::new(&p.join("; ")))
+    }
     /// A stock `.BTF` for the way back (BACKUP-8), padded over stock's marker sector's first page with the marker
     /// read at backup time put back when there is one (BACKUP-12).
     pub fn stock(btf: &[u8], marker: Option<Vec<u8>>, icons: Option<Vec<u8>>) -> Result<FirmwareUpdate, JsError> {
@@ -826,10 +830,14 @@ pub fn backup_check(b: &[u8]) -> String {
     json(&install::check_backup(b))
 }
 
-/// An image check `{blocks, image_len, version, crc32, sha256, problems}` for `kind` "reader" or "stock".
+/// An image check `{blocks, image_len, version, crc32, sha256, problems}` for `kind` "reader", "restorer" or "stock".
 #[wasm_bindgen]
 pub fn image_check(kind: &str, btf: &[u8]) -> String {
-    json(&if kind == "reader" { install::check_reader(btf) } else { install::check_stock(btf) })
+    json(&match kind {
+        "reader" => install::check_reader(btf),
+        "restorer" => install::check_restorer(btf),
+        _ => install::check_stock(btf),
+    })
 }
 
 /// The reader console's lines: `flash` -> `{id, vendor, size}`, `sys` -> `{uid}`, `flashcrc` -> `{crc, size}`; null

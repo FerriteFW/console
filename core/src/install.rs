@@ -35,6 +35,8 @@ pub const SECTOR: usize = 0x1000;
 pub const UPDATE: usize = UPDATE_AREA.start as usize;
 /// Text only a reader image holds (its help line for the binary dump: ferrite's reader and hwtest alike).
 pub const READER_MARK: &[u8] = b"fdump <addr> <len>";
+/// The restorer image's mark (ferrite restorer/src/main.rs, BACKUP-13): Back to stock for a radio not running Ferrite.
+pub const RESTORER_MARK: &[u8] = b"Ferrite restorer: BACK13";
 /// The link's `STOCK_RESTORE` (ferrite decision 261) and its ops.
 pub const STOCK_RESTORE: u8 = 0x60;
 pub const OP_START: u8 = 0;
@@ -629,6 +631,25 @@ pub fn check_reader(btf: &[u8]) -> ImageCheck {
     .0
 }
 
+/// The restorer image (BACKUP-13): its own mark, never Ferrite or the reader, below the stock marker sector.
+pub fn check_restorer(btf: &[u8]) -> ImageCheck {
+    image_check(btf, APP_MAX, |img| {
+        (!find(img, RESTORER_MARK) || find(img, FERRITE_MARK) || find(img, READER_MARK))
+            .then(|| "not the restorer image".into())
+    })
+    .0
+}
+
+/// The restorer's update: the file as it is (as the reader's).
+pub fn restorer_update(btf: &[u8]) -> Result<Update, Vec<String>> {
+    let c = check_restorer(btf);
+    if c.problems.is_empty() {
+        Ok(Update::raw(btf.to_vec()))
+    } else {
+        Err(c.problems)
+    }
+}
+
 /// Whether a reader image speaks `fdumpz` (the Rust reader, BACKUP-9.6; hwtest's doesn't): its help line.
 pub fn reader_has_fdumpz(btf: &[u8]) -> bool {
     unpack(btf).map(|(img, _)| find(&img, READER_Z_MARK)).unwrap_or(false)
@@ -641,6 +662,8 @@ pub fn check_stock(btf: &[u8]) -> ImageCheck {
             Some("this is a Ferrite image, not stock firmware".into())
         } else if find(img, READER_MARK) {
             Some("this is the reader image, not stock firmware".into())
+        } else if find(img, RESTORER_MARK) {
+            Some("this is the restorer image, not stock firmware".into())
         } else {
             None
         }

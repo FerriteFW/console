@@ -49,8 +49,8 @@ npm run tauri build       # the app for this system, in target/release/bundle/
 The release builds, all three systems (maintainers):
 
 ```sh
-FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh mac                      # the .app and .dmg, on a Mac: one universal app (Apple silicon and Intel; once: rustup target add x86_64-apple-darwin)
-FIRMWARE="RELEASE.ffw READER.btf" tools/desktop-build.sh all --host USER@HOST     # Linux and Windows, in Docker on a Linux build box
+FIRMWARE="RELEASE.ffw READER.btf RESTORER.btf" tools/desktop-build.sh mac                      # the .app and .dmg, on a Mac: one universal app (Apple silicon and Intel; once: rustup target add x86_64-apple-darwin)
+FIRMWARE="RELEASE.ffw READER.btf RESTORER.btf" tools/desktop-build.sh all --host USER@HOST     # Linux and Windows, in Docker on a Linux build box
 ```
 
 - `FIRMWARE` names the Ferrite release to build in (its signed `.ffw` and the signed reader, `.minisig` beside it). Without it, `../ferrite/target`'s local build goes in.

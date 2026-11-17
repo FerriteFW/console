@@ -5,7 +5,7 @@
 // signature is inside it, checked by core/src/ffw.rs). A local build's .ffw is unsigned: Console takes it only with
 // "Allow unsigned files" on. A bare image signed by Ferrite's CI (the reader) has <image>.minisig beside it: copied
 // too, and its text goes in the manifest entry as `minisig` (core/src/signature.rs).
-//   node scripts/bundle-firmware.mjs [ferrite.ffw] [reader.btf]
+//   node scripts/bundle-firmware.mjs [ferrite.ffw] [reader.btf] [restorer.btf]
 // Defaults: ../ferrite/target/ferrite-tx.ffw (tools/mkbtf.sh tx) and ../ferrite/target/ferrite-reader.btf
 // (tools/mkbtf.sh reader: Ferrite's read-only reader, ferrite decision 264). The old C reader still works:
 //   node scripts/bundle-firmware.mjs ../ferrite/target/ferrite-tx.btf ../fw/build/target/hwtest.btf
@@ -15,7 +15,12 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const [ferrite = join(root, "../ferrite/target/ferrite-tx.ffw"), reader = join(root, "../ferrite/target/ferrite-reader.btf")] = process.argv.slice(2);
+const [
+  ferrite = join(root, "../ferrite/target/ferrite-tx.ffw"),
+  reader = join(root, "../ferrite/target/ferrite-reader.btf"),
+  // BACKUP-13: the restorer (Back to stock without Ferrite running), when there is one
+  restorer = join(root, "../ferrite/target/ferrite-restorer.btf"),
+] = process.argv.slice(2);
 const out = join(root, "public/firmware");
 // Only what the manifest lists: older runs' leftovers (bench or test images) never ride along.
 rmSync(out, { recursive: true, force: true });
@@ -45,6 +50,10 @@ if (ferrite.endsWith(".ffw")) {
 // The reader's version: Ferrite's for its own reader (built from the same workspace), "hwtest" for the C one.
 const readerVersion = basename(reader).startsWith("ferrite-reader") ? `ferrite-reader ${version}` : "hwtest";
 const manifest = { ferrite: { version, ...entry(ferrite) }, reader: { version: readerVersion, ...entry(reader) } };
+if (existsSync(restorer)) manifest.restorer = { version: `ferrite-restorer ${version}`, ...entry(restorer) };
 writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 1) + "\n");
 const signed = (e) => (e.minisig || e.file.endsWith(".ffw") ? (e.file.endsWith(".ffw") ? " (its signature inside, if a release)" : " (signed)") : "");
-console.log(`public/firmware: ${manifest.ferrite.file} (${version})${signed(manifest.ferrite)}, ${manifest.reader.file}${signed(manifest.reader)}`);
+console.log(
+  `public/firmware: ${manifest.ferrite.file} (${version})${signed(manifest.ferrite)}, ${manifest.reader.file}${signed(manifest.reader)}` +
+    (manifest.restorer ? `, ${manifest.restorer.file}${signed(manifest.restorer)}` : ", no restorer"),
+);

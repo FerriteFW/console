@@ -90,7 +90,7 @@ git -C "$here/../ferrite" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite"
 git -C "$here" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite-console"
 # The bundled firmware (the tx release and the reader: scripts/bundle-firmware.mjs) is generated, never committed,
 # so it goes along from here.
-# FIRMWARE="RELEASE.ffw READER.btf" bundles a signed release (its .minisig files beside); else ../ferrite/target's.
+# FIRMWARE="RELEASE.ffw READER.btf RESTORER.btf" bundles a signed release (its .minisig files beside); else ../ferrite/target's.
 node "$here/scripts/bundle-firmware.mjs" ${FIRMWARE:-} >/dev/null
 COPYFILE_DISABLE=1 tar -C "$here" -c public/firmware | $ssh "$host" "rm -rf $dir/ferrite-console/public/firmware && tar -x -C $dir/ferrite-console"
 # The updater key goes over as an env file only the build reads (mode 600), deleted when the build ends.

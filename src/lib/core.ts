@@ -523,7 +523,7 @@ export const signatureCheck = (image: Uint8Array, minisig: string): SignatureChe
 export const backupCheck = (b: Uint8Array): BackupCheck => JSON.parse(wasm.backup_check(b));
 /** The Rust reader speaks fdumpz (BACKUP-9.6); hwtest's reader doesn't. */
 export const readerHasFdumpz = (btf: Uint8Array): boolean => wasm.reader_has_fdumpz(btf);
-export const imageCheck = (kind: "reader" | "stock", btf: Uint8Array): ImageCheck => JSON.parse(wasm.image_check(kind, btf));
+export const imageCheck = (kind: "reader" | "restorer" | "stock", btf: Uint8Array): ImageCheck => JSON.parse(wasm.image_check(kind, btf));
 export const readerLine = <T>(kind: "flash" | "sys" | "flashcrc", line: string): T | null => JSON.parse(wasm.reader_line(kind, line));
 export const ssbExtract = (btf: Uint8Array): Uint8Array | undefined => wasm.ssb_extract(btf);
 export const ssbDescribe = (patch: Uint8Array): SsbFound => JSON.parse(wasm.ssb_describe(patch));
