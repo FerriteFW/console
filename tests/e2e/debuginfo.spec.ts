@@ -1,0 +1,29 @@
+// About's "Save debug info" (Nov 16, 2026: users' write failures came with too little to go on): after a channel read,
+// the file names Console's version, the connection and the radio, and its log holds the link's requests with their
+// answers and times.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { connect, expect, openConsole, shotsDir, test } from "./helpers";
+
+test("debug info: version, connection, the link's log", async ({ page }) => {
+  await openConsole(page, "channels");
+  await connect(page);
+  await page.getByRole("toolbar", { name: "Channels" }).getByRole("button", { name: "Read from radio" }).click();
+  await expect.poll(() => page.evaluate(() => !!(window as any).ferrite.channels.base), { timeout: 30_000 }).toBe(true);
+  await page.goto(page.url().replace(/#.*$/, "#/about"));
+  const dl = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save debug info…" }).click();
+  const d = await dl;
+  expect(d.suggestedFilename()).toMatch(/^ferrite-console-debug-\d{8}-\d{4}\.txt$/);
+  const path = join(shotsDir(), `debug-${Date.now()}.txt`);
+  await d.saveAs(path);
+  const text = readFileSync(path, "utf8");
+  expect(text).toMatch(/^Ferrite Console \d+\.\d+\.\d+ \(web\)/);
+  expect(text).toContain("== connection");
+  expect(text).toMatch(/phase connected, cable Bridge/);
+  expect(text).toMatch(/radio as read: \d+ channels, \d+ zones/);
+  // The link's requests: the opening HELLO and the channel read, each with its answer and time.
+  expect(text).toMatch(/link HELLO #\d+ \d+ B: status 0 in \d+ ms/);
+  expect(text).toMatch(/link READ_MANY what 2 0-\d+: \d+ frames, \d+ records in \d+ ms/);
+  await expect(page.getByRole("status").filter({ hasText: "Saved as ferrite-console-debug-" })).toBeVisible();
+});

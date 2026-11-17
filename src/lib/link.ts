@@ -34,6 +34,12 @@ import {
   type Station,
 } from "./core";
 import { sleep, type Transport } from "./transport/types";
+import { debugLog } from "./debuglog";
+
+/** A message type's name for the debug log ("WRITE_MANY"). */
+const msgName = (ty: number) => Object.entries(P.msg).find(([, v]) => v === ty)?.[0] ?? `0x${ty.toString(16)}`;
+/** Asked every few hundred ms while Live View runs: logged only when they fail. */
+const quiet = (ty: number) => ty === P.msg.UI || ty === P.msg.STATE;
 
 export const CLIENT_NAME = "Ferrite Console";
 
@@ -201,10 +207,16 @@ export class Link {
         this.waiters.set(seq, { ty, seq, resolve });
         setTimeout(() => resolve(null), timeoutMs);
       });
+      const sent = performance.now();
       await this.t.write(this.session.request(ty, payload, performance.now()));
       const a = await got;
       if (this.closed) throw new Error("not connected");
-      if (a) return { status: a.status, rest: new Uint8Array(a.rest) };
+      if (a) {
+        if (!quiet(ty) || a.status !== 0)
+          debugLog(`link ${msgName(ty)} #${seq} ${payload.length} B: status ${a.status} in ${(performance.now() - sent).toFixed(0)} ms`);
+        return { status: a.status, rest: new Uint8Array(a.rest) };
+      }
+      debugLog(`link ${msgName(ty)} #${seq} ${payload.length} B: NO ANSWER in ${timeoutMs} ms`);
       this.waiters.delete(seq);
       // A frame sent just after a restart or 10 s of quiet can go to the terminal (TERM-2): a read-only request is
       // sent once more after a 0x00. Never a KEY, CMD, MORE or write: those would act twice or skip a chunk.
@@ -279,6 +291,7 @@ export class Link {
   /** LINK-51: after a lost frame while compressed, a HELLO starts both ends' windows over. */
   private async resync() {
     if (!(this.caps & P.caps.LZ)) return;
+    debugLog("link resync (HELLO)");
     await sleep(300);
     const { status, rest } = await this.askRaw(P.msg.HELLO, this.helloAgain(), undefined, false);
     if (status === 0) this.noteHello(rest);
@@ -637,6 +650,7 @@ export class Link {
         setTimeout(() => resolve(null), this.timeout() * 2);
       });
       void this.t.write(this.session.request(P.msg.WRITE_MANY, f.body, performance.now()));
+      debugLog(`link WRITE_MANY #${seq} (windowed) ops ${f.at}-${f.at + f.run - 1}, ${f.body.length} B`);
       return { f, got, seq };
     };
     const flight: ReturnType<typeof send>[] = [];
@@ -647,6 +661,7 @@ export class Link {
       const { f, got, seq } = flight.shift()!;
       const a = await got;
       if (this.closed) throw new Error("not connected");
+      debugLog(`link WRITE_MANY #${seq} (windowed): ${a ? `status ${a.status}, applied ${a.status === 0 ? f.run : (a.rest[0] ?? 0)}` : "NO ANSWER"}${stop ? " (draining)" : ""}`);
       if (stop) {
         if (!a) this.waiters.delete(seq);
         continue; // after a refusal or a lost frame: only draining what's in flight
@@ -821,12 +836,15 @@ export class Link {
           taken++;
           progress?.(at, out.size);
         };
+        const t0 = performance.now();
         try {
           frames = await this.streamRaw(P.msg.READ_MANY, p, each);
         } catch (e) {
+          debugLog(`link READ_MANY what ${what} from ${at}: ${e instanceof StreamGap ? `GAP after ${e.got.length} frames, asked again` : `FAILED: ${(e as Error).message}`}`);
           if (!(e instanceof StreamGap)) throw e;
           [frames, whole] = [e.got, false];
         }
+        debugLog(`link READ_MANY what ${what} ${first}-${end - 1}: ${frames.length} frames, ${out.size} records in ${(performance.now() - t0).toFixed(0)} ms${whole ? "" : " (a gap)"}`);
         // Any frames not seen by `each` (none normally) are taken now; the error frame (0xff) is not a record.
         for (const f of frames.slice(taken)) {
           if (f[0] === 0xff) continue;

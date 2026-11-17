@@ -2,6 +2,17 @@
   import Wordmark from "../components/Wordmark.svelte";
   import { isTauri } from "../transport/native";
   import { CONSOLE_VERSION as version } from "../codeplug.svelte";
+  import { saveDebugInfo } from "../debugdump";
+  let debugNote = $state("");
+  async function saveDebug() {
+    debugNote = "";
+    try {
+      const name = await saveDebugInfo();
+      if (name) debugNote = `Saved as ${name}. Attach it to your report.`;
+    } catch (e) {
+      debugNote = `Not saved: ${(e as Error).message}`;
+    }
+  }
   const shell = isTauri() ? "desktop app (Tauri)" : "web";
   // The third-party notices (tools/thirdparty.py, about 500 KB), fetched only when opened.
   let notices = $state("");
@@ -37,6 +48,14 @@
     <dt>Never</dt>
     <dd>Keys the radio itself (APRS messages you send are queued for the radio to send), writes calibration, or touches the Bluetooth module's own settings</dd>
   </dl>
+  <div class="debug">
+    <button class="btn" onclick={saveDebug}>Save debug info…</button>
+    <span class="sub">
+      For a bug report: what Console runs on, the connection, the radio, and Console's recent log (the link's requests and answers,
+      writes and errors). Save it right after the problem, before closing Console. It holds no PIN; it does name the radio's callsign and ID, and the channels a write's read back found different.
+    </span>
+    {#if debugNote}<p class="sub" role="status">{debugNote}</p>{/if}
+  </div>
   <details ontoggle={openNotices}>
     <summary>Third-party licences</summary>
     <p class="sub">
@@ -69,6 +88,15 @@
   }
   dd {
     margin: 0;
+  }
+  .debug {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+  }
+  .debug .btn {
+    flex: none;
   }
   summary {
     cursor: pointer;
