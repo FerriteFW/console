@@ -664,14 +664,18 @@ export class Link {
         this.waiters.set(seq, { ty: P.msg.WRITE_MANY, seq, resolve });
         setTimeout(() => resolve(null), this.timeout() * 2);
       });
-      void this.t.write(this.session.request(P.msg.WRITE_MANY, f.body, performance.now()));
+      this.t
+        .write(this.session.request(P.msg.WRITE_MANY, f.body, performance.now()))
+        .catch((e) => debugLog(`link WRITE_MANY #${seq} (windowed): send failed: ${(e as Error).message}`));
       debugLog(`link WRITE_MANY #${seq} (windowed) ops ${f.at}-${f.at + f.run - 1}, ${f.body.length} B`);
       return { f, got, seq };
     };
     const flight: ReturnType<typeof send>[] = [];
     let k = 0;
     let stop: { at: number; lost?: boolean } | null = null;
-    while (k < frames.length || flight.length) {
+    // after a stop only what is in flight is drained (frames not sent yet go one at a time below): with frames left,
+    // flight.shift() was undefined and the write crashed ("Cannot destructure property 'f'", issue #33)
+    while (flight.length || (!stop && k < frames.length)) {
       while (!stop && k < frames.length && flight.length < 2) flight.push(send(frames[k++]));
       const { f, got, seq } = flight.shift()!;
       const a = await got;

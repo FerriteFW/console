@@ -30,8 +30,14 @@ export class WebSerialTransport implements Transport {
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private loop: Promise<void> = Promise.resolve();
   private closing = false;
+  /** Writes one after another: a stream has one writer at a time, and the second of two windowed WRITE_MANY frames
+   *  sent back to back found it locked and was never sent (issue #33: every write past 5 channels lost a frame). */
+  private queue: Promise<void> = Promise.resolve();
+  private port: SerialPortLike;
 
-  private constructor(private port: SerialPortLike) {}
+  private constructor(port: SerialPortLike) {
+    this.port = port;
+  }
 
   static async request(): Promise<WebSerialTransport> {
     const serial = webSerial();
@@ -104,13 +110,18 @@ export class WebSerialTransport implements Transport {
     await this.port.close();
   }
 
-  async write(bytes: Uint8Array) {
-    const w = this.port.writable!.getWriter();
-    try {
-      await w.write(bytes);
-    } finally {
-      w.releaseLock();
-    }
+  write(bytes: Uint8Array): Promise<void> {
+    const run = async () => {
+      const w = this.port.writable!.getWriter();
+      try {
+        await w.write(bytes);
+      } finally {
+        w.releaseLock();
+      }
+    };
+    const r = this.queue.then(run, run);
+    this.queue = r.catch(() => {}); // a failed write still rejects for its caller; the next one still goes
+    return r;
   }
 
   /** Closes and reopens the port at `rate` (Web Serial can't change a port's rate in place). */
