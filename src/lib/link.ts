@@ -271,6 +271,21 @@ export class Link {
     });
   }
 
+  /**
+   * HELLO without compression, and compression kept off: for Back to stock, whose loop on the radio (firmware
+   * `tasks/restore.rs`) reads plain frames only. Compressed, the first PROGRAM (133 bytes) was never answered and the
+   * restore stopped after one block (black, Nov 16, 2026: "The radio stopped answering during the restore").
+   */
+  async helloPlain(): Promise<Hello> {
+    return this.exclusive(async () => {
+      const h = this.noteHello(await this.okRaw(P.msg.HELLO, helloPayloadPlain(CLIENT_NAME)));
+      this.caps &= ~P.caps.LZ;
+      this.session.set_lz(false);
+      debugLog("link HELLO plain: compression off");
+      return h;
+    });
+  }
+
   /** LINK-35.2, LINK-51: a HELLO answer's caps; compression on from here when it granted it (both windows new). */
   private noteHello(rest: Uint8Array): Hello {
     const h = parseHello(rest);

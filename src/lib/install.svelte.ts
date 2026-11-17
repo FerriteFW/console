@@ -1061,7 +1061,8 @@ class Install {
     try {
       this.message = "Asking the radio (it must run Ferrite)…";
       await link.open();
-      await link.hello().catch(() => {
+      // Plain frames: the radio's restore loop reads no compressed ones (it stopped after one block, Nov 16, 2026).
+      await link.helloPlain().catch(() => {
         throw new Error("The radio doesn't answer as Ferrite. Back to stock needs Ferrite running; check the cable and that the radio is on.");
       });
       // Decision 263, before anything stops: the backup must be this radio's by its MCU ID (INFO's; calibration can
