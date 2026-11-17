@@ -3,7 +3,7 @@
 // answers and times.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { connect, expect, openConsole, shotsDir, test } from "./helpers";
+import { closeWelcome, connect, expect, openConsole, shotsDir, test } from "./helpers";
 
 test("debug info: version, connection, the link's log", async ({ page }) => {
   await openConsole(page, "channels");
@@ -26,4 +26,21 @@ test("debug info: version, connection, the link's log", async ({ page }) => {
   expect(text).toMatch(/link HELLO #\d+ \d+ B: status 0 in \d+ ms/);
   expect(text).toMatch(/link READ_MANY what 2 0-\d+: \d+ frames, \d+ records in \d+ ms/);
   await expect(page.getByRole("status").filter({ hasText: "Saved as ferrite-console-debug-" })).toBeVisible();
+});
+
+test("debug info: the previous session's log survives a restart", async ({ page }) => {
+  await openConsole(page, "channels");
+  await connect(page);
+  // Console closed and opened again (a reload is a new session): the first session's link lines are the previous log.
+  await page.reload();
+  await closeWelcome(page);
+  await page.goto(page.url().replace(/#.*$/, "#/about"));
+  const dl = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save debug info…" }).click();
+  const path = join(shotsDir(), `debug-prev-${Date.now()}.txt`);
+  await (await dl).saveAs(path);
+  const text = readFileSync(path, "utf8");
+  const [now, prev] = text.split("== log of the previous session");
+  expect(prev).toMatch(/link HELLO #\d+ \d+ B: status 0 in \d+ ms/);
+  expect(now).not.toMatch(/link HELLO/);
 });

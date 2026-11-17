@@ -250,8 +250,24 @@ class Install {
   // 2. Back up
   backupStep = $state<Step>("idle");
   /** What runs now, in words. */
-  message = $state("");
-  error = $state("");
+  #message = $state("");
+  #error = $state("");
+  /** What it's doing now; each change goes to the debug log (debuglog.ts), so a report has the steps. */
+  get message() {
+    return this.#message;
+  }
+  set message(v: string) {
+    if (v && v !== this.#message) debugLog(`install: ${v}`);
+    this.#message = v;
+  }
+  /** What went wrong; to the debug log too. */
+  get error() {
+    return this.#error;
+  }
+  set error(v: string) {
+    if (v && v !== this.#error) debugLog(`install ERROR: ${v}`);
+    this.#error = v;
+  }
   /** Which card the error belongs to. */
   errorAt = $state<"connect" | "backup" | "install" | "restore" | "">("");
   done = $state(0);

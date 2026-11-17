@@ -4,7 +4,7 @@
 // errors and presses). No PIN, no file contents: the radio's ID, callsign and the table's counts only.
 import { channels } from "./channels.svelte";
 import { CONSOLE_VERSION } from "./codeplug.svelte";
-import { debugLines, debugLog } from "./debuglog";
+import { debugLines, debugLog, debugPrevious } from "./debuglog";
 import { saveAs } from "./download";
 import { radio } from "./radio.svelte";
 import { isTauri } from "./transport/native";
@@ -35,8 +35,11 @@ export function debugText(): string {
     `source "${c.source}", error "${c.error}"`,
     `write: ${w ? json({ step: w.step, done: "done" in w ? w.done : undefined, verified: "verified" in w ? w.verified : undefined, error: "error" in w ? w.error : undefined, written: "written" in w ? w.written : undefined, ops: "plan" in w && w.plan ? w.plan.ops.length : undefined, problems: "plan" in w && w.plan ? w.plan.problems : undefined }) : "none open"}`,
     "",
-    `== log (the last ${debugLines().length} lines)`,
+    `== log (this session, the last ${debugLines().length} lines)`,
     ...debugLines(),
+    "",
+    `== log of the previous session (the last time Console ran: ${debugPrevious().length} lines)`,
+    ...debugPrevious(),
   ];
   return lines.join("\n") + "\n";
 }

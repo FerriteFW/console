@@ -52,7 +52,7 @@
     <button class="btn" onclick={saveDebug}>Save debug info…</button>
     <span class="sub">
       For a bug report: what Console runs on, the connection, the radio, and Console's recent log (the link's requests and answers,
-      writes and errors). Save it right after the problem, before closing Console. It holds no PIN; it does name the radio's callsign and ID, and the channels a write's read back found different.
+      writes and errors). Save it right after the problem; if Console was closed since, the last session's log is in it too. It holds no PIN; it does name the radio's callsign and ID, and the channels a write's read back found different.
     </span>
     {#if debugNote}<p class="sub" role="status">{debugNote}</p>{/if}
   </div>

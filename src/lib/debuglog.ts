@@ -28,11 +28,45 @@ export function debugLines(): string[] {
   return ring.slice();
 }
 
+// The log outlives the app (an Intel Mac's report, Nov 16, 2026: the backup failed, Console was restarted, and the
+// debug info saved after had nothing of it): this session's lines go to localStorage at most every 2 s and when the
+// page goes; at the next start they become the previous session's, which the debug info includes. Per computer, never
+// sent anywhere; a blocked or full storage just keeps the log in memory.
+const NOW_KEY = "ferrite-debug-log";
+const PREV_KEY = "ferrite-debug-log-previous";
+let previous: string[] = [];
+try {
+  const was = localStorage.getItem(NOW_KEY);
+  if (was) localStorage.setItem(PREV_KEY, was);
+  previous = JSON.parse(localStorage.getItem(PREV_KEY) ?? "[]");
+  localStorage.removeItem(NOW_KEY);
+} catch {
+  previous = [];
+}
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function persist() {
+  saveTimer = null;
+  try {
+    localStorage.setItem(NOW_KEY, JSON.stringify(ring));
+  } catch {
+    /* memory only */
+  }
+}
+function persistSoon() {
+  if (!saveTimer) saveTimer = setTimeout(persist, 2000);
+}
+
+/** The previous session's lines (the last time Console ran), oldest first. */
+export function debugPrevious(): string[] {
+  return previous.slice();
+}
+
 export function debugLog(line: string) {
   const now = new Date();
   const since = typeof performance === "undefined" ? 0 : (performance.now() - t0) / 1000;
   ring.push(`${now.toISOString().slice(11, 23)} +${since.toFixed(3)} ${line}`);
   if (ring.length > RING) ring.splice(0, ring.length - RING);
+  persistSoon();
   void enabled().then(async (yes) => {
     if (!yes) return;
     const { invoke } = await import("@tauri-apps/api/core");
@@ -49,6 +83,8 @@ function text(e: unknown): string {
 export function debugWatch() {
   if (typeof window === "undefined") return;
   debugLog(`start: ${navigator.userAgent}`);
+  window.addEventListener("pagehide", persist);
+  window.addEventListener("beforeunload", persist);
   window.addEventListener("error", (e) => debugLog(`uncaught: ${text(e.error ?? e.message)}`));
   window.addEventListener("unhandledrejection", (e) => debugLog(`unhandled rejection: ${text(e.reason)}`));
   // Every press, with what it landed on: a disabled button gets no click, but it does get the pointer.

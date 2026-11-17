@@ -3,6 +3,7 @@
 // then hello, model, count, every 1 KB block and end; then the radio restarts and Console connects again.
 // The frames come from the Rust core (core/src/firmware.rs), only from a file its checks passed: the bootloader
 // only ever gets the image's own blocks.
+import { debugLog } from "./debuglog";
 import { askRestart, BootPort } from "./bootflash";
 import {
   FfwFile,
@@ -59,8 +60,24 @@ class Firmware {
   /** The image's minisig signature: Ferrite's (its trusted comment), none, or one that doesn't verify (refused). */
   signature = $state<Signed | null>(null);
   /** What the step is doing, in words. */
-  message = $state("");
-  error = $state("");
+  #message = $state("");
+  #error = $state("");
+  /** What it's doing now; each change goes to the debug log (debuglog.ts), so a report has the steps. */
+  get message() {
+    return this.#message;
+  }
+  set message(v: string) {
+    if (v && v !== this.#message) debugLog(`firmware: ${v}`);
+    this.#message = v;
+  }
+  /** What went wrong; to the debug log too. */
+  get error() {
+    return this.#error;
+  }
+  set error(v: string) {
+    if (v && v !== this.#error) debugLog(`firmware ERROR: ${v}`);
+    this.#error = v;
+  }
   done = $state(0);
   blocks = $state(0);
   /** A .ffw's contents (its parts written after the MCU flash); null for a bare .btf. */
