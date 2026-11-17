@@ -83,7 +83,7 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK" | "STATE" | "TUNE" | "BEACON", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "USED" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK" | "STATE" | "TUNE" | "BEACON", number>;
   /** LINK-59: `DATA_READ`'s ops and its most bytes, and the erase unit. */
   data: { READ: number; CRC: number; READ_MAX: number; SECTOR: number };
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS" | "SAT" | "SAT_INFO" | "RADIO", number>;

@@ -38,9 +38,10 @@ import { debugLog } from "./debuglog";
 
 /** A message type's name for the debug log ("WRITE_MANY"). */
 const msgName = (ty: number) => Object.entries(P.msg).find(([, v]) => v === ty)?.[0] ?? `0x${ty.toString(16)}`;
-/** Requests that may be sent twice: they read, or set what they set again (a lost answer's retry). */
+/** Requests that may be sent twice: they read, or set what they set again (a lost answer's retry; BEGIN only says how
+ *  many records follow, before any has gone). */
 const twiceOk = (ty: number) =>
-  [P.msg.INFO, P.msg.UI, P.msg.STATE, P.msg.READ, P.msg.READ_MANY, P.msg.LOG_READ, P.msg.HEARD, P.msg.MSGS, P.msg.CLOCK, P.msg.SUBSCRIBE, P.msg.DATA_READ].includes(ty);
+  [P.msg.INFO, P.msg.UI, P.msg.STATE, P.msg.READ, P.msg.READ_MANY, P.msg.USED, P.msg.BEGIN, P.msg.LOG_READ, P.msg.HEARD, P.msg.MSGS, P.msg.CLOCK, P.msg.SUBSCRIBE, P.msg.DATA_READ].includes(ty);
 /** Asked every few hundred ms while Live View runs: logged only when they fail. */
 const quiet = (ty: number) => ty === P.msg.UI || ty === P.msg.STATE;
 
@@ -665,6 +666,29 @@ export class Link {
    * `run` whole-record writes from ops[i] as WRITE_MANY frames (LINK-41). Busy answers carry how many went in;
    * the rest is sent again. A refusal throws `WriteError` on the op the radio stopped at.
    */
+  /** After a lost answer: the link ready for another try (a resync with compression, else a 0x00 sync). */
+  private async readyAgain() {
+    if (this.caps & P.caps.LZ) await this.resync().catch(() => {});
+    else await this.t.write(this.session.take_cable(performance.now())).catch(() => {});
+  }
+
+  /**
+   * A WRITE_MANY that may go twice (whole records by index, channel deletes, contacts by callsign, positions, skip
+   * lists): sent once
+   * more after a lost answer, the link made ready first. A lost frame failed the whole write before (the serial-comms
+   * review, Nov 17, 2026).
+   */
+  private async askTwice(body: Uint8Array, ms?: number): Promise<{ status: number; rest: Uint8Array }> {
+    try {
+      return await this.askRaw(P.msg.WRITE_MANY, body, ms, false);
+    } catch (e) {
+      if (!(e instanceof TimeoutError)) throw e;
+      debugLog(`link WRITE_MANY (what ${body[0]}, ${body.length} B): no answer, sent once more`);
+      await this.readyAgain();
+      return await this.askRaw(P.msg.WRITE_MANY, body, ms, false);
+    }
+  }
+
   private async writeMany(ops: PlanOp[], i: number, run: number, progress: (done: number) => void): Promise<void> {
     let done = 0;
     const end = performance.now() + P.timing.busy_retry_ms;
@@ -677,7 +701,7 @@ export class Link {
         body.set(r.entry, o);
         o += r.entry.length;
       }
-      const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+      const { status, rest } = await this.askTwice(body);
       const applied = rest.length ? rest[0] : 0;
       done += status === 0 ? recs.length : applied;
       progress(i + done);
@@ -780,7 +804,7 @@ export class Link {
         });
         const end = performance.now() + P.timing.busy_retry_ms;
         for (;;) {
-          const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+          const { status, rest } = await this.askTwice(body); // added or renamed by callsign: the same twice
           if (status === 0) break;
           if (status === 7 && performance.now() < end) {
             await sleep(P.timing.busy_sleep_ms);
@@ -855,7 +879,9 @@ export class Link {
           body.set(r.record, o + 3);
           o += 3 + r.record.length;
         }
-        const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+        // positions and skip lists replace what's there: the same twice; waypoints' adds and deletes shift a list
+        const again = what === P.what.POSITION || what === P.what.PRESET_SKIPS;
+        const { status, rest } = again ? await this.askTwice(body) : await this.askRaw(P.msg.WRITE_MANY, body);
         const applied = status === 0 ? part.length : rest.length ? rest[0] : 0;
         i += applied;
         progress?.(i);
@@ -1059,7 +1085,8 @@ export class Link {
           // (bigger than a frame) as before.
           const dels = deleteRun(ops, i);
           if (dels > 0) {
-            // LINK-41.2: channel deletes several to a WRITE_MANY (records of length 0)
+            // LINK-41.2: channel deletes several to a WRITE_MANY (records of length 0); a channel not there is nothing
+            // to do, so a delete whose answer was lost goes again safely (askTwice)
             const body = new Uint8Array(1 + dels * 3);
             body[0] = 2;
             for (let k = 0; k < dels; k++) {
@@ -1068,7 +1095,7 @@ export class Link {
             }
             // each delete is a flash write on the radio: 79 took black 4.3 s (Nov 16, 2026), past the 2 s a cable
             // request waits, and Console said the radio had stopped answering
-            const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body, deleteWaitMs(this.timeout(), dels));
+            const { status, rest } = await this.askTwice(body, deleteWaitMs(this.timeout(), dels));
             if (status !== 0) {
               const done = rest.length ? rest[0] : 0;
               throw new WriteError(ops[i + done], i + done, new RadioError(P.msg.WRITE_MANY, status, rest.slice(1)));

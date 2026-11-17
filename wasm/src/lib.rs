@@ -108,7 +108,7 @@ pub fn protocol() -> String {
     serde_json::json!({
         "msg": { "HELLO": msg::HELLO, "INFO": msg::INFO, "AUTH": msg::AUTH, "READ": msg::READ, "WRITE": msg::WRITE,
                  "DELETE": msg::DELETE, "BEGIN": msg::BEGIN, "END": msg::END, "SLOT": msg::SLOT, "BAUD": msg::BAUD,
-                 "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY,
+                 "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY, "USED": msg::USED,
                  "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP,
                  "MSG_DELETE": msg::MSG_DELETE, "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA,
                  "DATA_READ": msg::DATA_READ, "DATA_WRITE": msg::DATA_WRITE, "CLOCK": msg::CLOCK, "STATE": msg::STATE, "TUNE": msg::TUNE, "BEACON": msg::BEACON },
