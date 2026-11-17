@@ -405,6 +405,9 @@ export class Link {
         } catch (e) {
           if (!(e instanceof TimeoutError)) throw e;
           if (++tries > 2) throw new TimeoutError(`${e.message} (${ty === P.msg.DATA_WRITE ? "DATA_WRITE" : "DATA_READ"} ${payload[0]} at 0x${new DataView(payload.buffer, payload.byteOffset).getUint32(1, true).toString(16)})`);
+          // LINK-51: a lost frame leaves the compression windows apart, and every try after it went unread (an Intel
+          // Mac's update, Nov 17, 2026: one lost DATA_WRITE, then the SPI parts failed): a HELLO first.
+          await this.resync();
           continue;
         }
         if (a.status === 0) return a.rest;

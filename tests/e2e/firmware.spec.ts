@@ -313,3 +313,28 @@ test("firmware: SPI parts cut part way leave the radio half moved (255); install
   await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 120_000 });
   await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.hello?.layouts?.chip), { timeout: 20_000 }).toBe(3);
 });
+
+test("firmware: one frame lost in the SPI parts: a resync and the parts go on (no stall on compression)", async ({ page }) => {
+  // The Intel Mac's update (Nov 17, 2026): one DATA_WRITE lost; the tries after it, compressed against windows now
+  // apart, went unread. data() resyncs (HELLO) before trying again.
+  test.setTimeout(240_000);
+  setMode({});
+  const btf = testBtf(16);
+  await openConsole(page, "firmware");
+  await connect(page);
+  await page.getByText("Advanced: install a file (.ffw or .btf)").click();
+  await page.getByLabel("Allow unsigned files").check();
+  await pickFile(page, "ferrite-test.ffw", testFfw(btf));
+  await page.evaluate(() => {
+    const w = window as any;
+    const t = w.ferrite.radio.connectedLink.t;
+    const orig = t.write.bind(t);
+    t.write = (b: Uint8Array) => (w.__dropOne ? ((w.__dropOne = false), (w.__dropped = true), Promise.resolve()) : orig(b));
+  });
+  await update(page);
+  await expect.poll(() => page.evaluate(() => (window as any).ferrite.firmware.partsDone), { timeout: 90_000, intervals: [50] }).toBeGreaterThan(3);
+  await page.evaluate(() => ((window as any).__dropOne = true));
+  await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 120_000 });
+  expect(await page.evaluate(() => (window as any).__dropped)).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.hello?.layouts?.chip)).toBe(3);
+});
