@@ -170,7 +170,7 @@
     if (!el) return;
     shotNote = "";
     try {
-      download(await screenPng(el, scale), pngName(radio.ui?.screen?.id));
+      await download(await screenPng(el, scale), pngName(radio.ui?.screen?.id));
     } catch (e) {
       shotNote = `PNG: ${(e as Error).message}`;
     }

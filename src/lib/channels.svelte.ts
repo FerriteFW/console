@@ -3,6 +3,7 @@
 // first, then the diff, then the write session on confirm), CHIRP CSV in and out, backup files out and back in.
 // Unwritten edits are kept in IndexedDB (restored on the next visit); each table edit can be undone (`undo`).
 // Every record layout, check, diff and conversion is the Rust core's; this file only moves them and the files.
+import { saveAs, saveDownload } from "./download";
 import {
   P,
   backupFile,
@@ -82,16 +83,9 @@ const presetRecord = (p: Preset | undefined) => p && { name: p.name, low: p.low,
 /** A preset as the table's changes count it: its record and its skip list (SCAN-10). */
 const presetFields = (p: Preset | undefined) => p && { ...presetRecord(p), skips: p.skips ?? [] };
 
-/** A file to the user's downloads. */
-export function download(name: string, text: string, type: string) {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+/** A file to the user's downloads (the desktop app: its Downloads folder, download.ts); where it went. */
+export function download(name: string, text: string, type: string): Promise<string> {
+  return saveDownload(name, new Blob([text], { type }));
 }
 
 /** The channels part's JSON, as far as Console counts it (core/src/plan.rs `Backup`). */
@@ -329,8 +323,8 @@ class Channels {
   async backupRadio(): Promise<ReadResult & { name: string }> {
     const { set, home, presets } = await this.readRadio();
     const name = `${this.fileBase()}-backup.json`;
-    download(name, backupFile(set, new Date().toISOString(), this.radioMeta()), "application/json");
-    if (presets?.length) download(`${this.fileBase()}-presets.json`, presetsFile(presets, new Date().toISOString(), this.radioMeta()), "application/json");
+    await download(name, backupFile(set, new Date().toISOString(), this.radioMeta()), "application/json");
+    if (presets?.length) await download(`${this.fileBase()}-presets.json`, presetsFile(presets, new Date().toISOString(), this.radioMeta()), "application/json");
     return { set, home, presets, name };
   }
 
@@ -385,6 +379,15 @@ class Channels {
     this.error = "";
     this.write = { step: "backup" };
     try {
+      // A scan stopped first: a scanning radio answers late, and the write stopped part way through (Nov 16, 2026).
+      const link = radio.connectedLink;
+      if (link) {
+        try {
+          await link.stopScans();
+        } catch (e) {
+          throw new Error(`stopping the scan: ${(e as Error).message}`);
+        }
+      }
       const { set: fresh, home: freshHome, presets: freshPresets, name } = await this.backupRadio();
       const plan = writePlan(fresh, this.table);
       // Range presets: only to a radio that gave them, and only when the table's differ from what it holds now.
@@ -589,8 +592,15 @@ class Channels {
     this.notes = a.notes;
   }
 
-  exportChirp() {
-    download(`${this.fileBase()}-chirp.csv`, chirpExport(this.table), "text/csv");
+  async exportChirp() {
+    this.error = "";
+    try {
+      // The desktop app asks where (the save dialog); cancelled: nothing said
+      const to = await saveAs(`${this.fileBase()}-chirp.csv`, new Blob([chirpExport(this.table)], { type: "text/csv" }));
+      if (to) this.source = `Exported as CHIRP CSV: ${to}`;
+    } catch (e) {
+      this.error = `CHIRP export: ${(e as Error).message ?? e}`;
+    }
   }
 
   // ---- range presets (MENU 0 1 4) ----

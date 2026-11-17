@@ -21,7 +21,9 @@ import {
   parseTextChunk,
   recordReader,
   statusText,
+  stateParse,
   subscribePayload,
+  tunePayload,
   type Answer,
   type Hello,
   type Info,
@@ -635,24 +637,35 @@ export class Link {
         setTimeout(() => resolve(null), this.timeout() * 2);
       });
       void this.t.write(this.session.request(P.msg.WRITE_MANY, f.body, performance.now()));
-      return { f, got };
+      return { f, got, seq };
     };
     const flight: ReturnType<typeof send>[] = [];
     let k = 0;
-    let stop: { at: number } | null = null;
+    let stop: { at: number; lost?: boolean } | null = null;
     while (k < frames.length || flight.length) {
       while (!stop && k < frames.length && flight.length < 2) flight.push(send(frames[k++]));
-      const { f, got } = flight.shift()!;
+      const { f, got, seq } = flight.shift()!;
       const a = await got;
       if (this.closed) throw new Error("not connected");
-      if (stop) continue; // after a refusal: only draining what's in flight
-      if (!a) throw new TimeoutError(`No answer from the radio in ${((this.timeout() * 2) / 1000).toFixed(0)} s.`);
+      if (stop) {
+        if (!a) this.waiters.delete(seq);
+        continue; // after a refusal or a lost frame: only draining what's in flight
+      }
+      if (!a) {
+        // A frame (or its answer) lost: whether it was applied isn't known, but writing a record again changes
+        // nothing, so the rest goes one frame at a time from this frame's first op, after a resync (LINK-51: a lost
+        // frame leaves the compression windows apart). Before, the write stopped here with 5 channels written.
+        this.waiters.delete(seq);
+        stop = { at: f.at, lost: true };
+        continue;
+      }
       const applied = a.status === 0 ? f.run : a.rest.length ? a.rest[0] : 0;
       progress(f.at + applied);
       if (a.status !== 0) stop = { at: f.at + applied };
     }
     if (!stop) return frames.length ? frames[frames.length - 1].at + frames[frames.length - 1].run : i;
     // the rest one frame at a time, from the first op the radio didn't apply (busy asked again, a refusal thrown)
+    if (stop.lost) await this.resync();
     let at = stop.at;
     while (at < frames[frames.length - 1].at + frames[frames.length - 1].run) {
       const run = manyRun(ops, at);
@@ -697,6 +710,33 @@ export class Link {
    * its 8-byte record, or 0 bytes to clear it. 21 to a frame (MAX_PAYLOAD 240); `busy` goes again from the first
    * not applied; a refusal throws with the radio's reason. `progress(done)` as frames are answered.
    */
+  /**
+   * Stops every slot's scan before a write (LINK-67's state, LINK-68's TUNE scan stop): a scanning radio answers the
+   * link late (LINK-38), and a write stopped part way through. Waits up to 2 s for the radio to say they stopped.
+   * The slots it stopped ("A", "B", "C").
+   */
+  stopScans(): Promise<string[]> {
+    return this.exclusive(async () => {
+      const scanning = () => this.scanningRaw();
+      const was = await scanning();
+      for (const s of was) await this.okRaw(P.msg.TUNE, tunePayload("ABC".indexOf(s.slot), "scan", 0));
+      for (const end = performance.now() + 2_000; was.length && (await scanning()).length; ) {
+        if (performance.now() > end) throw new Error("the radio is still scanning: stop the scan on the radio, then write again");
+        await sleep(100);
+      }
+      return was.map((s) => s.slot);
+    });
+  }
+
+  /** The slots scanning now ("A", "B", "C"; LINK-67's state). */
+  scanningSlots(): Promise<string[]> {
+    return this.exclusive(async () => (await this.scanningRaw()).map((s) => s.slot));
+  }
+
+  private async scanningRaw() {
+    return (stateParse(await this.okRaw(P.msg.STATE))?.slots ?? []).filter((s) => s.scanning);
+  }
+
   writePositions(recs: { index: number; record: Uint8Array }[], progress?: (done: number) => void): Promise<void> {
     return this.writeRecords(P.what.POSITION, recs, progress);
   }

@@ -221,7 +221,7 @@ abstract class ListEditor<T> {
     try {
       const fresh = this.rekey(await this.readRadio(), this.base);
       const backupName = `${fileBase()}-${this.key}-backup.json`;
-      download(backupName, this.fileText(fresh, new Date().toISOString(), partRadio()), "application/json");
+      await download(backupName, this.fileText(fresh, new Date().toISOString(), partRadio()), "application/json");
       const drifted = !!this.base && this.plan(this.base, fresh, false).changes.length > 0;
       this.write = { step: "review", plan: this.plan(fresh, this.items, true), backupName, drifted };
     } catch (e) {

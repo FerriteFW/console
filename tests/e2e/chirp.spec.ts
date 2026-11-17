@@ -214,7 +214,12 @@ for (const fx of FILES) {
 
     test("write: backup, diff (the channels and the zone added), read back", async ({}, info) => {
       expect(added.length).toBe(fx.want.length);
+      // A scanning radio answers late and a write stopped part way through (reports, Nov 16, 2026): the write stops
+      // the scan first. Slot A scanning (its VFO band), then the write.
+      expect(await page.evaluate(() => (window as any).ferrite.radio.tune(0, "scan", 1).then((ok: boolean) => ok || (window as any).ferrite.radio.keyNote))).toBe(true);
+      await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.connectedLink.scanningSlots()), { timeout: long() }).toContain("A");
       await startWrite(`${fx.tag}-backup.json`);
+      await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.connectedLink.scanningSlots())).toEqual([]);
       await expect(wd().locator("h3.added")).toHaveText(`Added (${fx.want.length + 1})`);
       await expect(wd().locator("h3.changed")).toHaveCount(0);
       await expect(wd().locator("h3.deleted")).toHaveCount(0);
