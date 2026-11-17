@@ -14,13 +14,13 @@
   const elsewhere = $derived(!I.connected && radio.phase !== "idle" && radio.phase !== "updating");
   const cableOk = $derived(radio.available().cable === true);
 
-  async function picked(kind: "stock" | "backup", e: Event) {
+  async function picked(kind: "stock" | "backup" | "icons", e: Event) {
     const el = e.currentTarget as HTMLInputElement;
     const files = Array.from(el.files ?? []);
     el.value = "";
     if (files.length) await I.pickFile(kind, files);
   }
-  async function dropped(kind: "stock" | "backup", e: DragEvent) {
+  async function dropped(kind: "stock" | "backup" | "icons", e: DragEvent) {
     e.preventDefault();
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length) await I.pickFile(kind, files);
@@ -49,6 +49,20 @@
         <span>{I.stock ? I.stock.name : "From the radio maker's website: drop it here, or click"}</span>
       </label>
     </div>
+    <label class="drop icons" ondragover={(e) => e.preventDefault()} ondrop={(e) => dropped("icons", e)}>
+      <input type="file" accept=".bin" hidden aria-label="Menu icons file" onchange={(e) => picked("icons", e)} />
+      <span class="what">Stock's menu icons (optional)</span>
+      <span data-k="restore-icons">
+        {#if I.restoreIconsFrom === "backup"}
+          Kept with this backup: they go back too.
+        {:else if I.restoreIconsFrom === "file"}
+          From the icons file: they go back too.
+        {:else}
+          Not with this backup. Stock's main-menu tiles are in the radio's own flash, which every Ferrite install writes over: without an icons file (Install's "Save them as a file…", from a radio that never had Ferrite) the tiles stay blank on stock. Drop one here.
+        {/if}
+      </span>
+    </label>
+    {#if I.restoreIconsError}<p class="warn">{I.restoreIconsError}</p>{/if}
     {#if I.restoreBackup && I.restoreBackupCheck && !I.restoreBackupCheck.problems.filter((p) => !p.startsWith("a stock phone")).length}
       <p class="sub" data-k="restore-id">
         {I.restoreBackupUid ? `Backup of radio ID ${I.restoreBackupUid}.` : "Console doesn't know which radio this backup is from: the radio's ID is asked for first."}

@@ -323,6 +323,72 @@ test("back to stock: the backup into Ferrite's ranges, never calibration or the 
   expect(rs[rs.length - 1].blocks).toBe(951);
 });
 
+/** Stock's menu tiles as a radio that never had Ferrite holds them (BACKUP-12.3): 24 of 58 x 58, a flat background. */
+function tiles(): Buffer {
+  const b = Buffer.alloc(161_472);
+  for (let t = 0, o = 0; t < 24; t++)
+    for (let y = 0; y < 58; y++)
+      for (let x = 0; x < 58; x++, o += 2) b.writeUInt16LE(x >= 16 && x < 42 && y >= 16 && y < 42 ? 0xf800 ^ t : 0x0841, o);
+  return b;
+}
+
+test("menu icons: the backup reads stock's tiles and keeps them for back to stock", async ({ page }) => {
+  // BACKUP-12.3 (ferrite decision 406): stock draws its main menu's tiles from MCU 0x08080000, which every Ferrite
+  // image writes over; a stock .BTF doesn't bring them back (black, Nov 16, 2026).
+  const flash = chip(false, 4);
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, flash);
+  const icons = tiles();
+  const iconsPath = join(dir(), "icons.bin");
+  writeFileSync(iconsPath, icons);
+  setMode({ flash: flashPath, icons: iconsPath });
+  await serveRelease(page);
+  await open(page);
+  await backUp(page);
+  await expect(wizard(page).locator('[data-k="icons"]')).toContainText("stock's, kept with this backup");
+
+});
+
+test("menu icons: back to stock puts an icons file's tiles back at 0x08080000", async ({ page }) => {
+  const flash = chip(false, 4);
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, flash);
+  setMode({ flash: flashPath });
+  await serveRelease(page);
+  await open(page, false, "restore");
+  const back = card(page, "Back to stock");
+  const icons = tiles();
+  await page.getByLabel("Backup file").setInputFiles({ name: "backup-BJ90.bin", mimeType: "application/octet-stream", buffer: flash });
+  await page.getByLabel("Stock firmware for Back to stock").setInputFiles({ name: "stock.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
+  await page.getByLabel("Menu icons file").setInputFiles({ name: "rt950pro-menu-icons-X.bin", mimeType: "application/octet-stream", buffer: icons });
+  await expect(back.locator('[data-k="restore-icons"]')).toHaveText("From the icons file: they go back too.");
+  await back.getByRole("button", { name: "Back to stock" }).click();
+  const confirm = back.getByRole("group", { name: "Confirm the radio" });
+  await expect(confirm).toBeVisible({ timeout: 20_000 });
+  await confirm.getByLabel("This radio's ID").fill(HERE);
+  await back.getByRole("button", { name: "Back to stock" }).click();
+  await expect(page.getByRole("region", { name: "Back on stock" })).toBeVisible({ timeout: 120_000 });
+  // The stock image padded through 0x080F07FF: the marker, and the tiles at image offset 0x7D000.
+  const padded = Buffer.alloc(0xed800, 0xff);
+  readFileSync(new URL("../../core/tests/fixtures/ssb-synthetic.bin", import.meta.url)).copy(padded);
+  icons.copy(padded, 0x7d000);
+  padded.write("BJ90", 0xed000, "latin1");
+  const rs = results();
+  expect(rs[rs.length - 1].sha256).toBe(sha(pack(padded)));
+});
+
+test("menu icons: a file of them is taken for back to stock; a file that isn't them is refused", async ({ page }) => {
+  setMode({ flash: join(dir(), "none.bin") });
+  await serveRelease(page);
+  await open(page, false, "restore");
+  const back = card(page, "Back to stock");
+  await expect(back.locator('[data-k="restore-icons"]')).toContainText("the tiles stay blank on stock");
+  await page.getByLabel("Menu icons file").setInputFiles({ name: "code.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(161_472, 0x5a).map((x, i) => (x + i * 7) & 0xff) });
+  await expect(back).toContainText("code.bin isn't stock's menu icons");
+  await page.getByLabel("Menu icons file").setInputFiles({ name: "rt950pro-menu-icons-X.bin", mimeType: "application/octet-stream", buffer: tiles() });
+  await expect(back.locator('[data-k="restore-icons"]')).toHaveText("From the icons file: they go back too.");
+});
+
 test("back to stock: another radio's backup is refused though its calibration is the same", async ({ page }) => {
   const flashPath = join(dir(), "flash.bin");
   writeFileSync(flashPath, chip());

@@ -232,7 +232,8 @@ class FakeReader:
     """hwtest's console and its fdump, fed bytes (no threads, no rates: the bridge's TCP has none); with `z` (the
     Rust reader's image), fdumpz too (BACKUP-9.6), unless MODE.json says "no_fdumpz" (answered `?`, as hwtest).
     "corrupt_every": N spoils every Nth frame once (NAKed); "cut_every": N sends every Nth frame once 100 bytes short
-    (Console asks again once the frame's time is up); "wrong_first_dump": the first whole read serves a copy with one
+    (Console asks again once the frame's time is up); "icons": a file of 161472 bytes the reader's `mdump 0x08080000 161472` answers with (BACKUP-12.3);
+    "wrong_first_dump": the first whole read serves a copy with one
     byte flipped, its frames and CRCs consistent with it, so only `flashcrc` tells (an Intel Mac's report, Nov 16,
     2026)."""
 
@@ -286,6 +287,12 @@ class FakeReader:
             return self.console(f"flash crc32 {zlib.crc32(self.flash):08X} over {len(self.flash) // 1024} KB, 1 s\n")
         if w[0] == "mdump" and len(w) >= 3:
             addr, n = int(w[1], 0), int(w[2], 0)
+            icons = read_mode(self.mode_path).get("icons")
+            if (addr, n) == (0x08080000, 161472) and icons:
+                # BACKUP-12.3: stock's menu icons, from MODE.json's "icons" file, 32 bytes a line as the reader
+                b = open(icons, "rb").read()
+                out = "".join(f"{addr + i:X}:{b[i:i + 32].hex().upper()}*{sum(b[i:i + 32]) & 0xFF:02X}\n" for i in range(0, n, 32))
+                return self.console(out + "dump: end\n")
             if (addr, n) != (0x080F0000, 16):
                 return self.console("mdump: the fake knows 0x080F0000 16 only\n")
             m = bytes.fromhex(read_mode(self.mode_path).get("marker", "FF" * 16))

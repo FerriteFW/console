@@ -532,6 +532,13 @@ export const restoreStart = (rest: Uint8Array): RestoreStart | null => JSON.pars
 export const backupName = (uid: string, date: string, marker: Uint8Array | null = null): string => wasm.backup_name(uid, date, marker ?? undefined);
 /** BACKUP-12: stock's marker sector (0x080F0000) as the reader's `mdump 0x080F0000 16` answers it, or null. */
 export const parseMdump = (text: string): Uint8Array | null => wasm.parse_mdump(text) ?? null;
+/** BACKUP-12.3: stock's menu icons from the reader's `mdump 0x08080000 161472`, checked line by line. */
+export const parseMdumpIcons = (text: string): Uint8Array | null => wasm.parse_mdump_icons(text) ?? null;
+/** BACKUP-12.3: bytes from the icon area are stock's tiles (not erased flash, not a Ferrite image's code). */
+export const iconsPlausible = (b: Uint8Array): boolean => wasm.icons_plausible(b);
+/** BACKUP-12.3: the reader's read of the icon area, and its size. */
+export const MDUMP_ICONS = "mdump 0x08080000 161472\r";
+export const ICONS_LEN = 161_472;
 /** The stock marker word (UV85 or BJ90, as read) in the 16 saved bytes, or null (erased or not stock's). */
 export const markerWord = (m: Uint8Array): string | null => wasm.marker_word(m) ?? null;
 /** The stock marker a backup's file name carries, as its 16 bytes, or null. */

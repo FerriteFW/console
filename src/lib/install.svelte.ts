@@ -12,6 +12,7 @@
 //   the update area: core/src/install.rs), then the stock .BTF through the bootloader, padded over stock's marker
 //   sector's first page with the marker the backup read put back (BACKUP-12, ferrite decision 338).
 import { debugLog } from "./debuglog";
+import { saveAs } from "./download";
 import { ACK, askRestart, BootPort, bootRate, CMD_PROBE, sendAll } from "./bootflash";
 import {
   backupCheck,
@@ -21,7 +22,11 @@ import {
   firmwareCheck,
   FirmwareUpdate,
   Fdump,
+  iconsPlausible,
+  ICONS_LEN,
   imageCheck,
+  MDUMP_ICONS,
+  parseMdumpIcons,
   loadCore,
   markerWord,
   nameMarker,
@@ -177,6 +182,13 @@ const keep = {
   drop: () => keep.run("readwrite", (s) => s.delete("stock")),
 };
 
+/** BACKUP-12.3: stock's menu icons each backup this browser took read, by its SHA-256 (IndexedDB, as the stock file;
+ * best effort). They aren't in the backup file: Install also offers them as a file of their own. */
+const iconStore = {
+  get: (sha: string) => keep.run<Uint8Array | undefined>("readonly", (s) => s.get(`icons-${sha}`)).then((v) => v ?? null),
+  put: (sha: string, b: Uint8Array) => keep.run("readwrite", (s) => s.put(b, `icons-${sha}`)),
+};
+
 /** Which radio each backup this browser took is from: its SHA-256 -> the radio ID (decision 263). The file name
  * carries the ID too; this covers a renamed file. Best effort: a private window or cleared storage forgets it. */
 const ids = {
@@ -277,6 +289,10 @@ class Install {
   /** BACKUP-12.1: stock's marker sector's first 16 bytes as the reader read them (null: not read). */
   marker = $state<Uint8Array | null>(null);
   markerRead = $state(false);
+  /** BACKUP-12.3: stock's menu icons as the reader read them (null: not read), and whether they are stock's tiles
+   *  (not a Ferrite image's code left over them by an earlier install). */
+  icons = $state<Uint8Array | null>(null);
+  iconsStock = $state(false);
   check = $state<BackupCheck | null>(null);
   backupName = $state("");
   /** The owner saved the backup and said so (or the desktop app saved it and read it back). */
@@ -317,6 +333,10 @@ class Install {
   restoreBackupUid = $state<string | null>(null);
   /** BACKUP-12: the marker sector bytes the backup read (this browser's record, or the file name's word), or null. */
   restoreMarker = $state<Uint8Array | null>(null);
+  /** BACKUP-12.3: the menu icons Back to stock puts back (this browser's record of the backup's, or a file), and from where. */
+  restoreIcons = $state<Uint8Array | null>(null);
+  restoreIconsFrom = $state<"" | "backup" | "file">("");
+  restoreIconsError = $state("");
   /** Console doesn't know the backup's radio: the owner types this radio's ID (this one) to go on. */
   restoreConfirmUid = $state<string | null>(null);
   restoreTyped = $state("");
@@ -450,7 +470,7 @@ class Install {
 
   /** Ferrite takes a .ffw, or a .btf with its .minisig (signature.ts), as the reader does; stock and backup the
    *  first file. */
-  async pickFile(kind: "ferrite" | "reader" | "stock" | "backup", files: File[]) {
+  async pickFile(kind: "ferrite" | "reader" | "stock" | "backup" | "icons", files: File[]) {
     await loadCore();
     const ffwFile = kind === "ferrite" ? files.find((f) => /\.ffw$/i.test(f.name)) : undefined;
     if (ffwFile) {
@@ -469,6 +489,13 @@ class Install {
     }
     const f = files[0];
     const p = { name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) };
+    if (kind === "icons") {
+      // BACKUP-12.3: a menu-icons file (Install's "Save the menu icons", this radio's or another's).
+      const ok = p.bytes.length === ICONS_LEN && iconsPlausible(p.bytes);
+      this.restoreIconsError = ok ? "" : `${p.name} isn't stock's menu icons (${ICONS_LEN} bytes of tiles expected).`;
+      if (ok) [this.restoreIcons, this.restoreIconsFrom] = [p.bytes, "file"];
+      return;
+    }
     if (kind === "stock") {
       this.pickStock(p);
       if (this.keepStock) await keep.put(p);
@@ -477,6 +504,10 @@ class Install {
       this.restoreBackupCheck = backupCheck(p.bytes);
       this.restoreBackupUid = ids.get(this.restoreBackupCheck.sha256) ?? nameUid(p.name);
       this.restoreMarker = markers.get(this.restoreBackupCheck.sha256) ?? nameMarker(p.name);
+      if (this.restoreIconsFrom !== "file") {
+        this.restoreIcons = await iconStore.get(this.restoreBackupCheck.sha256);
+        this.restoreIconsFrom = this.restoreIcons ? "backup" : "";
+      }
       this.restoreConfirmUid = null;
       this.restoreTyped = "";
       this.restoreSummary = null;
@@ -677,6 +708,12 @@ class Install {
       const md = await w.waitFor(/80F0000:[0-9A-F]{32}\*[0-9A-F]{2}|\?  \(help\)|mdump: [^\r\n]*/, 3000, this.held);
       this.marker = md ? parseMdump(md[0]) : null;
       this.markerRead = !!this.marker;
+      // BACKUP-12.3: stock's menu icons (MCU 0x08080000, 161 KB), which every Ferrite image writes over: read only,
+      // about 35 s. Taken whole through the sink (the text keeps 8 KB).
+      this.message = "Reading stock's menu icons (about 35 s)…";
+      this.icons = await this.readIcons(w);
+      this.iconsStock = !!this.icons && iconsPlausible(this.icons);
+      debugLog(`backup: menu icons ${this.icons ? `read, ${this.iconsStock ? "stock's tiles" : "not stock's (Ferrite's code or blank)"}` : "not read"}`);
       let data = await this.readChip(chip.size);
       this.message = "Checking: the radio's own CRC of the whole chip (about a minute)…";
       w.clear();
@@ -705,6 +742,7 @@ class Install {
       this.backupName = backupName(this.uid, today(), this.marker);
       ids.put(c.sha256, this.uid);
       if (this.marker) markers.put(c.sha256, this.marker);
+      if (this.icons && this.iconsStock) await iconStore.put(c.sha256, this.icons);
       this.message = "";
       this.backupStep = c.problems.some((p) => !p.startsWith("a stock phone")) ? "failed" : "done";
       if (this.backupStep === "failed") {
@@ -729,6 +767,37 @@ class Install {
       if (w.text.trimEnd().endsWith(">")) return;
     }
     throw new Error("The reader didn't start. Turn the radio off and on, then start the backup again.");
+  }
+
+  /** BACKUP-12.3: the menu icons this backup read, as a file of their own (for Back to stock on another computer, or
+   *  for another radio whose icons an earlier Ferrite install wrote over). The name it went as, or null. */
+  async saveIcons(): Promise<string | null> {
+    if (!this.icons || !this.iconsStock) return null;
+    const uid = (this.uid || "radio").replace(/\s+/g, "");
+    return saveAs(`rt950pro-menu-icons-${uid}.bin`, new Blob([this.icons as BlobPart], { type: "application/octet-stream" }));
+  }
+
+  /** BACKUP-12.3: the reader's `mdump` of the icon area, checked line by line; null when it doesn't come whole (an
+   *  older reader, a lost line: the backup goes on without them). */
+  private async readIcons(w: Wire): Promise<Uint8Array | null> {
+    let text = "";
+    let done = false;
+    w.sink = (b) => {
+      text += latin1(b);
+      done ||= /dump: end|mdump: [^\r\n]*only|\?  \(help\)/.test(text.slice(-200));
+    };
+    try {
+      await w.write(MDUMP_ICONS);
+      const end = performance.now() + 90_000;
+      while (!done && performance.now() < end) {
+        this.held();
+        await sleep(200);
+      }
+    } finally {
+      w.sink = null;
+      w.clear();
+    }
+    return done ? parseMdumpIcons(text) : null;
   }
 
   /** The whole chip: the Rust reader's fdumpz at 230400 (115200 on Windows) (BACKUP-9.6, ferrite decision 265) when the reader image
@@ -1121,7 +1190,7 @@ class Install {
       if (fin.status !== 0) throw new Error(`The radio refused to finish: ${statusText(fin.status)}.`);
       link.close();
       this.wire!.attach();
-      await this.flash(FirmwareUpdate.stock(this.stock!.bytes, this.restoreMarker ?? undefined), "stock firmware", false);
+      await this.flash(FirmwareUpdate.stock(this.stock!.bytes, this.restoreMarker ?? undefined, this.restoreIcons ?? undefined), "stock firmware", false);
       this.backOnStock();
     } catch (e) {
       link.close();
@@ -1139,7 +1208,7 @@ class Install {
     this.error = "";
     this.errorAt = "";
     try {
-      await this.flash(FirmwareUpdate.stock(this.stock.bytes, this.restoreMarker ?? undefined), "stock firmware");
+      await this.flash(FirmwareUpdate.stock(this.stock.bytes, this.restoreMarker ?? undefined, this.restoreIcons ?? undefined), "stock firmware");
       this.backOnStock();
     } catch (e) {
       this.fail("restore", e);
