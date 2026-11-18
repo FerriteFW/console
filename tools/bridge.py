@@ -433,8 +433,12 @@ class Bridge:
         async def to_boot(data):
             boot = self.boot
             out = boot.feed(data)
-            if out:
-                await ws.send(2, out)
+            # fakeboot.PAUSE: the reply in two USB reads, as some hosts deliver it (Nov 17, 2026)
+            for i, part in enumerate(out.split(fakeboot.PAUSE)):
+                if i:
+                    await asyncio.sleep(0.3)
+                if part:
+                    await ws.send(2, part)
             if getattr(boot, "next", None) is not None:
                 self.boot = boot.next  # the reader's `reboot`, the restore's FINISH: the bootloader next
                 log(f"fakeboot: the cable goes to {type(self.boot).__name__}")

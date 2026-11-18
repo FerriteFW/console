@@ -378,6 +378,22 @@ test("menu icons: the backup reads stock's tiles and keeps them for back to stoc
 
 });
 
+test("menu icons: the marker's `dump: end` in a later read doesn't end the icon read", async ({ page }) => {
+  // Two Windows logs and a Linux one (Nov 17, 2026): icons "not read" in 0.2 s, then "no answer to fdump". The marker's
+  // reply came in two reads; its late `dump: end` finished the icon read at once, while the radio was still sending
+  // the icons (35 s) and couldn't hear fdumpz.
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, chip(false, 4));
+  const icons = tiles();
+  const iconsPath = join(dir(), "icons.bin");
+  writeFileSync(iconsPath, icons);
+  setMode({ flash: flashPath, icons: iconsPath, split_marker: true });
+  await serveRelease(page);
+  await open(page);
+  await backUp(page);
+  await expect(wizard(page).locator('[data-k="icons"]')).toContainText("stock's, kept with this backup");
+});
+
 test("menu icons: back to stock puts an icons file's tiles back at 0x08080000", async ({ page }) => {
   const flash = chip(false, 4);
   const flashPath = join(dir(), "flash.bin");

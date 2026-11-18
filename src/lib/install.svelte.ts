@@ -808,6 +808,7 @@ class Install {
       await w.write("sys\r");
       const sys = await w.waitFor(/[^\r\n]* uid [0-9A-F]{24}[^\r\n]*/, 4000, this.held);
       this.uid = (sys && readerLine<{ uid: string }>("sys", sys[0])?.uid) || "";
+      debugLog(`backup: reader ${sys ? radioSaid(sys[0]) : `said no sys line; heard ${radioSaid(w.text)}`}`);
       w.clear();
       await w.write("flash\r");
       const fl = await w.waitFor(/flash id [0-9A-F]{6} \([^)]*\)[^\r\n]*/, 5000, this.held);
@@ -821,7 +822,9 @@ class Install {
       // without `mdump` (an older one) answers `?`: assumed blank, and said.
       w.clear();
       await w.write(MDUMP_MARKER);
-      const md = await w.waitFor(/80F0000:[0-9A-F]{32}\*[0-9A-F]{2}|\?  \(help\)|mdump: [^\r\n]*/, 3000, this.held);
+      // To its `dump: end`: on some hosts that comes in a later read, and it then ended the icon read below at once
+      // (two Windows logs and a Linux one, Nov 17, 2026).
+      const md = await w.waitFor(/80F0000:[0-9A-F]{32}\*[0-9A-F]{2}(?=[\s\S]*?dump: end)|\?  \(help\)|mdump: [^\r\n]*/, 3000, this.held);
       this.marker = md ? parseMdump(md[0]) : null;
       if (!md) debugLog(`backup: no answer to the marker's mdump; heard ${radioSaid(w.text)}`);
       this.markerRead = !!this.marker;
@@ -901,9 +904,12 @@ class Install {
   private async readIcons(w: Wire): Promise<Uint8Array | null> {
     let text = "";
     let done = false;
+    let started = false; // a `dump: end` before the first icon line is someone else's
     w.sink = (b) => {
       text += latin1(b);
-      done ||= /dump: end|mdump: [^\r\n]*only|\?  \(help\)/.test(text.slice(-200));
+      const tail = text.slice(-200);
+      started ||= text.includes("8080000:");
+      done ||= (started && /dump: end/.test(tail)) || /mdump: [^\r\n]*only|\?  \(help\)/.test(tail);
     };
     try {
       await w.write(MDUMP_ICONS);
