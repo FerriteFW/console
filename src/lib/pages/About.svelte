@@ -3,6 +3,7 @@
   import { isTauri } from "../transport/native";
   import { CONSOLE_VERSION as version } from "../codeplug.svelte";
   import { saveDebugInfo } from "../debugdump";
+  import { radio } from "../radio.svelte";
   let debugNote = $state("");
   async function saveDebug() {
     debugNote = "";
@@ -55,6 +56,13 @@
       writes and errors). Save it right after the problem; if Console was closed since, the last session's log is in it too. It holds no PIN; it does name the radio's callsign and ID, and the channels a write's read back found different.
     </span>
     {#if debugNote}<p class="sub" role="status">{debugNote}</p>{/if}
+    {#if radio.crash}
+      <!-- SAFE-8.2: the radio's last start followed a crash or a hang (its readback's restart line) -->
+      <p class="crash" data-k="radio-crash">
+        The radio restarted after a {radio.crash.after === "fault" ? `crash at ${radio.crash.pc}` : "hang"} ({radio.crash.inARow} in a row,
+        firmware {radio.crash.firmware}). The debug info holds it: save it and send it with what you were doing.
+      </p>
+    {/if}
   </div>
   <details ontoggle={openNotices}>
     <summary>Third-party licences</summary>
@@ -94,6 +102,11 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 6px 12px;
+  }
+  .crash {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--red);
   }
   .debug .btn {
     flex: none;

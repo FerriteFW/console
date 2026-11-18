@@ -203,6 +203,25 @@ class Radio {
    * Firmware Update takes the cable from a connected session (or a radio on another protocol: decision 385): polling
    * stops; the link stays usable for REBOOT. The bar shows "Updating firmware" until `handBack` or `disconnect`.
    */
+  /**
+   * SAFE-8.2: the radio's last start followed a crash (a fault, with its address) or a hang, from the readback's
+   * `restart` line; null when it didn't. Shown on About and in the debug info, so a crash on the radio comes back
+   * with its address (Nov 17, 2026: crashes on opening Nearby from V/M's hold menu). Kept for the session.
+   */
+  crash = $state<{ after: "fault" | "hang"; pc: string; inARow: number; firmware: string; seen: string } | null>(null);
+
+  private setUi(u: Ui | null) {
+    this.ui = u;
+    const line = u?.lines.find((l) => l.startsWith("restart "));
+    const m = line?.match(/after=(fault|hang)(?: pc=(0x[0-9a-fA-F]+))?(?: in_a_row=(\d+))?/);
+    if (!m) return;
+    const pc = m[2] ?? "";
+    if (this.crash && this.crash.after === m[1] && this.crash.pc === pc) return;
+    const firmware = `${this.info?.firmware ?? this.hello?.firmware ?? "?"} ${this.info?.build?.name ?? ""}`.trim();
+    this.crash = { after: m[1] as "fault" | "hang", pc, inARow: Number(m[3] ?? 1), firmware, seen: new Date().toISOString() };
+    debugLog(`radio: restarted after a ${m[1]}${pc ? ` at pc=${pc}` : ""} (${m[3] ?? 1} in a row), firmware ${firmware}`);
+  }
+
   /** Called before an update or a data move takes the cable (Listen stops: listen.svelte.ts). */
   beforeTake: (() => void)[] = [];
 
@@ -431,7 +450,7 @@ class Radio {
       this.liveUpdates = this.live_.updates();
       this.liveResyncs = this.live_.resyncs();
       if (r === 0) {
-        this.ui = parseUi(this.live_.text());
+        this.setUi(parseUi(this.live_.text()));
         this.lastUiAt = now;
         this.fails = 0;
         const span = Math.max(1000, now - this.evLog[0][0]);
@@ -584,7 +603,7 @@ class Radio {
         try {
           const text = await this.link.uiText();
           if (gen !== this.generation) return;
-          this.ui = parseUi(text);
+          this.setUi(parseUi(text));
           this.uiMs = Math.round(performance.now() - t0);
           this.fails = 0;
         } catch (e) {
