@@ -17,11 +17,12 @@ import {
 } from "../../src/lib/sstv.ts";
 
 test("sstv: slot addresses (SSTV-4)", () => {
+  // decision 404: four slots from 0x15D000, past the stock bootloader's fonts (one to send, three received)
   assert.equal(slotAddr(0), 0x15d000);
-  assert.equal(slotAddr(1), 0x0e9000);
-  assert.equal(slotAddr(5), 0x18d000);
-  assert.equal(slotAddr(5) + 0x29000 - 1, 0x1b5fff);
-  assert.equal(pixelsAddr(2), 0x112000 + 0x1000);
+  assert.equal(slotAddr(1), 0x186000);
+  assert.equal(slotAddr(3), 0x1d8000);
+  assert.equal(slotAddr(3) + 0x29000 - 1, 0x200fff); // inside the SSTV region (to 0x20FFFF)
+  assert.equal(pixelsAddr(2), 0x1af000 + 0x1000);
 });
 
 test("sstv: the header both ways, its bytes where SSTV-4.3 puts them", () => {
@@ -75,12 +76,12 @@ test("sstv: the write: 41 erases, the pixels in aligned 64-byte programs, the he
   const px = new Uint8Array(320 * 256 * 2).fill(0xff);
   px.fill(0x12, 0, 640); // the first row only; the rest stays erased and isn't sent
   const h = sendHeader("test.png", 0);
-  const { body, header } = writePlan(1, px, h);
+  const { body, header } = writePlan(0, px, h);
   const erases = body.filter((o) => o.what === "erase");
   assert.equal(erases.length, 41);
-  assert.equal(erases[0].addr, slotAddr(1));
-  assert.equal(erases[40].addr, slotAddr(1) + 40 * 4096);
-  assert.deepEqual([...erases[0].payload], [0, 0x00, 0x90, 0x0e, 0x00]);
+  assert.equal(erases[0].addr, slotAddr(0));
+  assert.equal(erases[40].addr, slotAddr(0) + 40 * 4096);
+  assert.deepEqual([...erases[0].payload], [0, 0x00, 0xd0, 0x15, 0x00]);
   const progs = body.filter((o) => o.what === "program");
   assert.equal(progs.length, 10);
   for (const p of progs) {
@@ -88,10 +89,10 @@ test("sstv: the write: 41 erases, the pixels in aligned 64-byte programs, the he
     assert.equal(p.addr % 64, 0);
     assert.equal(p.payload.length, 5 + 64);
   }
-  assert.equal(progs[0].addr, pixelsAddr(1));
+  assert.equal(progs[0].addr, pixelsAddr(0));
   assert.equal(header.length, 1);
-  assert.equal(header[0].addr, slotAddr(1));
+  assert.equal(header[0].addr, slotAddr(0));
   assert.deepEqual(decodeHeader(header[0].payload.subarray(5)), h);
-  assert.throws(() => writePlan(2, px, h));
+  assert.throws(() => writePlan(1, px, h)); // a received slot
   assert.throws(() => writePlan(0, px.subarray(1), h));
 });

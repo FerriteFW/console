@@ -1,6 +1,6 @@
 <script lang="ts">
-  // SSTV pictures (ferrite manual chapter 27a, SSTV-4): two pictures to send, picked here, cropped to 320 x 256 and
-  // written to the radio over the cable; the four newest received, read from the radio (either link) and saved as PNG.
+  // SSTV pictures (ferrite manual chapter 27a, SSTV-4): a picture to send, picked here, cropped to 320 x 256 and
+  // written to the radio over the cable; the three newest received, read from the radio (either link) and saved as PNG.
   import { canWrite, pictures, type Slot } from "../pictures.svelte";
   import { radio } from "../radio.svelte";
   import { saveBlob } from "../codeplug.svelte";
@@ -16,7 +16,7 @@
     (pictures.slots ?? []).filter((s) => RECEIVED_SLOTS.includes(s.k) && s.header).sort((a, b) => b.header!.seq - a.header!.seq),
   );
 
-  // a picture picked for slot 0 or 1, not written yet: its pixels as the radio will hold them
+  // a picture picked for slot 0, not written yet: its pixels as the radio will hold them
   let picked = $state<Record<number, { px: Uint8Array; name: string } | undefined>>({});
   let pickError = $state("");
 
@@ -99,7 +99,7 @@
   <section aria-label="Pictures to send">
     <h3>To send</h3>
     <p class="sub small">
-      Two pictures the radio can send (MENU 0 3 7). A picture is cropped to fill 320 x 256. Writing goes over the cable only.
+      The picture the radio can send (MENU 0 3 7), besides its test card. A picture is cropped to fill 320 x 256. Writing goes over the cable only.
     </p>
     {#if !writable}<div class="pg-banner warn" data-k="needs-version">Writing pictures needs Ferrite {PICTURES_FROM} or newer.</div>{/if}
     <div class="grid">

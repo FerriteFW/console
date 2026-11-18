@@ -1,5 +1,5 @@
-// SSTV pictures (ferrite manual chapter 27a, SSTV-4): the radio's six picture slots read raw (`DATA_READ`, LINK-59,
-// either link) and a picture to send written into slot 0 or 1 (`DATA_WRITE`, LINK-60: the cable only), each checked
+// SSTV pictures (ferrite manual chapter 27a, SSTV-4): the radio's four picture slots read raw (`DATA_READ`, LINK-59,
+// either link) and a picture to send written into slot 0 (`DATA_WRITE`, LINK-60: the cable only), each checked
 // by its CRC. The slots' format and the write's order: sstv.ts.
 import { P } from "./core";
 import type { Link } from "./link";
