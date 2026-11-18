@@ -5,6 +5,7 @@ import { connect, disconnect, expect, expectScreen, openConsole, state, test } f
 test.afterEach(async ({ page }) => disconnect(page));
 
 test("reconnect: a dropped link comes back by itself, Live View reads again, Listen stays off", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("ferrite-console-cable-high-speed", "on")); // Listen needs 230400 (decision 408)
   await openConsole(page, "live");
   await connect(page);
   await page.getByRole("button", { name: /^Listen/ }).click();
@@ -19,6 +20,7 @@ test("reconnect: a dropped link comes back by itself, Live View reads again, Lis
 });
 
 test("reconnect: Stop ends the retrying and leaves Console disconnected", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("ferrite-console-cable-high-speed", "on")); // Listen needs 230400 (decision 408)
   await openConsole(page, "live");
   await connect(page);
   // A reopen that always fails (the cable not back): the retrying stays up until Stop.

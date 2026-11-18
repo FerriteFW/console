@@ -1,7 +1,7 @@
 // UPD-25, UPD-26 (ferrite decision 394): newer releases from the internet, so a new Ferrite needs no new Console and
 // Console can update itself. On since 0.9.0, the first public release (written Nov 13, 2026, and off until then).
 // With UPDATES_ON false nothing is fetched and nothing shows.
-import { P } from "./core";
+import { loadCore, P } from "./core";
 import { isTauri } from "./transport/native";
 import { olderThan } from "./version";
 import { isFeed, newerIn, type Feed } from "./feed";
@@ -36,6 +36,7 @@ export function feed(): Promise<Feed | null> {
 
 /** UPD-25: the latest Ferrite from the feed when it is newer than `than` (the bundled release's version, or ""). */
 export async function newerFirmware(than: string) {
+  await loadCore(); // P comes with the core: the check at start can run before it loads (a Firefox report, Nov 17, 2026)
   return newerIn(await feed(), than, P.protocol);
 }
 

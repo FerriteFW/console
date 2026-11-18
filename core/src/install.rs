@@ -303,7 +303,7 @@ pub fn icons_plausible(b: &[u8]) -> bool {
     if b.len() != ICONS_LEN || b.iter().all(|&x| x == 0xFF) {
         return false;
     }
-    let px: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let px: Vec<u16> = b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
     let same = px.windows(2).filter(|w| w[0] == w[1] && w[0] != 0xFFFF).count();
     same * 20 > px.len()
 }
@@ -1505,6 +1505,14 @@ mod tests {
         assert!(r[ICONS_OFF..ICONS_OFF + ICONS_LEN].iter().all(|&b| b == 0xFF));
         assert_eq!(ICONS_OFF, 0x7D000);
         assert_eq!(ICONS_LEN, 161_472);
+        // Radtel's V0.30 ICON image (659.6 KB, Nov 17, 2026) covers the tiles' place with its own: sent as it is,
+        // its tiles kept over the backup's (BACKUP-12.3, the Back to stock page's note).
+        let mut own = vec![0x22u8; 675_404];
+        let mut other = tiles.clone();
+        other.iter_mut().step_by(2).for_each(|b| *b ^= 0x10);
+        own[ICONS_OFF..ICONS_OFF + ICONS_LEN].copy_from_slice(&other);
+        let r = stock_restore_image(&own, None, Some(&tiles));
+        assert_eq!(&r[ICONS_OFF..ICONS_OFF + ICONS_LEN], &other[..]);
     }
 
     #[test]

@@ -4,7 +4,8 @@
 // carries the APRS events the APRS pages ask for.
 import { debugLog } from "./debuglog";
 import { LiveClient, loadCore, P, parseEvent, parseUi, stateMerge, stateParse, tunePayload, type AprsEvent, type Hello, type Info, type RadioNow, type TuneOp, type Ui } from "./core";
-import { IS_WINDOWS, Link, RadioError, TimeoutError } from "./link";
+import { Link, RadioError, TimeoutError } from "./link";
+import { cablePrefs } from "./cablePrefs.svelte";
 import { mismatch, type Mismatch } from "./mismatch.ts";
 import { provider, type Transport, type TransportKind } from "./transport";
 import { BridgeTransport } from "./transport/bridge";
@@ -202,8 +203,31 @@ class Radio {
    * Firmware Update takes the cable from a connected session (or a radio on another protocol: decision 385): polling
    * stops; the link stays usable for REBOOT. The bar shows "Updating firmware" until `handBack` or `disconnect`.
    */
+  /**
+   * SAFE-8.2: the radio's last start followed a crash (a fault, with its address) or a hang, from the readback's
+   * `restart` line; null when it didn't. Shown on About and in the debug info, so a crash on the radio comes back
+   * with its address (Nov 17, 2026: crashes on opening Nearby from V/M's hold menu). Kept for the session.
+   */
+  crash = $state<{ after: "fault" | "hang"; pc: string; inARow: number; firmware: string; seen: string } | null>(null);
+
+  private setUi(u: Ui | null) {
+    this.ui = u;
+    const line = u?.lines.find((l) => l.startsWith("restart "));
+    const m = line?.match(/after=(fault|hang)(?: pc=(0x[0-9a-fA-F]+))?(?: in_a_row=(\d+))?/);
+    if (!m) return;
+    const pc = m[2] ?? "";
+    if (this.crash && this.crash.after === m[1] && this.crash.pc === pc) return;
+    const firmware = `${this.info?.firmware ?? this.hello?.firmware ?? "?"} ${this.info?.build?.name ?? ""}`.trim();
+    this.crash = { after: m[1] as "fault" | "hang", pc, inARow: Number(m[3] ?? 1), firmware, seen: new Date().toISOString() };
+    debugLog(`radio: restarted after a ${m[1]}${pc ? ` at pc=${pc}` : ""} (${m[3] ?? 1} in a row), firmware ${firmware}`);
+  }
+
+  /** Called before an update or a data move takes the cable (Listen stops: listen.svelte.ts). */
+  beforeTake: (() => void)[] = [];
+
   takeForUpdate(): { t: Transport; link: Link } | null {
     if ((this.phase !== "connected" && this.phase !== "outdated") || !this.link || !this.t || this.kind !== "cable") return null;
+    for (const f of this.beforeTake) f();
     const gen = ++this.generation; // the poll loop stops
     this.wake?.();
     this.phase = "updating";
@@ -277,7 +301,11 @@ class Radio {
       this.kind = t.kind;
       this.label = t.label;
       this.reopen = t.reopen ? () => t.reopen!() : null;
-      const link = new Link(t);
+      const link = new Link(t); // decision 408: no compression on the cable (Link's own default)
+      link.onRate = (rate) => {
+        this.baud = rate;
+        this.note = `${rate} baud (the radio went back to it)`;
+      };
       this.link = link;
       t.onClose = (why) => {
         if (gen === this.generation) this.drop(why);
@@ -299,6 +327,33 @@ class Radio {
     } catch (e) {
       debugLog(`connect: failed: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
       if (gen === this.generation) await this.fail(e, quiet);
+    }
+  }
+
+  /** LINK-13.3: the cable raised to 230400 (High speed); the rate in use and the bar's note. */
+  private async raise(link: Link) {
+    try {
+      const rate = await link.raiseBaud();
+      this.baud = rate;
+      this.note = rate > 115200 ? `${rate} baud` : "115200 baud (the radio kept its rate)";
+    } catch (e) {
+      this.baud = this.t?.baud ?? null;
+      this.note = `115200 baud (${(e as Error).message})`;
+    }
+    debugLog(`cable: high speed on, ${this.note}`);
+  }
+
+  /** Live View's High speed (decision 408): kept for the next connect, and the connected cable switched now. */
+  async setHighSpeed(on: boolean) {
+    cablePrefs.highSpeed = on;
+    const link = this.link;
+    if (!link || this.phase !== "connected" || !this.t?.setBaud) return;
+    if (on) await this.raise(link);
+    else {
+      await link.lowerBaud().catch(() => {});
+      this.baud = this.t.baud ?? 115200;
+      this.note = "115200 baud";
+      debugLog("cable: high speed off, 115200 baud");
     }
   }
 
@@ -327,14 +382,15 @@ class Radio {
       if (rate) this.note = rate > 9600 ? "Bluetooth at 115200" : "Bluetooth at 9600";
     }
     if (this.t?.setBaud) {
-      // LINK-13.3: the cable at 230400, else 115200 (ferrite decision 266); Windows stays at 115200.
-      try {
-        const rate = await link.raiseBaud();
-        this.baud = rate;
-        this.note = rate > 115200 ? `${rate} baud` : IS_WINDOWS ? "115200 baud" : "115200 baud (the radio kept its rate)";
-      } catch (e) {
-        this.baud = this.t.baud ?? null;
-        this.note = `115200 baud (${(e as Error).message})`;
+      // LINK-13.3, decision 408: 115200 unless High speed is on (Live View), then 230400.
+      this.baud = this.t.baud ?? 115200;
+      this.note = "115200 baud";
+      if (cablePrefs.highSpeed) await this.raise(link);
+      // High speed changed while this connect ran (setHighSpeed waits for "connected"): as it says now
+      if (cablePrefs.highSpeed !== (this.baud ?? 115200) > 115200) {
+        if (cablePrefs.highSpeed) await this.raise(link);
+        else await link.lowerBaud().catch(() => {});
+        this.baud = this.t?.baud ?? this.baud;
       }
     }
     if (gen !== this.generation) return;
@@ -394,7 +450,7 @@ class Radio {
       this.liveUpdates = this.live_.updates();
       this.liveResyncs = this.live_.resyncs();
       if (r === 0) {
-        this.ui = parseUi(this.live_.text());
+        this.setUi(parseUi(this.live_.text()));
         this.lastUiAt = now;
         this.fails = 0;
         const span = Math.max(1000, now - this.evLog[0][0]);
@@ -547,7 +603,7 @@ class Radio {
         try {
           const text = await this.link.uiText();
           if (gen !== this.generation) return;
-          this.ui = parseUi(text);
+          this.setUi(parseUi(text));
           this.uiMs = Math.round(performance.now() - t0);
           this.fails = 0;
         } catch (e) {

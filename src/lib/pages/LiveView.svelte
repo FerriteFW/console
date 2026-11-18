@@ -10,6 +10,7 @@
   import KeyboardHelp from "../components/KeyboardHelp.svelte";
   import LivePanel from "../components/LivePanel.svelte";
   import { radio } from "../radio.svelte";
+  import { cablePrefs } from "../cablePrefs.svelte";
   import { listen } from "../listen.svelte";
   import { presser, turn } from "../press.svelte";
   // The wheel over the screen alone (no keypad drawn) turns the knob too, as over the drawn radio.
@@ -208,7 +209,7 @@
     listen.apply();
   });
   const listenTitle = $derived(
-    !connected ? "Connect to listen" : radio.kind !== "cable" ? "Receive audio needs the cable: Bluetooth is too slow for it" : !listen.available ? "This firmware doesn't send receive audio" : listen.on ? "Stop listening" : "Hear what the radio receives, on this computer (12 kHz: a slot while its squelch is open, else the broadcast or HF)",
+    !connected ? "Connect to listen" : radio.kind !== "cable" ? "Receive audio needs the cable: Bluetooth is too slow for it" : !listen.fastEnough ? "Listening needs High speed (230400 baud): tick it on the right" : !listen.available ? "This firmware doesn't send receive audio" : listen.on ? "Stop listening" : "Hear what the radio receives, on this computer (12 kHz: a slot while its squelch is open, else the broadcast or HF)",
   );
 </script>
 
@@ -239,6 +240,15 @@
     {#if recentTunes.note}<span class="meta ok" aria-live="polite">{recentTunes.note}</span>{/if}
     <label><input type="checkbox" bind:checked={showKeypad} /> Keypad</label>
     {#if roomy}<label title="Slots, stations heard and the radio's state beside the radio"><input type="checkbox" bind:checked={panelOn} /> Panel</label>{/if}
+    {#if radio.kind === "cable"}
+      <label title="The cable at 230400 baud instead of 115200: faster reads, writes and backups. Off is safer: some cables and computers lose bytes at 230400."
+        ><input type="checkbox" checked={cablePrefs.highSpeed} onchange={async (e) => {
+          const on = (e.currentTarget as HTMLInputElement).checked;
+          if (!on && listen.on) await listen.stop(); // the audio needs 230400
+          await radio.setHighSpeed(on);
+        }} /> High speed</label
+      >
+    {/if}
     <span class="spacer"></span>
     {#if shotNote}<span class="meta" aria-live="polite">{shotNote}</span>{/if}
     <span class="group">

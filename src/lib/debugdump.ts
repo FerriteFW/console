@@ -29,6 +29,8 @@ export function debugText(): string {
     `phase ${radio.phase}, ${radio.kind ?? "none"} ${radio.label}, baud ${radio.baud ?? "-"}, note "${radio.note}", error "${radio.error}", fails ${radio.fails}`,
     `hello: ${json(radio.hello)}`,
     `info: ${json(radio.info)}`,
+    `radio crash (SAFE-8.2): ${radio.crash ? json(radio.crash) : "none seen this session"}`,
+    `readback restart line: ${radio.ui?.lines.find((l) => l.startsWith("restart ")) ?? "none"}`,
     "",
     "== channels",
     `radio as read: ${c.base ? `${c.base.channels.length} channels, ${c.base.zones.length} zones` : "not read"}; table: ${c.table.channels.length} channels, ${c.table.zones.length} zones; unwritten changes ${c.pending}`,

@@ -255,12 +255,29 @@ test("install: a copy that passes every chunk but not the radio's CRC is read ag
   writeFileSync(flashPath, chip());
   setMode({ flash: flashPath, wrong_first_dump: true });
   await serveRelease(page);
+  // High speed on (decision 408): the first read at 230400, the second at 115200.
+  await page.addInitScript(() => localStorage.setItem("ferrite-console-cable-high-speed", "on"));
   await open(page);
   await backUp(page);
   const d = dumpResult() as { z: boolean; rates: number[] };
   expect(d.z).toBe(true);
   expect(d.rates).toEqual([230400, 115200]);
   await expect(wizard(page).getByText(/read twice/)).toHaveCount(0);
+});
+
+test("install: a reader that answers \"?\" to the icons and nothing to fdump: the debug log says what it heard", async ({ page }) => {
+  // Two Windows debug logs (Nov 17, 2026): icons "not read" in 0.2 s, then "no answer to fdump"; the log couldn't tell
+  // a "?" from silence. Now each failed step logs the radio's last words.
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, chip());
+  setMode({ flash: flashPath, garble_long: true });
+  await serveRelease(page);
+  await open(page);
+  await wizard(page).getByRole("button", { name: "Back up the radio" }).click();
+  await expect(wizard(page).getByText(/no answer to fdump/)).toBeVisible({ timeout: 90_000 });
+  const log = (await page.evaluate(() => (window as any).ferrite.debugLines())).join("\n");
+  expect(log).toMatch(/backup: icons reply ended, \d+ chars: first .*\?  \(help\)/);
+  expect(log).toMatch(/backup: fdumpz at 115200: no answer; heard "/);
 });
 
 test("install: a pending phone update is refused after the backup; a bad checksum isn't used", async ({ page }) => {
@@ -361,6 +378,22 @@ test("menu icons: the backup reads stock's tiles and keeps them for back to stoc
 
 });
 
+test("menu icons: the marker's `dump: end` in a later read doesn't end the icon read", async ({ page }) => {
+  // Two Windows logs and a Linux one (Nov 17, 2026): icons "not read" in 0.2 s, then "no answer to fdump". The marker's
+  // reply came in two reads; its late `dump: end` finished the icon read at once, while the radio was still sending
+  // the icons (35 s) and couldn't hear fdumpz.
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, chip(false, 4));
+  const icons = tiles();
+  const iconsPath = join(dir(), "icons.bin");
+  writeFileSync(iconsPath, icons);
+  setMode({ flash: flashPath, icons: iconsPath, split_marker: true });
+  await serveRelease(page);
+  await open(page);
+  await backUp(page);
+  await expect(wizard(page).locator('[data-k="icons"]')).toContainText("stock's, kept with this backup");
+});
+
 test("menu icons: back to stock puts an icons file's tiles back at 0x08080000", async ({ page }) => {
   const flash = chip(false, 4);
   const flashPath = join(dir(), "flash.bin");
@@ -443,6 +476,7 @@ test("menu icons: a file of them is taken for back to stock; a file that isn't t
   await open(page, false, "restore");
   const back = card(page, "Back to stock");
   await expect(back.locator('[data-k="restore-icons"]')).toContainText("the tiles stay blank on stock");
+  await expect(back.locator('[data-k="restore-icons-v030"]')).toContainText("RT_950Pro_ICON_V0.30_261117.BTF"); // Radtel's file carries them
   await page.getByLabel("Menu icons file").setInputFiles({ name: "code.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(161_472, 0x5a).map((x, i) => (x + i * 7) & 0xff) });
   await expect(back).toContainText("code.bin isn't stock's menu icons");
   await page.getByLabel("Menu icons file").setInputFiles({ name: "rt950pro-menu-icons-X.bin", mimeType: "application/octet-stream", buffer: tiles() });

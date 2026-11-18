@@ -228,6 +228,9 @@ def zcode(chunk):
     return bytes([Z_DEFLATE]) + d if len(d) < len(chunk) - 1 else bytes([Z_RAW]) + chunk
 
 
+PAUSE = b"\x00PAUSE\x00"  # the bridge sends what comes before it, waits 0.3 s, then the rest
+
+
 class FakeReader:
     """hwtest's console and its fdump, fed bytes (no threads, no rates: the bridge's TCP has none); with `z` (the
     Rust reader's image), fdumpz too (BACKUP-9.6), unless MODE.json says "no_fdumpz" (answered `?`, as hwtest).
@@ -288,19 +291,27 @@ class FakeReader:
         if w[0] == "mdump" and len(w) >= 3:
             addr, n = int(w[1], 0), int(w[2], 0)
             icons = read_mode(self.mode_path).get("icons")
+            if (addr, n) == (0x08080000, 161472) and self.mode.get("garble_long"):
+                # Nov 17, 2026's Windows logs, as read: a long command arrives garbled and is answered "?"
+                return self.console("?  (help)\n")
             if (addr, n) == (0x08080000, 161472) and icons:
                 # BACKUP-12.3: stock's menu icons, from MODE.json's "icons" file, 32 bytes a line as the reader
                 b = open(icons, "rb").read()
                 out = "".join(f"{addr + i:X}:{b[i:i + 32].hex().upper()}*{sum(b[i:i + 32]) & 0xFF:02X}\n" for i in range(0, n, 32))
-                return self.console(out + "dump: end\n")
+                # "split_marker": the icons come slowly too, as a radio's 35 s (here one pause)
+                return (PAUSE if self.mode.get("split_marker") else b"") + self.console(out + "dump: end\n")
             if (addr, n) != (0x080F0000, 16):
                 return self.console("mdump: the fake knows 0x080F0000 16 only\n")
             m = bytes.fromhex(read_mode(self.mode_path).get("marker", "FF" * 16))
-            return self.console(f"80F0000:{m.hex().upper()}*{sum(m) & 0xFF:02X}\ndump: end\n")
+            line = self.console(f"80F0000:{m.hex().upper()}*{sum(m) & 0xFF:02X}\n")
+            # "split_marker": `dump: end` comes in a later read than the line (the Windows and Linux reports of Nov 17, 2026)
+            return line + (PAUSE if self.mode.get("split_marker") else b"") + self.console("dump: end\n")
         if w[0] == "reboot":
             self.log("fakereader: reboot into the bootloader")
             self.next = FakeBoot({"deaf_ms": 300, **read_mode(self.mode_path)}, result_path(self.mode_path), self.log)
             return b""
+        if w[0] in ("fdump", "fdumpz") and len(w) >= 3 and self.mode.get("garble_long"):
+            return b""  # its line end lost: the reader waits for the rest, and never answers
         if w[0] in ("fdump", "fdumpz") and len(w) >= 3:
             z = w[0] == "fdumpz"
             if z and not self.z:

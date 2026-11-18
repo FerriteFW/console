@@ -63,6 +63,11 @@
       </span>
     </label>
     {#if I.restoreIconsError}<p class="warn">{I.restoreIconsError}</p>{/if}
+    <!-- BACKUP-12.3: Radtel's V0.30 ICON image is long enough to cover the tiles' place, so it is sent as it is with
+         its own tiles (Nov 17, 2026). No link: Radtel's file, from Radtel or the dealer. -->
+    <p class="sub" data-k="restore-icons-v030">
+      No icons file? Radtel's V0.30 ICON firmware (<code>RT_950Pro_ICON_V0.30_261117.BTF</code>, from Radtel or your dealer) carries the menu icons itself: choose it as the stock firmware above and the tiles come back with it.
+    </p>
     {#if I.restoreBackup && I.restoreBackupCheck && !I.restoreBackupCheck.problems.filter((p) => !p.startsWith("a stock phone")).length}
       <p class="sub" data-k="restore-id">
         {I.restoreBackupUid ? `Backup of radio ID ${I.restoreBackupUid}.` : "Console doesn't know which radio this backup is from: the radio's ID is asked for first."}

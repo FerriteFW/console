@@ -16,6 +16,7 @@ import { debugLog } from "./debuglog";
 import { saveBlob } from "./codeplug.svelte";
 import { erasedCrc, dataCrc32, loadCore, MigrateCopy, MigratePlan, migrateRegions, P, type MigrateSummary } from "./core";
 import { Eta } from "./eta";
+import { crc32 } from "./zip";
 import { Link, TimeoutError } from "./link";
 import { radio } from "./radio.svelte";
 import { isTauri } from "./transport/native";
@@ -41,6 +42,40 @@ type Kept = {
 /** LINK-62 (decision 339): the chip's layout while its data is half moved (a raw write this power-on, or a move cut
  *  before its stamp): only a copy of the old data can finish it. */
 export const LAYOUT_MOVING = 255;
+
+/** The migration mark's records (ferrite-store `store`, LINK-62): 16 bytes each at 0x00E000, "FRMV", the layout the
+ *  raw writes began from (u16), this layout (u16), 4 bytes 0xFF, a CRC-32 over the first 12. */
+const MARK_AT = 0x00e000;
+const MARK_MAGIC = 0x564d5246;
+
+/**
+ * The layout the chip's data was in when the raw writes behind a "half moved" radio (255) began, from its migration
+ * mark; null when there is no mark (or it doesn't read). The firmware's own layout means no data was moved: the
+ * writes were an update's SPI parts (the store marks those too, decision 339), cut before their stamp, so writing the
+ * parts again (their stamp clears the mark) finishes it with no copy of the data (an Intel Mac's update, Nov 17, 2026).
+ */
+export async function markFrom(link: Link): Promise<number | null> {
+  for (let at = MARK_AT; at < MARK_AT + 0x1000; at += 224) {
+    const p = new Uint8Array(6);
+    const v = new DataView(p.buffer);
+    p[0] = 0;
+    v.setUint32(1, at, true);
+    p[5] = Math.min(224, MARK_AT + 0x1000 - at); // not into calibration (0xF000), which the radio refuses
+    let b: Uint8Array;
+    try {
+      b = await link.data(P.msg.DATA_READ, p);
+    } catch {
+      return null;
+    }
+    const d = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    for (let o = 0; o + 16 <= b.length; o += 16) {
+      const rec = b.subarray(o, o + 16);
+      if (rec.every((x) => x === 0xff)) return null; // past the last record
+      if (d.getUint32(o, true) === MARK_MAGIC && d.getUint32(o + 12, true) === crc32(rec.subarray(0, 12))) return d.getUint16(o + 4, true);
+    }
+  }
+  return null;
+}
 
 /** After the stamp: the radio restarts and mounts the new layout; Console asks for HELLO until this runs out. */
 const RESTART_WAIT_MS = 40_000;
@@ -187,6 +222,12 @@ class Migrate {
         return v;
       };
       if (l?.chip === LAYOUT_MOVING && !resume && !this.picked) {
+        const began = await markFrom(link);
+        debugLog(`data move: chip 255, the mark says it began from layout ${began ?? "?"}`);
+        if (began !== null && began === l.firmware)
+          throw new Error(
+            "Nothing was moved: only the update's SPI parts were cut part way (your channels and settings are as they were). Install the same update again (Firmware › Install again…): writing its parts finishes it.",
+          );
         throw new Error(
           "The radio's data was cut part way through a move, and this computer holds no copy of it. Choose Use a saved backup… (the file saved when the update began, or from the computer that started it) to finish it.",
         );

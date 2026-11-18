@@ -86,7 +86,13 @@ class Listen {
   /** Whether this connection can listen: the cable, a radio that offers `AUDIO`. */
   get available(): boolean {
     const l = radio.connectedLink;
-    return !!l && radio.kind === "cable" && (l.caps & P.caps.AUDIO) !== 0;
+    return !!l && radio.kind === "cable" && (l.caps & P.caps.AUDIO) !== 0 && this.fastEnough;
+  }
+
+  /** The audio (about 12.6 KB/s while something is heard, LINK-13.4) needs 230400: 115200 carries 11.5 KB/s, and
+   *  the answers starved behind it (the serial-comms review, Nov 17, with decision 408's 115200). */
+  get fastEnough(): boolean {
+    return (radio.baud ?? 115200) > 115200;
   }
 
   async start() {
@@ -131,6 +137,9 @@ class Listen {
   /** Stops listening: the radio told when still connected, the audio closed. */
   async stop() {
     const link = this.link;
+    // The radio stops sending first, on any link still open: an update or a data move takes this link over (its
+    // requests queue behind this one), and the audio went on through it (the serial-comms review, Nov 17).
+    const stopped = link && link.isOpen ? link.ask(P.msg.AUDIO, new Uint8Array([0])).catch(() => {}) : null;
     if (this.recorder) void this.stopRecording(); // what was recorded is saved, not lost
     this.on = false;
     this.slot = "";
@@ -145,7 +154,7 @@ class Listen {
     const ctx = this.ctx;
     this.ctx = null;
     await ctx?.close().catch(() => {});
-    if (link && radio.connectedLink === link) await link.ask(P.msg.AUDIO, new Uint8Array([0])).catch(() => {});
+    await stopped;
   }
 
   /** Each second while on: the renewal every RENEW_MS; and when nothing at all has come for SILENT_MS, `AUDIO` 1
@@ -153,6 +162,7 @@ class Listen {
   private async tick() {
     const link = this.link;
     if (!link || radio.connectedLink !== link) return void this.stop();
+    if (!this.fastEnough) return this.stopped("Listen stopped: the cable went back to 115200 baud"); // LINK-11.1
     const now = performance.now();
     if (now - this.anyAt >= SILENT_MS) {
       if (this.retried) return this.stopped("Listen stopped: the radio isn't sending audio");
@@ -255,3 +265,8 @@ class Listen {
 }
 
 export const listen = new Listen();
+
+// An update or a data move takes the cable: Listen stops first (radio.svelte.ts takeForUpdate).
+radio.beforeTake.push(() => {
+  if (listen.on || listen.starting) void listen.stop();
+});

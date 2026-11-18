@@ -44,3 +44,25 @@ test("debug info: the previous session's log survives a restart", async ({ page 
   expect(prev).toMatch(/link HELLO #\d+ \d+ B: status 0 in \d+ ms/);
   expect(now).not.toMatch(/link HELLO/);
 });
+
+test("radio crash: the readback's restart line shows on About and goes in the debug info (SAFE-8.2)", async ({ page }) => {
+  await openConsole(page, "live");
+  await connect(page);
+  await expect.poll(() => page.evaluate(() => !!(window as any).ferrite.radio.ui)).toBe(true);
+  // The simulator doesn't crash: its readback, with the line a radio sends after a fault.
+  await page.evaluate(() => {
+    const r = (window as any).ferrite.radio;
+    r.setUi({ ...r.ui, lines: [...r.ui.lines, "restart after=fault pc=0x8023abc in_a_row=2"] });
+  });
+  await expect(page.locator('[data-k="radio-crash"]')).toHaveCount(0); // not on the main pages
+  await page.goto(page.url().replace(/#.*$/, "#/about"));
+  const note = page.locator('[data-k="radio-crash"]');
+  await expect(note).toContainText("crash at 0x8023abc (2 in a row");
+  const dl = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save debug info…" }).click();
+  const path = join(shotsDir(), `debug-crash-${Date.now()}.txt`);
+  await (await dl).saveAs(path);
+  const text = readFileSync(path, "utf8");
+  expect(text).toMatch(/radio crash \(SAFE-8\.2\): \{"after":"fault","pc":"0x8023abc","inARow":2/);
+  expect(text).toMatch(/radio: restarted after a fault at pc=0x8023abc \(2 in a row\)/);
+});

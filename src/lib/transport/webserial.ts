@@ -1,6 +1,9 @@
 // The programming cable through Chrome's Web Serial: 115200 8N1, raised with BAUD after HELLO (LINK-11, LINK-13.3).
 import type { Transport } from "./types";
 
+/** Web Serial's read errors after which the port gives a new stream (the spec's non-fatal ones). */
+const NON_FATAL = new Set(["BufferOverrunError", "FramingError", "ParityError", "BreakError"]);
+
 // Minimal Web Serial types (not in TypeScript's DOM library).
 type SerialPortLike = {
   open(o: { baudRate: number; dataBits?: number; stopBits?: number; parity?: string; bufferSize?: number }): Promise<void>;
@@ -30,8 +33,14 @@ export class WebSerialTransport implements Transport {
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private loop: Promise<void> = Promise.resolve();
   private closing = false;
+  /** Writes one after another: a stream has one writer at a time, and the second of two windowed WRITE_MANY frames
+   *  sent back to back found it locked and was never sent (issue #33: every write past 5 channels lost a frame). */
+  private queue: Promise<void> = Promise.resolve();
+  private port: SerialPortLike;
 
-  private constructor(private port: SerialPortLike) {}
+  private constructor(port: SerialPortLike) {
+    this.port = port;
+  }
 
   static async request(): Promise<WebSerialTransport> {
     const serial = webSerial();
@@ -75,21 +84,43 @@ export class WebSerialTransport implements Transport {
   }
 
   private async openAt(rate: number) {
-    await this.port.open({ baudRate: rate, dataBits: 8, stopBits: 1, parity: "none", bufferSize: 8192 });
+    // 64 KB: a JavaScript stall (inflating, a background tab) at 230400 overran 8 KB in about 350 ms
+    await this.port.open({ baudRate: rate, dataBits: 8, stopBits: 1, parity: "none", bufferSize: 65536 });
     this.baud = rate;
-    this.reader = this.port.readable!.getReader();
-    const reader = this.reader;
+    const port = this.port;
     this.loop = (async () => {
-      try {
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value && value.length) this.onData(value);
+      // A framing, parity, break or overrun error ends one stream only (Web Serial): the port hands out another, and
+      // reading goes on (a byte garbled at a rate switch ended the whole session; the serial-comms review, Nov 17).
+      let errors = 0;
+      let since = 0;
+      while (!this.closing) {
+        const readable = port.readable;
+        if (!readable) {
+          if (!this.closing) this.onClose("The cable stopped: the port gives no more data.");
+          return;
         }
-      } catch (e) {
-        if (!this.closing) this.onClose(`The cable stopped: ${(e as Error).message}`);
-      } finally {
-        reader.releaseLock();
+        const reader = readable.getReader();
+        this.reader = reader;
+        try {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) return; // cancelled (shut)
+            if (value && value.length) this.onData(value);
+          }
+        } catch (e) {
+          const name = (e as { name?: string })?.name ?? "";
+          // a line held in break, or a lasting rate mismatch, errors without end: give up after 20 in a second
+          const now = Date.now();
+          if (now - since > 1000) [since, errors] = [now, 0];
+          if (!this.closing && NON_FATAL.has(name) && ++errors <= 20) {
+            void import("../debuglog").then((m) => m.debugLog(`cable: ${name} while reading: reading on`)).catch(() => {});
+            continue;
+          }
+          if (!this.closing) this.onClose(`The cable stopped: ${(e as Error).message}`);
+          return;
+        } finally {
+          reader.releaseLock();
+        }
       }
     })();
   }
@@ -104,13 +135,18 @@ export class WebSerialTransport implements Transport {
     await this.port.close();
   }
 
-  async write(bytes: Uint8Array) {
-    const w = this.port.writable!.getWriter();
-    try {
-      await w.write(bytes);
-    } finally {
-      w.releaseLock();
-    }
+  write(bytes: Uint8Array): Promise<void> {
+    const run = async () => {
+      const w = this.port.writable!.getWriter();
+      try {
+        await w.write(bytes);
+      } finally {
+        w.releaseLock();
+      }
+    };
+    const r = this.queue.then(run, run);
+    this.queue = r.catch(() => {}); // a failed write still rejects for its caller; the next one still goes
+    return r;
   }
 
   /** Closes and reopens the port at `rate` (Web Serial can't change a port's rate in place). */

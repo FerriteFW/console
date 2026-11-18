@@ -38,16 +38,18 @@ import { debugLog } from "./debuglog";
 
 /** A message type's name for the debug log ("WRITE_MANY"). */
 const msgName = (ty: number) => Object.entries(P.msg).find(([, v]) => v === ty)?.[0] ?? `0x${ty.toString(16)}`;
+/** Requests that may be sent twice: they read, or set what they set again (a lost answer's retry; BEGIN only says how
+ *  many records follow, before any has gone). */
+const twiceOk = (ty: number, payload: Uint8Array) =>
+  (ty !== P.msg.CLOCK || payload.length === 0) && // a CLOCK that sets the time goes once: again, it would be late
+  [P.msg.INFO, P.msg.UI, P.msg.STATE, P.msg.READ, P.msg.READ_MANY, P.msg.USED, P.msg.BEGIN, P.msg.LOG_READ, P.msg.HEARD, P.msg.MSGS, P.msg.CLOCK, P.msg.SUBSCRIBE, P.msg.DATA_READ].includes(ty);
 /** Asked every few hundred ms while Live View runs: logged only when they fail. */
 const quiet = (ty: number) => ty === P.msg.UI || ty === P.msg.STATE;
 
 export const CLIENT_NAME = "Ferrite Console";
 
-/** Windows (the app or a browser): its serial stack and Console struggle above 115200, so the cable stays there. */
-export const IS_WINDOWS = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
-
-/** The rates Console raises the cable to, best first (LINK-13.3); none on Windows, which stays at 115200. */
-export const cableFastRates = (): number[] => (IS_WINDOWS ? [] : P.timing.cable_fast_rates);
+/** The rates Console raises the cable to with High speed on, best first (LINK-13.3, decision 408). */
+export const cableFastRates = (): number[] => P.timing.cable_fast_rates;
 
 export class RadioError extends Error {
   constructor(
@@ -93,6 +95,10 @@ export class Link {
   private streamW: StreamWaiter | null = null;
   /** LINK-15.1: the module's `!!!!` answer to the speed unlock is dropped, not fed to the session. */
   private dropUnlock = false;
+  /** Whether to ask for compression (LINK-35.2). Off on the cable (decision 408): 230400 has room enough, and a lost
+   *  frame with compression on leaves the two ends' windows apart until a resync; Bluetooth's ~280 B/s needs it. */
+  compress = true;
+
   /** LINK-35.2: HELLO's capability byte (`P.caps`: compression granted, receive audio on this port, line commands). */
   caps = 0;
   /** HELLO's protocol: `P.protocol`, or the radio can only be updated (decision 385; see `current`). */
@@ -115,6 +121,9 @@ export class Link {
   onAudio: (payload: Uint8Array) => void = () => {};
 
   constructor(readonly t: Transport) {
+    // Decision 408: every link on the cable without compression (the Install page's and the restart probes' too:
+    // the serial-comms review, Nov 17); Bluetooth with it.
+    this.compress = t.kind !== "cable";
     t.onData = (bytes) => {
       if (this.closed) return;
       if (this.dropUnlock && bytes.length >= 4 && bytes[0] === 0x21 && bytes[1] === 0x21 && bytes[2] === 0x21 && bytes[3] === 0x21) {
@@ -168,6 +177,11 @@ export class Link {
     await this.t.write(this.session.take_cable(performance.now()));
   }
 
+  /** The link still takes requests (not closed). */
+  get isOpen(): boolean {
+    return !this.closed;
+  }
+
   /** No more requests; whatever is in flight fails with "not connected". */
   close() {
     this.closed = true;
@@ -199,8 +213,9 @@ export class Link {
     resync = true,
   ): Promise<{ status: number; rest: Uint8Array }> {
     if (this.closed) throw new Error("not connected");
-    const { HELLO, INFO, UI } = P.msg;
+    const { HELLO } = P.msg;
     let resynced = !resync;
+    let fellBack = false;
     for (;;) {
       const seq = this.session.next_seq();
       const got = new Promise<Answer | null>((resolve) => {
@@ -218,14 +233,23 @@ export class Link {
       }
       debugLog(`link ${msgName(ty)} #${seq} ${payload.length} B: NO ANSWER in ${timeoutMs} ms`);
       this.waiters.delete(seq);
-      // A frame sent just after a restart or 10 s of quiet can go to the terminal (TERM-2): a read-only request is
-      // sent once more after a 0x00. Never a KEY, CMD, MORE or write: those would act twice or skip a chunk.
+      // A frame sent just after a restart or 10 s of quiet can go to the terminal (TERM-2), or be lost: a request
+      // that changes nothing (or the same thing twice) is sent once more. Never a KEY, CMD, MORE, message, beacon,
+      // tune or write: those would act twice or skip a chunk (they resync, then fail: the serial-comms review, Nov 17).
       if (!resynced && this.caps & P.caps.LZ && ty !== HELLO) {
-        resynced = true; // LINK-51: the windows may be apart: start them over, then ask again
+        resynced = true; // LINK-51: the windows may be apart: start them over, then ask again (if it may go twice)
         await this.resync();
-        continue;
+        if (twiceOk(ty, payload)) continue;
+        throw new TimeoutError(`No answer from the radio in ${(timeoutMs / 1000).toFixed(0)} s.`);
       }
-      if (!resynced && (ty === HELLO || ty === INFO || ty === UI)) {
+      // LINK-11.1: at a raised rate a framing error puts the radio back to 115200; Console found out only when the
+      // poll gave up 20 s later, and every request meanwhile failed. Asked once: is the radio at 115200 now?
+      if (!fellBack && ty !== HELLO && (await this.fallBack())) {
+        fellBack = true;
+        if (twiceOk(ty, payload)) continue;
+        throw new TimeoutError(`No answer from the radio in ${(timeoutMs / 1000).toFixed(0)} s (it had gone back to 115200 baud).`);
+      }
+      if (!resynced && (ty === HELLO || twiceOk(ty, payload))) {
         resynced = true;
         await this.t.write(this.session.take_cable(performance.now()));
         continue;
@@ -265,7 +289,7 @@ export class Link {
    */
   async hello(): Promise<Hello> {
     return this.exclusive(async () => {
-      const h = this.noteHello(await this.okRaw(P.msg.HELLO, helloPayload(CLIENT_NAME)));
+      const h = this.noteHello(await this.okRaw(P.msg.HELLO, this.compress ? helloPayload(CLIENT_NAME) : helloPayloadPlain(CLIENT_NAME)));
       if (this.current) return h;
       return this.noteHello(await this.okRaw(P.msg.HELLO, helloPayloadPlain(CLIENT_NAME)));
     });
@@ -278,9 +302,8 @@ export class Link {
    */
   async helloPlain(): Promise<Hello> {
     return this.exclusive(async () => {
+      this.compress = false;
       const h = this.noteHello(await this.okRaw(P.msg.HELLO, helloPayloadPlain(CLIENT_NAME)));
-      this.caps &= ~P.caps.LZ;
-      this.session.set_lz(false);
       debugLog("link HELLO plain: compression off");
       return h;
     });
@@ -292,6 +315,7 @@ export class Link {
     if (!h) throw new Error("The radio's HELLO answer didn't parse.");
     this.protocol = h.protocol;
     this.caps = this.current ? h.caps : 0;
+    if (!this.compress) this.caps &= ~P.caps.LZ;
     this.layouts = h.layouts ?? null;
     this.session.set_lz((this.caps & P.caps.LZ) !== 0);
     return h;
@@ -300,7 +324,39 @@ export class Link {
   /** A HELLO after the first (a resync, a new rate): as the first, without compression from a radio on another
    *  protocol. */
   private helloAgain() {
-    return this.current ? helloPayload(CLIENT_NAME) : helloPayloadPlain(CLIENT_NAME);
+    return this.current && this.compress ? helloPayload(CLIENT_NAME) : helloPayloadPlain(CLIENT_NAME);
+  }
+
+  /** The rate in use changed by itself (LINK-11.1's fall-back): the bar says so. */
+  onRate: (rate: number) => void = () => {};
+
+  /**
+   * LINK-11.1: at a raised rate, a request unanswered: the radio may have gone back to 115200 (a framing error on its
+   * side). The PC goes there too and stays: probing at 115200 sends bytes a radio still at 230400 reads as a framing
+   * error, so after the probe it is at 115200 either way (switching back left the two ends apart: the second
+   * review, Nov 17). A HELLO there, a second after a pause if the first goes unanswered. True when one answers.
+   */
+  private async fallBack(): Promise<boolean> {
+    const t = this.t;
+    const was = t.baud ?? P.timing.cable_baud;
+    if (!t.setBaud || was <= P.timing.cable_baud || this.closed) return false;
+    await t.setBaud(P.timing.cable_baud);
+    this.onRate(P.timing.cable_baud);
+    debugLog(`link: no answer at ${was}: going to 115200 (LINK-11.1)`);
+    for (let tries = 0; tries < 2; tries++) {
+      try {
+        await t.write(this.session.take_cable(performance.now()));
+        await sleep(100); // the radio's link task sees its own fall-back before the HELLO comes
+        const { status, rest } = await this.askRaw(P.msg.HELLO, this.helloAgain(), 800, false);
+        if (status === 0) {
+          this.noteHello(rest);
+          return true;
+        }
+      } catch {
+        /* once more */
+      }
+    }
+    return false;
   }
 
   /** LINK-51: after a lost frame while compressed, a HELLO starts both ends' windows over. */
@@ -405,6 +461,10 @@ export class Link {
         } catch (e) {
           if (!(e instanceof TimeoutError)) throw e;
           if (++tries > 2) throw new TimeoutError(`${e.message} (${ty === P.msg.DATA_WRITE ? "DATA_WRITE" : "DATA_READ"} ${payload[0]} at 0x${new DataView(payload.buffer, payload.byteOffset).getUint32(1, true).toString(16)})`);
+          // LINK-51: a lost frame leaves the compression windows apart, and every try after it went unread (an Intel
+          // Mac's update, Nov 17, 2026: one lost DATA_WRITE, then the SPI parts failed): a HELLO first (one that times
+          // out too counts as this try, not the end of all of them).
+          await this.resync().catch(() => {});
           continue;
         }
         if (a.status === 0) return a.rest;
@@ -553,8 +613,10 @@ export class Link {
     const t = this.t;
     const { BAUD, HELLO } = P.msg;
     const { baud_switch_ms, cable_baud } = P.timing;
-    if (!t.setBaud || (t.baud ?? cable_baud) === cable_baud || this.closed) return Promise.resolve();
+    if (!t.setBaud || this.closed) return Promise.resolve();
     return this.exclusive(async () => {
+      // the rate checked here, behind whatever raise is still queued (an off right after an on left it at 230400)
+      if ((t.baud ?? cable_baud) === cable_baud) return;
       const { status } = await this.askRaw(BAUD, baudPayload(cable_baud), 600, false);
       if (status !== 0) return;
       await sleep(baud_switch_ms);
@@ -611,6 +673,29 @@ export class Link {
    * `run` whole-record writes from ops[i] as WRITE_MANY frames (LINK-41). Busy answers carry how many went in;
    * the rest is sent again. A refusal throws `WriteError` on the op the radio stopped at.
    */
+  /** After a lost answer: the link ready for another try (a resync with compression, else a 0x00 sync). */
+  private async readyAgain() {
+    if (this.caps & P.caps.LZ) await this.resync().catch(() => {});
+    else await this.t.write(this.session.take_cable(performance.now())).catch(() => {});
+  }
+
+  /**
+   * A WRITE_MANY that may go twice (whole records by index, channel deletes, contacts by callsign, positions, skip
+   * lists): sent once
+   * more after a lost answer, the link made ready first. A lost frame failed the whole write before (the serial-comms
+   * review, Nov 17, 2026).
+   */
+  private async askTwice(body: Uint8Array, ms?: number): Promise<{ status: number; rest: Uint8Array }> {
+    try {
+      return await this.askRaw(P.msg.WRITE_MANY, body, ms, false);
+    } catch (e) {
+      if (!(e instanceof TimeoutError)) throw e;
+      debugLog(`link WRITE_MANY (what ${body[0]}, ${body.length} B): no answer, sent once more`);
+      await this.readyAgain();
+      return await this.askRaw(P.msg.WRITE_MANY, body, ms, false);
+    }
+  }
+
   private async writeMany(ops: PlanOp[], i: number, run: number, progress: (done: number) => void): Promise<void> {
     let done = 0;
     const end = performance.now() + P.timing.busy_retry_ms;
@@ -623,7 +708,7 @@ export class Link {
         body.set(r.entry, o);
         o += r.entry.length;
       }
-      const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+      const { status, rest } = await this.askTwice(body);
       const applied = rest.length ? rest[0] : 0;
       done += status === 0 ? recs.length : applied;
       progress(i + done);
@@ -664,14 +749,18 @@ export class Link {
         this.waiters.set(seq, { ty: P.msg.WRITE_MANY, seq, resolve });
         setTimeout(() => resolve(null), this.timeout() * 2);
       });
-      void this.t.write(this.session.request(P.msg.WRITE_MANY, f.body, performance.now()));
+      this.t
+        .write(this.session.request(P.msg.WRITE_MANY, f.body, performance.now()))
+        .catch((e) => debugLog(`link WRITE_MANY #${seq} (windowed): send failed: ${(e as Error).message}`));
       debugLog(`link WRITE_MANY #${seq} (windowed) ops ${f.at}-${f.at + f.run - 1}, ${f.body.length} B`);
       return { f, got, seq };
     };
     const flight: ReturnType<typeof send>[] = [];
     let k = 0;
     let stop: { at: number; lost?: boolean } | null = null;
-    while (k < frames.length || flight.length) {
+    // after a stop only what is in flight is drained (frames not sent yet go one at a time below): with frames left,
+    // flight.shift() was undefined and the write crashed ("Cannot destructure property 'f'", issue #33)
+    while (flight.length || (!stop && k < frames.length)) {
       while (!stop && k < frames.length && flight.length < 2) flight.push(send(frames[k++]));
       const { f, got, seq } = flight.shift()!;
       const a = await got;
@@ -722,7 +811,9 @@ export class Link {
         });
         const end = performance.now() + P.timing.busy_retry_ms;
         for (;;) {
-          const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+          // added or renamed by callsign: the same twice; a delete twice answers "not found", so not those frames
+          const hasDelete = part.some((r) => (r[22] & 1) !== 0);
+          const { status, rest } = hasDelete ? await this.askRaw(P.msg.WRITE_MANY, body) : await this.askTwice(body);
           if (status === 0) break;
           if (status === 7 && performance.now() < end) {
             await sleep(P.timing.busy_sleep_ms);
@@ -797,7 +888,9 @@ export class Link {
           body.set(r.record, o + 3);
           o += 3 + r.record.length;
         }
-        const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body);
+        // positions and skip lists replace what's there: the same twice; waypoints' adds and deletes shift a list
+        const again = what === P.what.POSITION || what === P.what.PRESET_SKIPS;
+        const { status, rest } = again ? await this.askTwice(body) : await this.askRaw(P.msg.WRITE_MANY, body);
         const applied = status === 0 ? part.length : rest.length ? rest[0] : 0;
         i += applied;
         progress?.(i);
@@ -1001,7 +1094,8 @@ export class Link {
           // (bigger than a frame) as before.
           const dels = deleteRun(ops, i);
           if (dels > 0) {
-            // LINK-41.2: channel deletes several to a WRITE_MANY (records of length 0)
+            // LINK-41.2: channel deletes several to a WRITE_MANY (records of length 0); a channel not there is nothing
+            // to do, so a delete whose answer was lost goes again safely (askTwice)
             const body = new Uint8Array(1 + dels * 3);
             body[0] = 2;
             for (let k = 0; k < dels; k++) {
@@ -1010,7 +1104,7 @@ export class Link {
             }
             // each delete is a flash write on the radio: 79 took black 4.3 s (Nov 16, 2026), past the 2 s a cable
             // request waits, and Console said the radio had stopped answering
-            const { status, rest } = await this.askRaw(P.msg.WRITE_MANY, body, deleteWaitMs(this.timeout(), dels));
+            const { status, rest } = await this.askTwice(body, deleteWaitMs(this.timeout(), dels));
             if (status !== 0) {
               const done = rest.length ? rest[0] : 0;
               throw new WriteError(ops[i + done], i + done, new RadioError(P.msg.WRITE_MANY, status, rest.slice(1)));

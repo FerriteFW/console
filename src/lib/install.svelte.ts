@@ -55,7 +55,8 @@ import {
 import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
-import { IS_WINDOWS, Link, TimeoutError } from "./link";
+import { Link, TimeoutError } from "./link";
+import { cablePrefs } from "./cablePrefs.svelte";
 import { radio } from "./radio.svelte";
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
@@ -111,6 +112,14 @@ const today = () => {
 };
 
 /** The cable's bytes as console text, unless a protocol has the port (`sink`). */
+/** What the radio sent last, for the debug log when a reader step fails (Nov 17, 2026: two Windows backups failed
+ * with "no answer to fdump" after a 0.2 s icon read; the log couldn't tell a `?` from silence). Control characters
+ * shown escaped; at most `n` characters, the end of it. */
+function radioSaid(s: string, n = 300): string {
+  const t = s.slice(-n);
+  return JSON.stringify(t) + (s.length > n ? ` (last ${n} of ${s.length})` : "");
+}
+
 class Wire {
   text = "";
   sink: ((b: Uint8Array) => void) | null = null;
@@ -799,18 +808,25 @@ class Install {
       await w.write("sys\r");
       const sys = await w.waitFor(/[^\r\n]* uid [0-9A-F]{24}[^\r\n]*/, 4000, this.held);
       this.uid = (sys && readerLine<{ uid: string }>("sys", sys[0])?.uid) || "";
+      debugLog(`backup: reader ${sys ? radioSaid(sys[0]) : `said no sys line; heard ${radioSaid(w.text)}`}`);
       w.clear();
       await w.write("flash\r");
       const fl = await w.waitFor(/flash id [0-9A-F]{6} \([^)]*\)[^\r\n]*/, 5000, this.held);
       const chip = fl && readerLine<{ id: string; vendor: string; size: number }>("flash", fl[0]);
-      if (!chip) throw new Error("The reader didn't report the radio's SPI flash.");
+      if (!chip) {
+        debugLog(`backup: no flash line; heard ${radioSaid(w.text)}`);
+        throw new Error("The reader didn't report the radio's SPI flash.");
+      }
       this.chip = `${chip.vendor} ${chip.id}, ${chip.size / 1024} KB`;
       // BACKUP-12.1: stock's marker sector (0x080F0000), before any Ferrite image that reaches it is flashed. A reader
       // without `mdump` (an older one) answers `?`: assumed blank, and said.
       w.clear();
       await w.write(MDUMP_MARKER);
-      const md = await w.waitFor(/80F0000:[0-9A-F]{32}\*[0-9A-F]{2}|\?  \(help\)|mdump: [^\r\n]*/, 3000, this.held);
+      // To its `dump: end`: on some hosts that comes in a later read, and it then ended the icon read below at once
+      // (two Windows logs and a Linux one, Nov 17, 2026).
+      const md = await w.waitFor(/80F0000:[0-9A-F]{32}\*[0-9A-F]{2}(?=[\s\S]*?dump: end)|\?  \(help\)|mdump: [^\r\n]*/, 3000, this.held);
       this.marker = md ? parseMdump(md[0]) : null;
+      if (!md) debugLog(`backup: no answer to the marker's mdump; heard ${radioSaid(w.text)}`);
       this.markerRead = !!this.marker;
       // BACKUP-12.3: stock's menu icons (MCU 0x08080000, 161 KB), which every Ferrite image writes over: read only,
       // about 35 s. Taken whole through the sink (the text keeps 8 KB).
@@ -871,6 +887,7 @@ class Install {
       await w.idle(300);
       if (w.text.trimEnd().endsWith(">")) return;
     }
+    debugLog(`backup: no reader prompt; heard ${radioSaid(w.text)}`);
     throw new Error("The reader didn't start. Turn the radio off and on, then start the backup again.");
   }
 
@@ -887,9 +904,12 @@ class Install {
   private async readIcons(w: Wire): Promise<Uint8Array | null> {
     let text = "";
     let done = false;
+    let started = false; // a `dump: end` before the first icon line is someone else's
     w.sink = (b) => {
       text += latin1(b);
-      done ||= /dump: end|mdump: [^\r\n]*only|\?  \(help\)/.test(text.slice(-200));
+      const tail = text.slice(-200);
+      started ||= text.includes("8080000:");
+      done ||= (started && /dump: end/.test(tail)) || /mdump: [^\r\n]*only|\?  \(help\)/.test(tail);
     };
     try {
       await w.write(MDUMP_ICONS);
@@ -902,15 +922,17 @@ class Install {
       w.sink = null;
       w.clear();
     }
-    return done ? parseMdumpIcons(text) : null;
+    const icons = done ? parseMdumpIcons(text) : null;
+    if (!icons) debugLog(`backup: icons reply ${done ? "ended" : "never ended"}, ${text.length} chars: first ${JSON.stringify(text.slice(0, 120))}, last ${radioSaid(text, 200)}`);
+    return icons;
   }
 
-  /** The whole chip: the Rust reader's fdumpz at 230400 (115200 on Windows) (BACKUP-9.6, ferrite decision 265) when the reader image
+  /** The whole chip: the Rust reader's fdumpz at 230400 with High speed on, else 115200 (BACKUP-9.6, ferrite decision 265) when the reader image
    * has it, else (hwtest's reader, or a reader that answers `?`) fdump from the fastest rate down (flashdump.py's
    * read_range). */
   private async readChip(size: number, slow = false): Promise<Uint8Array> {
     let last: Error | null = null;
-    const fast = !!this.t!.setBaud && !IS_WINDOWS && !slow;
+    const fast = !!this.t!.setBaud && cablePrefs.highSpeed && !slow; // decision 408: 230400 only with High speed on
     debugLog(`backup: reading ${size} B, ${fast ? "fast" : "at 115200"}`);
     if (this.readerFile && readerHasFdumpz(this.readerFile.bytes)) {
       const rate = fast ? FDUMPZ_BAUD : READER_RATES[READER_RATES.length - 1];
@@ -965,7 +987,10 @@ class Install {
         5000,
         this.held,
       );
-      if (!ready) throw new Error("no answer to fdump");
+      if (!ready) {
+        debugLog(`backup: ${z ? "fdumpz" : "fdump"} at ${rate}: no answer; heard ${radioSaid(w.text)}`);
+        throw new Error("no answer to fdump");
+      }
       if (ready[0].startsWith("fdump: ")) throw new Error(ready[0]);
       if (!ready[0].startsWith("fdump ")) throw new NoFdumpz("the reader has no fdumpz");
       started = true;
