@@ -211,6 +211,22 @@ fn free_name(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     (1..).map(|k| dir.join(format!("{stem} ({k}){ext}"))).find(|p| !p.exists()).unwrap()
 }
 
+/// An https link opened in the system's browser (the webview opens no links of its own: the update notice's
+/// "Console 0.9.4 available" and the user guide did nothing, Nov 17, 2026). https only: no other scheme, no files.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") || url.chars().any(|c| c.is_control() || c == ' ' || c == '"') {
+        return Err("only https links".into());
+    }
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(&url).spawn();
+    #[cfg(target_os = "windows")]
+    let r = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn();
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let r = std::process::Command::new("xdg-open").arg(&url).spawn();
+    r.map(|_| ()).map_err(|e| format!("couldn't open the browser: {e}"))
+}
+
 #[tauri::command]
 async fn save_file(request: tauri::ipc::Request<'_>) -> Result<Option<String>, String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
@@ -288,7 +304,8 @@ pub fn run() {
             debug_state,
             debug_log,
             save_file,
-            save_download
+            save_download,
+            open_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running Ferrite Console");

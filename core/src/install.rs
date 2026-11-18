@@ -303,7 +303,7 @@ pub fn icons_plausible(b: &[u8]) -> bool {
     if b.len() != ICONS_LEN || b.iter().all(|&x| x == 0xFF) {
         return false;
     }
-    let px: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let px: Vec<u16> = b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
     let same = px.windows(2).filter(|w| w[0] == w[1] && w[0] != 0xFFFF).count();
     same * 20 > px.len()
 }
