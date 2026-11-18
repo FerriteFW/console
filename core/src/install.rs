@@ -1505,6 +1505,14 @@ mod tests {
         assert!(r[ICONS_OFF..ICONS_OFF + ICONS_LEN].iter().all(|&b| b == 0xFF));
         assert_eq!(ICONS_OFF, 0x7D000);
         assert_eq!(ICONS_LEN, 161_472);
+        // Radtel's V0.30 ICON image (659.6 KB, Nov 17, 2026) covers the tiles' place with its own: sent as it is,
+        // its tiles kept over the backup's (BACKUP-12.3, the Back to stock page's note).
+        let mut own = vec![0x22u8; 675_404];
+        let mut other = tiles.clone();
+        other.iter_mut().step_by(2).for_each(|b| *b ^= 0x10);
+        own[ICONS_OFF..ICONS_OFF + ICONS_LEN].copy_from_slice(&other);
+        let r = stock_restore_image(&own, None, Some(&tiles));
+        assert_eq!(&r[ICONS_OFF..ICONS_OFF + ICONS_LEN], &other[..]);
     }
 
     #[test]

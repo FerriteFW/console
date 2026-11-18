@@ -445,6 +445,7 @@ test("menu icons: a file of them is taken for back to stock; a file that isn't t
   await open(page, false, "restore");
   const back = card(page, "Back to stock");
   await expect(back.locator('[data-k="restore-icons"]')).toContainText("the tiles stay blank on stock");
+  await expect(back.locator('[data-k="restore-icons-v030"]')).toContainText("RT_950Pro_ICON_V0.30_261117.BTF"); // Radtel's file carries them
   await page.getByLabel("Menu icons file").setInputFiles({ name: "code.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(161_472, 0x5a).map((x, i) => (x + i * 7) & 0xff) });
   await expect(back).toContainText("code.bin isn't stock's menu icons");
   await page.getByLabel("Menu icons file").setInputFiles({ name: "rt950pro-menu-icons-X.bin", mimeType: "application/octet-stream", buffer: tiles() });
