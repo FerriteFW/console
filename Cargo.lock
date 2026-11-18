@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-app"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "ferrite-core",
  "ferrite-ui",
@@ -1022,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-console-app"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "btleplug",
  "ferrite-console-core",
@@ -1043,7 +1043,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-console-core"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "ferrite-app",
  "ferrite-core",
@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-console-wasm"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "ferrite-console-core",
  "serde",
@@ -1066,7 +1066,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-core"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "uafsk",
  "udsc",
@@ -1076,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-store"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "ferrite-app",
  "ferrite-core",
@@ -1085,7 +1085,7 @@ dependencies = [
 
 [[package]]
 name = "ferrite-ui"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "ferrite-core",
  "ufmt",
