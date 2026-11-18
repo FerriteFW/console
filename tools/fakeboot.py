@@ -288,6 +288,9 @@ class FakeReader:
         if w[0] == "mdump" and len(w) >= 3:
             addr, n = int(w[1], 0), int(w[2], 0)
             icons = read_mode(self.mode_path).get("icons")
+            if (addr, n) == (0x08080000, 161472) and self.mode.get("garble_long"):
+                # Nov 17, 2026's Windows logs, as read: a long command arrives garbled and is answered "?"
+                return self.console("?  (help)\n")
             if (addr, n) == (0x08080000, 161472) and icons:
                 # BACKUP-12.3: stock's menu icons, from MODE.json's "icons" file, 32 bytes a line as the reader
                 b = open(icons, "rb").read()
@@ -301,6 +304,8 @@ class FakeReader:
             self.log("fakereader: reboot into the bootloader")
             self.next = FakeBoot({"deaf_ms": 300, **read_mode(self.mode_path)}, result_path(self.mode_path), self.log)
             return b""
+        if w[0] in ("fdump", "fdumpz") and len(w) >= 3 and self.mode.get("garble_long"):
+            return b""  # its line end lost: the reader waits for the rest, and never answers
         if w[0] in ("fdump", "fdumpz") and len(w) >= 3:
             z = w[0] == "fdumpz"
             if z and not self.z:
