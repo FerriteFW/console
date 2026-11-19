@@ -152,13 +152,15 @@ export class WebSerialTransport implements Transport {
   /** Closes and reopens the port at `rate` (Web Serial can't change a port's rate in place). */
   async setBaud(rate: number) {
     if (rate === this.baud) return;
+    // `closing` only while the old port shuts: the new read loop stops at once while it's set, and a switch with
+    // it still up left nothing reading at the new rate (High speed never came up in 0.9.4).
     this.closing = true;
     try {
       await this.shut();
-      await this.openAt(rate);
     } finally {
       this.closing = false;
     }
+    await this.openAt(rate);
   }
 
   async close() {

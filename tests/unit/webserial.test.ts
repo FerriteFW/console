@@ -90,3 +90,48 @@ test("webserial: another read error closes the cable", async () => {
   await new Promise((r) => setTimeout(r, 50));
   assert.match(closed, /The cable stopped: a bad byte/);
 });
+
+/** A port that can be closed and opened again at another rate; each open gives a stream with that open's bytes. */
+function ratePort() {
+  const rates: number[] = [];
+  let ctrl: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let readable: ReadableStream<Uint8Array> | null = null;
+  return {
+    rates,
+    send: (b: number[]) => ctrl!.enqueue(Uint8Array.from(b)),
+    port: {
+      async open(o: { baudRate: number }) {
+        rates.push(o.baudRate);
+        readable = new ReadableStream<Uint8Array>({ start: (c) => void (ctrl = c) });
+      },
+      async close() {
+        readable = null;
+      },
+      getInfo: () => ({ usbVendorId: 0x1a86 }),
+      addEventListener() {},
+      get readable() {
+        return readable;
+      },
+    },
+  };
+}
+
+test("webserial: after a rate switch the port is read at the new rate (High speed)", async () => {
+  const p = ratePort();
+  const t = await (WebSerialTransport as unknown as { fromPort(p: unknown): Promise<WebSerialTransport> }).fromPort(p.port);
+  const got: number[] = [];
+  t.onData = (b) => got.push(...b);
+  let closed = "";
+  t.onClose = (why) => (closed = why);
+  p.send([1]);
+  await new Promise((r) => setTimeout(r, 5));
+  await t.setBaud(230400);
+  p.send([2, 3]);
+  await new Promise((r) => setTimeout(r, 5));
+  await t.setBaud(115200);
+  p.send([4]);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(p.rates, [115200, 230400, 115200]);
+  assert.deepEqual(got, [1, 2, 3, 4]);
+  assert.equal(closed, "");
+});
