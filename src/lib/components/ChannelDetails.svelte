@@ -11,7 +11,7 @@
     onclose,
     ondelete,
     onmoved,
-  }: { c: Channel; zones: Zone[]; choices: Choices; onclose: () => void; ondelete: () => void; onmoved: (to: number) => void } = $props();
+  }: { c: Channel; zones: Zone[]; choices: Choices; onclose: () => void; ondelete: () => void; onmoved: (from: number, to: number, moved: Map<number, number>) => void } = $props();
 
   const problem = $derived(checkChannel(c, zones.length));
   let numberNote = $state("");
@@ -53,9 +53,12 @@
   function renumber(e: Event) {
     const el = e.currentTarget as HTMLInputElement;
     const from = c.number;
-    numberNote = channels.renumber(from, Number(el.value));
-    if (numberNote) el.value = String(from);
-    else onmoved(Number(el.value));
+    const to = Number(el.value);
+    // A used number is taken: the channels from there to the old place move one along (the notice says which).
+    const r = channels.move(from, to);
+    numberNote = r.why;
+    if (r.why) el.value = String(from);
+    else if (r.moved.size) onmoved(from, to, r.moved);
   }
 
   const flags: { k: keyof Channel; label: string; hint: string }[] = [
@@ -79,7 +82,13 @@
   <div class="fields">
     <label>
       <span>Number</span>
-      <input value={c.number} onchange={renumber} aria-label="Channel number" inputmode="numeric" />
+      <input
+        value={c.number}
+        onchange={renumber}
+        aria-label="Channel number"
+        inputmode="numeric"
+        title="Its place on the radio. A used number is taken: the channels from there move one along."
+      />
       {#if numberNote}<small class="err">{numberNote}</small>{/if}
     </label>
     <label>

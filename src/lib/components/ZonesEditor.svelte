@@ -88,15 +88,47 @@
     onsay(`Deleted zone ${z.number} "${z.name}"${n ? `; its ${plural(n, "channel")} now in no zone` : ""}.`, true);
   }
 
-  /** ▲ ▼: the channel trades numbers with its neighbour in the zone. */
-  function swap(i: number, j: number) {
-    // The numbers, not the rows: the rows' numbers change in the swap.
-    const a = members[i]?.number;
-    const b = members[j]?.number;
-    if (a === undefined || b === undefined) return;
-    channels.swap(a, b);
-    const home = channels.home === undefined ? ` The home channel wasn't read: if it was ${a} or ${b}, set it again on the radio.` : "";
-    onsay(`Channels ${Math.min(a, b)} and ${Math.max(a, b)} swapped numbers. A slot on either on the radio tunes the other after Write.${home}`, true);
+  /** ▲ ▼ or a drag: the channel at place `i` in the zone to place `j`. The zone's own numbers are shared out again in
+   *  the new order, so the radio's order changes too and no channel outside the zone is renumbered. */
+  function place(i: number, j: number) {
+    if (!zone || i === j || !members[i] || !members[j]) return;
+    const n = members[i].number;
+    const map = channels.moveInZone(zone.number - 1, i, j);
+    if (!map.size) return;
+    const home = channels.home === undefined ? " The home channel wasn't read: if it was one of these, set it again on the radio." : "";
+    const what =
+      map.size === 2 ? `Channels ${Math.min(...map.keys())} and ${Math.max(...map.keys())} swapped numbers.` : `Channel ${n} is now ${map.get(n)}; ${map.size - 1} others in the zone moved one place.`;
+    onsay(`${what} After Write, a slot on the radio that was on a moved number tunes what's there now.${home}`, true);
+  }
+
+  // Dragging: a channel within the zone (by place), or a zone in the list (by number). Our own types, so nothing
+  // else takes the drop.
+  const DRAG_CH = "application/x-ferrite-zone-channel";
+  const DRAG_ZONE = "application/x-ferrite-zone";
+  let dragCh = $state<number | null>(null);
+  let overCh = $state<number | null>(null);
+  let dragZone = $state<number | null>(null);
+  let overZone = $state<number | null>(null);
+  function grab(e: DragEvent, type: string, value: number) {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.setData(type, String(value));
+    e.dataTransfer.effectAllowed = "move";
+  }
+  function overOk(e: DragEvent, type: string): boolean {
+    if (!e.dataTransfer?.types.includes(type)) return false;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    return true;
+  }
+
+  /** Zone `from` to place `to` (numbers): the zones it passes move one along; every channel keeps its zone. */
+  function moveZone(from: number, to: number) {
+    if (from === to || to < 1 || to > t.zones.length) return;
+    const name = t.zones[from - 1]?.name ?? "";
+    channels.moveZone(from, to);
+    if (pickedN !== null) pickedN = pickedN === from ? to : from < to && pickedN > from && pickedN <= to ? pickedN - 1 : from > to && pickedN >= to && pickedN < from ? pickedN + 1 : pickedN;
+    const passed = Math.abs(to - from);
+    onsay(`Zone "${name}" is now zone ${to}${passed > 1 ? `; ${passed} zones moved one along` : `; zone ${from} is now the one it passed`}. Its channels went with it.`, true);
   }
 
   function bringIn(nums: number[]) {
@@ -134,7 +166,25 @@
     <ul class="zones" role="listbox" aria-label="Zones">
       {#each t.zones as z (z.number)}
         {@const n = counts.get(z.number - 1) ?? 0}
-        <li>
+        <li
+          draggable="true"
+          class:dragging={dragZone === z.number}
+          class:drop-above={overZone === z.number && dragZone !== null && dragZone > z.number}
+          class:drop-below={overZone === z.number && dragZone !== null && dragZone < z.number}
+          ondragstart={(e) => {
+            grab(e, DRAG_ZONE, z.number);
+            dragZone = z.number;
+          }}
+          ondragend={() => (dragZone = overZone = null)}
+          ondragover={(e) => {
+            if (dragZone !== null && dragZone !== z.number && overOk(e, DRAG_ZONE)) overZone = z.number;
+          }}
+          ondragleave={() => (overZone = null)}
+          ondrop={(e) => {
+            if (dragZone !== null && overOk(e, DRAG_ZONE)) moveZone(dragZone, z.number);
+            dragZone = overZone = null;
+          }}
+        >
           <button
             role="option"
             aria-selected={pickedN === z.number}
@@ -159,6 +209,18 @@
       <header>
         <button class="btn quiet back" onclick={() => (pickedN = null)} aria-label="Back to the zones">← Zones</button>
         <h2>Zone {zone.number}</h2>
+        <span class="zmove">
+          <button class="ib" disabled={zone.number === 1} onclick={() => moveZone(zone.number, zone.number - 1)} aria-label={`Move zone ${zone.number} up`} title="Move this zone up the list (its channels go with it); or drag it in the list"
+            >▲</button
+          >
+          <button
+            class="ib"
+            disabled={zone.number === t.zones.length}
+            onclick={() => moveZone(zone.number, zone.number + 1)}
+            aria-label={`Move zone ${zone.number} down`}
+            title="Move this zone down the list (its channels go with it); or drag it in the list">▼</button
+          >
+        </span>
         <button class="btn danger" title="Delete this zone; its channels go to no zone (undoable)" aria-label={`Delete zone ${zone.number}`} onclick={() => deleteZone(zone)}
           >Delete</button
         >
@@ -205,18 +267,38 @@
       </div>
 
       <h3>Channels in this zone <span class="sub">({members.length}/{choices.zoneCap})</span></h3>
-      <p class="sub small">In channel-number order. ▲ ▼ swap a channel's number with its neighbour's, so the radio's order changes too.</p>
+      <p class="sub small">In channel-number order, as on the radio. Drag a channel, or use ▲ ▼, to change the order: the zone's channels share out their numbers again, and no other channel is renumbered.</p>
       {#if members.length}
         <ol class="members" aria-label="Channels in this zone">
           {#each members as c, i (c.number)}
-            <li class:changed={!!channels.base && dirty.changed.has(c.number)}>
+            <li
+              class:changed={!!channels.base && dirty.changed.has(c.number)}
+              class:dragging={dragCh === i}
+              class:drop-above={overCh === i && dragCh !== null && dragCh > i}
+              class:drop-below={overCh === i && dragCh !== null && dragCh < i}
+              draggable="true"
+              ondragstart={(e) => {
+                grab(e, DRAG_CH, i);
+                dragCh = i;
+              }}
+              ondragend={() => (dragCh = overCh = null)}
+              ondragover={(e) => {
+                if (dragCh !== null && dragCh !== i && overOk(e, DRAG_CH)) overCh = i;
+              }}
+              ondragleave={() => (overCh = null)}
+              ondrop={(e) => {
+                if (dragCh !== null && overOk(e, DRAG_CH)) place(dragCh, i);
+                dragCh = overCh = null;
+              }}
+            >
+              <span class="grip" aria-hidden="true">⠿</span>
               <span class="num">{c.number}</span>
               <span class="nm">{c.name || "(no name)"}</span>
               <span class="mhz">{c.rx}</span>
               {#if channels.home === c.number}<span class="tag" title="The radio's home channel (hold 0)">home</span>{/if}
               <span class="acts">
-                <button class="ib" disabled={i === 0} onclick={() => swap(i, i - 1)} aria-label={`Move channel ${c.number} up`} title="Swap numbers with the channel above">▲</button>
-                <button class="ib" disabled={i === members.length - 1} onclick={() => swap(i, i + 1)} aria-label={`Move channel ${c.number} down`} title="Swap numbers with the channel below">▼</button>
+                <button class="ib" disabled={i === 0} onclick={() => place(i, i - 1)} aria-label={`Move channel ${c.number} up`} title="Swap numbers with the channel above">▲</button>
+                <button class="ib" disabled={i === members.length - 1} onclick={() => place(i, i + 1)} aria-label={`Move channel ${c.number} down`} title="Swap numbers with the channel below">▼</button>
                 <button class="ib del" onclick={() => takeOut(c.number)} aria-label={`Take channel ${c.number} out of the zone`} title="Out of this zone (to no zone)">✕</button>
               </span>
             </li>
@@ -514,6 +596,27 @@
   .acts {
     display: flex;
     gap: 2px;
+  }
+  .zmove {
+    display: inline-flex;
+    gap: 2px;
+  }
+  .grip {
+    color: var(--sub);
+    opacity: 0.45;
+    cursor: grab;
+  }
+  li[draggable="true"]:hover .grip {
+    opacity: 1;
+  }
+  li.dragging {
+    opacity: 0.45;
+  }
+  li.drop-above {
+    box-shadow: inset 0 2px 0 var(--blue);
+  }
+  li.drop-below {
+    box-shadow: inset 0 -2px 0 var(--blue);
   }
   .ib {
     width: 28px;

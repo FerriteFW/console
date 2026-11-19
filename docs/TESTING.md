@@ -42,6 +42,7 @@ Start `npm run dev`, open http://localhost:1420 in Chrome. Close `term.py` and a
 7. File › Open… the step-2 `.ferrite`. Write: the three changes go back. Check on the radio.
 8. CHIRP: export, import the same file. No notes; Write shows nothing to write.
 9. + Zone, add a channel to it, Write. Delete the zone, Write. Check ◀▶ on the radio.
+9a. Reorder: drag a channel up a few rows by its ⠿ handle; drag the last channel of a zone to its top; drag a zone up the list. Write. On the radio, the channel list, the zone's order and ◀▶'s zone order match. Undo each, Write again.
 10. BACK on the radio during a write: Console says cancelled, re-reads.
 11. Disconnect: `term.py` answers at 115200 without a power cycle.
 12. Bluetooth: Read works, slowly (time it). A small write works.
