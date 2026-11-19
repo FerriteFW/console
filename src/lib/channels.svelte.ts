@@ -45,6 +45,7 @@ import {
   type Zone,
 } from "./core";
 import { intoChirpZone } from "./chirpzone";
+import { moveMap, orderMap, zoneMap } from "./reorder";
 import { WriteError } from "./link";
 import { radio } from "./radio.svelte";
 
@@ -808,39 +809,69 @@ class Channels {
     return before - this.table.channels.length;
   }
 
-  /** A channel to another number (free ones only). */
-  renumber(from: number, to: number): string {
-    if (!(to >= 1 && to <= P.limits.channels)) return `Channels are 1 to ${P.limits.channels}.`;
-    if (this.table.channels.some((c) => c.number === to)) return `Channel ${to} is in use.`;
-    const c = this.table.channels.find((x) => x.number === from);
-    if (!c) return "";
-    this.remember();
-    c.number = to;
-    for (const z of this.table.zones) {
-      if (z.pri1 === from) z.pri1 = to;
-      if (z.pri2 === from) z.pri2 = to;
-    }
-    if (this.home === from) this.home = to; // CHAN-18: renumbering carries it
-    this.table.channels.sort((a, b) => a.number - b.number);
-    return "";
+  /** A channel to another number. A free one is a renumber; a used one is taken, and the channels from there towards
+   *  the old place move one along as far as the first free number (reorder.ts `moveMap`). One undo. The renumbered
+   *  channels' numbers (old -> new), empty when it was refused, with the refusal's words. */
+  move(from: number, to: number): { moved: Map<number, number>; why: string } {
+    if (!(Number.isInteger(to) && to >= 1 && to <= P.limits.channels)) return { moved: new Map(), why: `Channels are 1 to ${P.limits.channels}.` };
+    if (!this.table.channels.some((c) => c.number === from)) return { moved: new Map(), why: "" };
+    const moved = moveMap(
+      this.table.channels.map((c) => c.number),
+      from,
+      to,
+    );
+    this.renumberAll(moved);
+    return { moved, why: "" };
   }
 
-  /** Two channels trade numbers (the zone editor's ▲ ▼: a zone's order is its channels' numbers), one undo. What
-   *  names a channel by number goes with it: the zones' priority channels and the home channel. */
+  /** In zone `zone` (its index), the channel at place `from` (in number order) moved to place `to`: the zone's own
+   *  numbers shared out again in the new order, so no channel outside it changes (the ▲ ▼ and drag of the Zones tab).
+   *  One undo; the renumbered channels. */
+  moveInZone(zone: number, from: number, to: number): Map<number, number> {
+    const nums = this.table.channels.filter((c) => c.zone === zone).map((c) => c.number);
+    const moved = orderMap(nums, from, to);
+    this.renumberAll(moved);
+    return moved;
+  }
+
+  /** Two channels trade numbers, one undo. */
   swap(a: number, b: number) {
-    const ca = this.table.channels.find((c) => c.number === a);
-    const cb = this.table.channels.find((c) => c.number === b);
-    if (!ca || !cb || a === b) return;
+    if (a === b || !this.table.channels.some((c) => c.number === a) || !this.table.channels.some((c) => c.number === b)) return;
+    this.renumberAll(
+      new Map([
+        [a, b],
+        [b, a],
+      ]),
+    );
+  }
+
+  /** Channels renumbered by `map` (old -> new; a renumbering, so no two end on one number), one undo. What names a
+   *  channel by number goes with it: the zones' priority channels and the home channel (CHAN-18). */
+  private renumberAll(map: Map<number, number>) {
+    if (!map.size) return;
     this.remember();
-    ca.number = b;
-    cb.number = a;
-    const other = (n: number | null) => (n === a ? b : n === b ? a : n);
+    const to = (n: number | null) => (n === null ? null : (map.get(n) ?? n));
+    for (const c of this.table.channels) c.number = to(c.number) as number;
     for (const z of this.table.zones) {
-      z.pri1 = other(z.pri1);
-      z.pri2 = other(z.pri2);
+      z.pri1 = to(z.pri1);
+      z.pri2 = to(z.pri2);
     }
-    if (this.home != null) this.home = other(this.home);
+    if (this.home != null) this.home = to(this.home);
     this.table.channels.sort((x, y) => x.number - y.number);
+  }
+
+  /** Zone `from` (its number) to place `to`: the zones it passes move one along, and every channel keeps its zone
+   *  (its zone index follows). One undo. */
+  moveZone(from: number, to: number) {
+    const n = this.table.zones.length;
+    const map = zoneMap(n, from - 1, to - 1);
+    if (!map.size) return;
+    this.remember();
+    const zones = [...this.table.zones];
+    const [z] = zones.splice(from - 1, 1);
+    zones.splice(to - 1, 0, z);
+    this.table.zones = zones.map((z, i) => ({ ...z, number: i + 1 }));
+    for (const c of this.table.channels) if (c.zone !== null && map.has(c.zone)) c.zone = map.get(c.zone)!;
   }
 
   /** Channels into a zone (its index; null for no zone): a channel is in one zone at most, so this moves it. A zone

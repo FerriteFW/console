@@ -6,6 +6,7 @@
   // survive a reload (channels.svelte.ts keeps them); deletes are undone from the notice or with Ctrl/Cmd+Z. The
   // radio's range presets (MENU 0 1 4) are a third tab: read and written with the channels, in the same table, since
   // they're programmed as the channels are and a band scan of one goes with the channel scans it sits beside.
+  import { tick as settle } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import ChannelRow from "../components/ChannelRow.svelte";
   import ChannelDetails from "../components/ChannelDetails.svelte";
@@ -180,6 +181,51 @@
       for (let i = Math.min(from, idx); i <= Math.max(from, idx); i++) on ? selected.add(shown[i].number) : selected.delete(shown[i].number);
     } else on ? selected.add(n) : selected.delete(n);
     lastPick = n;
+  }
+
+  /** The channel being dragged by its handle (by number). */
+  let dragFrom = $state<number | null>(null);
+
+  /** A channel moved (dragged, ↑ ↓ on its handle, or a number typed in its panel): the ticks and the panel follow
+   *  their channels to their new numbers, and the notice says what moved (undoable). */
+  function moved(from: number, to: number, map: Map<number, number>) {
+    if (!map.size) return;
+    const ticked = [...selected].map((n) => map.get(n) ?? n);
+    selected.clear();
+    for (const n of ticked) selected.add(n);
+    if (activeN !== null) activeN = map.get(activeN) ?? activeN;
+    if (lastPick !== null) lastPick = map.get(lastPick) ?? lastPick;
+    const others = [...map.keys()].filter((n) => n !== from);
+    const lo = Math.min(...others);
+    const hi = Math.max(...others);
+    const along = !others.length ? "" : others.length === 1 ? `; channel ${lo} is now ${map.get(lo)}` : `; channels ${lo}–${hi} moved one along (now ${map.get(lo)}–${map.get(hi)})`;
+    const home = channels.home === undefined ? " The home channel wasn't read: if it was one of these, set it again on the radio." : "";
+    say(`Channel ${from} is now ${to}${along}. After Write, a slot on the radio that was on a moved number tunes what's there now.${home}`, true);
+  }
+
+  /** The dragged channel dropped on channel `to`: it takes that number. */
+  function dropOn(to: number) {
+    const from = dragFrom;
+    dragFrom = null;
+    if (from === null || from === to) return;
+    const r = channels.move(from, to);
+    if (r.why) say(r.why);
+    else moved(from, to, r.moved);
+  }
+
+  /** ↑ ↓ on a handle: the channel takes the number of the one above or below it as shown, the handle keeps focus. */
+  async function step(n: number, dir: -1 | 1) {
+    const i = shown.findIndex((c) => c.number === n);
+    const next = shown[i + dir];
+    if (i < 0 || !next) return;
+    const to = next.number; // kept: the move renumbers `next` itself
+    const r = channels.move(n, to);
+    if (r.why) return say(r.why);
+    moved(n, to, r.moved);
+    // The rows are keyed by number, so the one that had focus may now show another channel: focus the handle at the
+    // new number once the table has redrawn.
+    await settle();
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`tr[data-n="${to}"] button.grip`)?.focus());
   }
 
   function tickAll(on: boolean) {
@@ -424,6 +470,11 @@
                     active={activeN === c.number}
                     onselect={(on, range) => tick(c.number, on, range)}
                     onopen={() => (activeN = c.number)}
+                    {dragFrom}
+                    ongrab={() => (dragFrom = c.number)}
+                    onletgo={() => (dragFrom = null)}
+                    ondropon={() => dropOn(c.number)}
+                    onstep={(dir) => void step(c.number, dir)}
                   />
                 {:else}
                   <tr><td colspan="10" class="empty">No channel matches.</td></tr>
@@ -440,7 +491,7 @@
                 {choices}
                 onclose={() => (activeN = null)}
                 ondelete={() => remove([active.number])}
-                onmoved={(to) => (activeN = to)}
+                onmoved={moved}
               />
             </div>
           {/if}
@@ -805,8 +856,34 @@
     z-index: 3;
   }
   .grid :global(td.sticky2) {
-    width: 52px;
-    min-width: 52px;
+    width: 66px;
+    min-width: 66px;
+  }
+  .grid :global(td.num) {
+    white-space: nowrap;
+  }
+  .grid :global(button.grip) {
+    padding: 2px 1px;
+    border: 0;
+    background: none;
+    color: var(--sub);
+    opacity: 0.45;
+    cursor: grab;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .grid :global(tr:hover button.grip),
+  .grid :global(button.grip:focus-visible) {
+    opacity: 1;
+  }
+  .grid :global(tr.dragging td) {
+    opacity: 0.45;
+  }
+  .grid :global(tr.drop-above td) {
+    box-shadow: inset 0 2px 0 var(--blue);
+  }
+  .grid :global(tr.drop-below td) {
+    box-shadow: inset 0 -2px 0 var(--blue);
   }
   .grid :global(button.open) {
     width: 100%;

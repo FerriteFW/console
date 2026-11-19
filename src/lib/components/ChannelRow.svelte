@@ -14,6 +14,11 @@
     active,
     onselect,
     onopen,
+    dragFrom,
+    ongrab,
+    onletgo,
+    ondropon,
+    onstep,
   }: {
     c: Channel;
     zones: Zone[];
@@ -23,7 +28,48 @@
     active: boolean;
     onselect: (on: boolean, range: boolean) => void;
     onopen: () => void;
+    /** The channel being dragged (by number), or null. */
+    dragFrom: number | null;
+    ongrab: () => void;
+    onletgo: () => void;
+    /** The dragged channel dropped on this row: it takes this row's number. */
+    ondropon: () => void;
+    /** ↑ ↓ on the handle: one place up or down the table as shown. */
+    onstep: (dir: -1 | 1) => void;
   } = $props();
+
+  /** Our own drag type, so a field in the row never takes the drop as text. */
+  const DRAG = "application/x-ferrite-channel";
+  let over = $state(false);
+  // The line shows where the channel lands: above this row when it moves up the table, below when down.
+  const above = $derived(over && dragFrom !== null && dragFrom > c.number);
+  const below = $derived(over && dragFrom !== null && dragFrom < c.number);
+  function dragOver(e: DragEvent) {
+    if (dragFrom === null || dragFrom === c.number || !e.dataTransfer?.types.includes(DRAG)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    over = true;
+  }
+  function drop(e: DragEvent) {
+    over = false;
+    if (dragFrom === null || dragFrom === c.number || !e.dataTransfer?.types.includes(DRAG)) return;
+    e.preventDefault();
+    ondropon();
+  }
+  function grab(e: DragEvent) {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.setData(DRAG, String(c.number));
+    e.dataTransfer.effectAllowed = "move";
+    // The whole row as the drag image, not just the handle.
+    const tr = (e.currentTarget as HTMLElement).closest("tr");
+    if (tr) e.dataTransfer.setDragImage(tr, 20, 14);
+    ongrab();
+  }
+  function key(e: KeyboardEvent) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    onstep(e.key === "ArrowUp" ? -1 : 1);
+  }
 
   const problem = $derived(checkChannel(c, zones.length));
   // CHAN-2, LINK-53: a marker for a channel with a position, the position in its title.
@@ -49,7 +95,20 @@
   }
 </script>
 
-<tr class={rowState} class:bad={!!problem} class:sel={selected} class:active data-n={c.number} onclick={rowClick}>
+<tr
+  class={rowState}
+  class:bad={!!problem}
+  class:sel={selected}
+  class:active
+  class:dragging={dragFrom === c.number}
+  class:drop-above={above}
+  class:drop-below={below}
+  data-n={c.number}
+  onclick={rowClick}
+  ondragover={dragOver}
+  ondragleave={() => (over = false)}
+  ondrop={drop}
+>
   <td class="pick sticky">
     <input
       type="checkbox"
@@ -59,6 +118,18 @@
     />
   </td>
   <td class="num sticky2">
+    <button
+      class="grip"
+      draggable="true"
+      ondragstart={grab}
+      ondragend={() => {
+        over = false;
+        onletgo();
+      }}
+      onkeydown={key}
+      aria-label={`Move channel ${c.number}: drag, or ↑ ↓`}
+      title="Drag to move this channel (it takes the number it's dropped on), or focus here and press ↑ ↓">⠿</button
+    >
     <button class="open" onclick={onopen} aria-label={`Details for channel ${c.number}`} title="All of this channel's fields">{c.number}</button>
   </td>
   <td class="namecell">
