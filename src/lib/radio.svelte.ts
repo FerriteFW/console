@@ -6,6 +6,7 @@ import { debugLog } from "./debuglog";
 import { LiveClient, loadCore, P, parseEvent, parseUi, stateMerge, stateParse, tunePayload, type AprsEvent, type Hello, type Info, type RadioNow, type TuneOp, type Ui } from "./core";
 import { Link, RadioError, TimeoutError } from "./link";
 import { cablePrefs } from "./cablePrefs.svelte";
+import { LossWatch } from "./bleStep";
 import { mismatch, type Mismatch } from "./mismatch.ts";
 import { provider, type Transport, type TransportKind } from "./transport";
 import { BridgeTransport } from "./transport/bridge";
@@ -118,6 +119,12 @@ class Radio {
   /** How to open this session's port or radio again with no chooser (the transport's `reopen`). */
   private reopen: (() => Promise<Transport>) | null = null;
   private retryGen = 0;
+  /** Bluetooth's rate this connection (115200 unlocked, 9600; 0 not Bluetooth). */
+  private bleRate = 0;
+  /** Bluetooth stepped down after losses (bleStep.ts): reconnects stay at 9600; a new Connect tries 115200 again. */
+  private bleSlowNext = false;
+  private losses = new LossWatch();
+  private stepping = false;
 
   /** The link while connected (channel programming uses it directly); never for a radio on another protocol. */
   get connectedLink(): Link | null {
@@ -136,6 +143,7 @@ class Radio {
 
   async connect(kind: TransportKind) {
     this.stopRetry();
+    this.bleSlowNext = false;
     return this.connectWith(() => provider.open(kind));
   }
 
@@ -302,6 +310,7 @@ class Radio {
       this.label = t.label;
       this.reopen = t.reopen ? () => t.reopen!() : null;
       const link = new Link(t); // decision 408: no compression on the cable (Link's own default)
+      link.onLoss = () => this.loss(gen);
       link.onRate = (rate) => {
         this.baud = rate;
         this.note = `${rate} baud (the radio went back to it)`;
@@ -376,10 +385,17 @@ class Radio {
   private async afterAuth(gen: number) {
     const link = this.link!;
     this.info = await link.info();
-    if (this.t?.unlock) {
+    this.bleRate = 0;
+    this.losses.reset();
+    if (this.t?.unlock && this.bleSlowNext) {
+      // Stepped down after losses (bleStep.ts): no unlock, so the module stays at 9600, and the radio with it.
+      this.bleRate = 9600;
+      this.note = "Bluetooth at 9600 (115200 was losing data)";
+    } else if (this.t?.unlock) {
       // LINK-15.1: Bluetooth at 115200 when the radio and its module take it (ferrite decision 285)
       const rate = await link.bleFast().catch(() => 0);
       if (rate) this.note = rate > 9600 ? "Bluetooth at 115200" : "Bluetooth at 9600";
+      this.bleRate = rate;
     }
     if (this.t?.setBaud) {
       // LINK-13.3, decision 408: 115200 unless High speed is on (Live View), then 230400.
@@ -686,6 +702,37 @@ class Radio {
     this.keyNote = `${what}: ${(e as Error).message}`;
     clearTimeout(this.flashTimer);
     this.flashTimer = setTimeout(() => (this.keyNote = ""), 4000);
+  }
+
+  /** A loss on the link (bleStep.ts): on Bluetooth at 115200, the second within a minute steps down to 9600. */
+  private loss(gen: number) {
+    if (gen !== this.generation || this.phase !== "connected" || this.kind !== "bluetooth" || this.bleRate !== 115200 || this.stepping) return;
+    if (this.losses.note(performance.now())) void this.stepDown(gen);
+  }
+
+  /**
+   * Bluetooth at 115200 kept losing data (the edge of range: the air resends, the module's small buffer overruns):
+   * the radio asked to 9600 once any transfer has finished, then the radio reconnected without the module's unlock,
+   * so both ends are at 9600. Later reconnects stay there; a new Connect tries 115200 again.
+   */
+  private async stepDown(gen: number) {
+    const link = this.link;
+    if (!link) return;
+    this.stepping = true;
+    try {
+      debugLog("bluetooth: losing data at 115200: stepping down to 9600");
+      this.bleSlowNext = true;
+      this.note = "Bluetooth losing data: going to 9600…";
+      // A page's whole job (a write and its read back) finishes first, at the old rate: up to 2 minutes.
+      for (let waited = 0; this.busy && waited < 120_000 && gen === this.generation; waited += 250) await sleep(250);
+      if (gen !== this.generation) return;
+      await link.bleSlow();
+      if (gen !== this.generation) return;
+      await this.teardown();
+      this.lost("Bluetooth was losing data at 115200: reconnecting at 9600.");
+    } finally {
+      this.stepping = false;
+    }
   }
 
   private async fail(e: unknown, quiet = false) {
