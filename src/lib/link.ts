@@ -232,6 +232,7 @@ export class Link {
         return { status: a.status, rest: new Uint8Array(a.rest) };
       }
       debugLog(`link ${msgName(ty)} #${seq} ${payload.length} B: NO ANSWER in ${timeoutMs} ms`);
+      this.onLoss();
       this.waiters.delete(seq);
       // A frame sent just after a restart or 10 s of quiet can go to the terminal (TERM-2), or be lost: a request
       // that changes nothing (or the same thing twice) is sent once more. Never a KEY, CMD, MORE, message, beacon,
@@ -329,6 +330,9 @@ export class Link {
 
   /** The rate in use changed by itself (LINK-11.1's fall-back): the bar says so. */
   onRate: (rate: number) => void = () => {};
+  /** Data lost on the way (a frame missing, a resync, a request unanswered): Bluetooth steps down on these
+   *  (bleStep.ts). */
+  onLoss: () => void = () => {};
 
   /**
    * LINK-11.1: at a raised rate, a request unanswered: the radio may have gone back to 115200 (a framing error on its
@@ -363,6 +367,7 @@ export class Link {
   private async resync() {
     if (!(this.caps & P.caps.LZ)) return;
     debugLog("link resync (HELLO)");
+    this.onLoss();
     await sleep(300);
     const { status, rest } = await this.askRaw(P.msg.HELLO, this.helloAgain(), undefined, false);
     if (status === 0) this.noteHello(rest);
@@ -397,6 +402,23 @@ export class Link {
       }
       this.noteHello(await this.okRaw(HELLO, this.helloAgain()));
       return 9600;
+    });
+  }
+
+  /**
+   * Bluetooth back to 9600 (bleStep.ts): BAUD 9600, answered at 115200, after whatever transfer is running (it holds
+   * `exclusive`). The module goes back to 9600 only on a new connection (its unlock is per connection), so the caller
+   * reconnects next. Best effort: a radio that misses this hears the module at 9600 and swaps by itself (LINK-25.2).
+   */
+  bleSlow(): Promise<void> {
+    if (!this.t.unlock || this.closed) return Promise.resolve();
+    return this.exclusive(async () => {
+      try {
+        await this.askRaw(P.msg.BAUD, baudPayload(9600), 3000, false);
+        await sleep(150); // the answer has left; the radio switches once its ring is empty
+      } catch {
+        /* LINK-25.2 swaps it */
+      }
     });
   }
 
@@ -523,7 +545,8 @@ export class Link {
             const frames = await this.streamRaw(ty, payload);
             return frames.map((f) => parseTextChunk(f)?.text ?? "").join("");
           } catch (e) {
-            if (!(e instanceof StreamGap)) throw e;
+            this.onLoss();
+          if (!(e instanceof StreamGap)) throw e;
           }
         }
         throw new StreamGap([]);

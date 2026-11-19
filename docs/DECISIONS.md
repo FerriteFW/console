@@ -22,6 +22,7 @@
 - Since Nov 16, 2026 Console keeps the cable at 115200 on Windows (the app and browsers): Windows and Console struggled above it. Backups there use fdumpz at 115200 too. Other platforms are unchanged.
 - Since Nov 17, 2026 (ferrite decision 408) the cable runs at 115200 with no compression everywhere; Live View's High speed raises it to 230400 (and the backup's read). Users' cables lost bytes at 230400, and with compression a lost frame stalled the link until a resync. Bluetooth keeps compression.
 
+- Nov 18, 2026 (Alex): Bluetooth at 115200 steps down to 9600 by itself when it loses data. At the edge of range the air resends, the module's small buffer (about 160 bytes) overruns, and long answers lose frames while short ones get through (a user's Windows log: every satellite list read stalled 7-9 s with gaps). Two losses (a missing frame, a resync or an unanswered request; one loss's own retries count once) within a minute: once any transfer has finished, Console asks the radio for 9600 and reconnects without the module's unlock, and the bar says "Bluetooth at 9600 (115200 was losing data)". Reconnects stay at 9600; a new Connect tries 115200 again. `src/lib/bleStep.ts`.
 ## Events and Live View (Oct 20, 2026)
 
 - One subscription per session (LINK-46): Console ORs what each part wants. APRS pages want heard and messages while open.
