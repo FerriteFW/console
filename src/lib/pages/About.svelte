@@ -6,7 +6,7 @@
   import { radio } from "../radio.svelte";
   let debugNote = $state("");
   async function saveDebug() {
-    debugNote = "";
+    debugNote = radio.connectedLink ? "Asking the radio about itself…" : "";
     try {
       const name = await saveDebugInfo();
       if (name) debugNote = `Saved as ${name}. Attach it to your report.`;

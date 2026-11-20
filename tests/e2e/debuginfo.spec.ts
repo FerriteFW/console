@@ -25,6 +25,13 @@ test("debug info: version, connection, the link's log", async ({ page }) => {
   // The link's requests: the opening HELLO and the channel read, each with its answer and time.
   expect(text).toMatch(/link HELLO #\d+ \d+ B: status 0 in \d+ ms/);
   expect(text).toMatch(/link READ_MANY what 2 0-\d+: \d+ frames, \d+ records in \d+ ms/);
+  // LINK-19.6: the radio on itself (the flash chip, the store's mount, the counts) and its readback.
+  const radioPart = text.split("== radio")[1]?.split("== channels")[0] ?? "";
+  expect(radioPart).toContain("-- the radio on itself (ui radio)");
+  expect(radioPart).toMatch(/^flash id=0x[0-9a-f]+ mb=\d+ store=mounted /m);
+  expect(radioPart).toMatch(/^data channels=\d+ zones=\d+ /m);
+  expect(radioPart).toContain("-- the readback (ui)");
+  expect(radioPart).toMatch(/^bar lock=/m);
   await expect(page.getByRole("status").filter({ hasText: "Saved as ferrite-console-debug-" })).toBeVisible();
 });
 
