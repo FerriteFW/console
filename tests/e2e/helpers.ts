@@ -64,10 +64,12 @@ export async function closeWelcome(page: Page) {
   if (await skip.isVisible()) await skip.click();
 }
 
-export async function connect(page: Page) {
+/** `screenMs`: how long the first screen may take. Bluetooth's paced bridge (~960 B/s) under a full run's load took
+ *  more than the default 10 s, and the test failed only in full runs. */
+export async function connect(page: Page, screenMs = 10_000) {
   await page.getByRole("button", { name: "Bridge", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Connected: Bridge", { timeout: 20_000 });
-  await expect.poll(() => screenId(page)).not.toBeNull();
+  await expect.poll(() => screenId(page), { timeout: screenMs }).not.toBeNull();
 }
 
 export async function disconnect(page: Page) {

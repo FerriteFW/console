@@ -546,7 +546,7 @@ class Channels {
     const imp = this.imported;
     if (!imp) return;
     this.remember();
-    const z = this.chirpZone();
+    const z = this.chirpZone(replace);
     this.table.zones = z.zones;
     this.table.channels = this.merged(replace, z.channels);
     this.source = `${imp.channels.length} channels imported from ${imp.file}${replace ? " (replacing all)" : ""}`;
@@ -563,15 +563,17 @@ class Channels {
 
   /** The table as the import would leave it (by number, or replacing every channel), before any split. */
   importPreview(replace: boolean): ChannelSet {
-    const z = this.chirpZone();
+    const z = this.chirpZone(replace);
     return { zones: z.zones, channels: this.merged(replace, z.channels) };
   }
 
   /** The import's channels that name no zone, in the zone CHIRP (`intoChirpZone`). Over 256, the import's split
    *  makes CHIRP 2, CHIRP 3 ... */
-  chirpZone(): { zones: Zone[]; channels: Channel[] } {
+  chirpZone(replace = false): { zones: Zone[]; channels: Channel[] } {
     const imp = this.imported;
-    return intoChirpZone($state.snapshot(this.table.zones) as Zone[], (imp ? $state.snapshot(imp.channels) : []) as Channel[], P.limits.zones, newZone);
+    // Merge: the table's channels keep their own zone where the file names none (an export and import changes nothing)
+    const kept = replace ? undefined : new Map(this.table.channels.map((c) => [c.number, c.zone]));
+    return intoChirpZone($state.snapshot(this.table.zones) as Zone[], (imp ? $state.snapshot(imp.channels) : []) as Channel[], P.limits.zones, newZone, kept);
   }
 
   private merged(replace: boolean, imported: Channel[]): Channel[] {

@@ -65,6 +65,7 @@
 - Comment carries the zone name.
 - New channels get squelch Global. A merge keeps the fields CHIRP has no column for.
 - WFM and digital modes are skipped.
+- Nov 19, 2026: a merge keeps a channel's zone, no zone included, when the file names none: the CHIRP zone (Nov 16) is for channels the table doesn't have yet, and Replace. It had put the table's own unzoned channels in CHIRP, so an export and import was no longer a round trip with nothing to write (the e2e test had failed since).
 
 ## Channel library (Add channels)
 

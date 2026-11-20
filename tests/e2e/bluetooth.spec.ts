@@ -12,7 +12,7 @@ test("bluetooth: Live View from the radio's updates, keys, a lost update put rig
   const sent: Buffer[] = [];
   page.on("websocket", (ws) => ws.on("framesent", (f) => typeof f.payload !== "string" && sent.push(f.payload as Buffer)));
   await openConsole(page, "live", url!);
-  await connect(page);
+  await connect(page, 45_000); // Bluetooth's paced first screen, under a full run's load
   await expect(page.getByRole("status")).toContainText("Bluetooth");
   // Live View's updates (4); the panel beside it also takes the event log's new events (8, LINK-57).
   await expect.poll(() => state(page, (f) => (f.radio.subMask as number) & 4), { timeout: 20_000 }).toBe(4);
