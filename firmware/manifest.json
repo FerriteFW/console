@@ -1,22 +1,16 @@
 {
- "ferrite": {
-  "version": "v0.9.4",
-  "file": "ferrite-0.9.4.ffw",
-  "sha256": "e832bb4c9c0495d68c7b770058f133a93da4257aae6d143b3adfd29e03366a1d",
-  "bytes": 824349
- },
  "reader": {
-  "version": "ferrite-reader v0.9.4",
+  "version": "ferrite-reader v0.9.5",
   "file": "ferrite-reader.btf",
-  "sha256": "272515c8b291a131f11f18d5073165b520a4f3b4939f1e8ff67e23bcc4cbc65e",
+  "sha256": "e6a0d2166c0523007fe6b1f81d91b4b64aef76b7c7f4113a412b3d71b211e709",
   "bytes": 37888,
-  "minisig": "untrusted comment: signature from minisign secret key\nRUQbhRdY9EcsWwO77RBImBG4D3Cbcug9VH8MV5DmLkWQZEPu7+9GkOlZ52LFpmbz3rdYFX9AaYXwUz4/mEE2leMEOH1ieygSfQ8=\ntrusted comment: Ferrite v0.9.4 00613e1\nwWO29xtkkpUipgba+SYEiWFuwR1bWAzwPY2um2TN07e7t0ieQLegfC7V0gMGEsLmIVL7e6g8rViZvrU6B+VuDg==\n"
+  "minisig": "untrusted comment: signature from minisign secret key\nRUQbhRdY9EcsWwrpkoqvQjjeSXFrr/CSUXwgezZbuKCwRUorsu1iFHfiOuYY3RvrKKsXez3ErNUJvPET4DWr7OdjHlABzBpaug8=\ntrusted comment: Ferrite v0.9.5 f44f387\nwAGPziCrPErwejSG0MLTIEKnvR4jmABlZeCmL6o+AA2rf/eaJY8P1mfC2Vm2Xu5S6I5lPicuAYyeIPrgi6jaAA==\n"
  },
  "restorer": {
-  "version": "ferrite-restorer v0.9.4",
+  "version": "ferrite-restorer v0.9.5",
   "file": "ferrite-restorer.btf",
-  "sha256": "e7432933278da1029e953e60c23f0271435a6da8fe72b8b754a650dbda9f9066",
+  "sha256": "4e07aeec7add9164367f2cbc5154d71641438d272d4be46e906debf76df105c5",
   "bytes": 26624,
-  "minisig": "untrusted comment: signature from minisign secret key\nRUQbhRdY9EcsW44nRpa9aEWui0v0b12T5MfYinAUs9ogccPG2DY29zjRdswcTyXYlT7k17XqBa62FRym06E5QvHev7sYSy86lA0=\ntrusted comment: Ferrite v0.9.4 00613e1\nivYI8pigzbZ5oLssRAMxDzpHg2w0vkO8wbyQKKaNtV6fQJbTL9C+d8VcpZrujE8ODoLaMbeVmaFanonozQsSCA==\n"
+  "minisig": "untrusted comment: signature from minisign secret key\nRUQbhRdY9EcsW9koCJICnPTlL0NHQ2inYpgwPTaeAiFt0jZ8LzymA6LBhAolEQKRmscQwO33Xv2JSs/Fz2+snkSyT2s30bvXIQI=\ntrusted comment: Ferrite v0.9.5 f44f387\nN7OFHLh4V3gv4qVX1/Sd9DGE2ESSTNAJMCyityqEYivqC1/KUKH9kt/yAqddhLvl4Bp6nMeiDeFdSoMKxl5hBQ==\n"
  }
 }
