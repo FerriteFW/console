@@ -95,9 +95,22 @@ async function update(page: Page) {
   await wizard(page).getByRole("button", { name: "Update", exact: true }).click();
 }
 
+/** A one-second video (ffmpeg), for the update video's place; null without ffmpeg. */
+function tinyMp4(): Buffer | null {
+  const out = join(mkdtempSync(join(tmpdir(), "vid-")), "v.mp4");
+  const r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=navy:s=320x180:d=1", "-pix_fmt", "yuv420p", "-y", out]);
+  return r.status === 0 && existsSync(out) ? readFileSync(out) : null;
+}
+
 test("firmware: a whole update through the fake bootloader, then connected again", async ({ page }, info) => {
   setMode({});
   const btf = testBtf(24);
+  // The update's feature video (ferritefw.dev's list names it): a short clip here, so it shows while the update runs
+  const clip = tinyMp4();
+  await page.route("**/video/index.json", (route) => route.fulfill({ json: { update: "clip", videos: [] } }));
+  await page.route("**/video/clip.jpg", (route) => route.abort());
+  if (clip) await page.route("**/video/clip.mp4", (route) => route.fulfill({ body: clip, contentType: "video/mp4" }));
+  else await page.route("**/video/clip.mp4", (route) => route.abort());
   await openConsole(page, "firmware");
   await connect(page);
   await pickFile(page, "ferrite-test.btf", btf);
@@ -114,9 +127,16 @@ test("firmware: a whole update through the fake bootloader, then connected again
   await shot(page, info, "61-firmware-confirm");
   await w.getByRole("button", { name: "Update", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Firmware Update holds");
+  // The feature video plays while it runs (hidden when it can't load: no ffmpeg here, or offline)
+  const video = page.locator('[data-k="update-video"]');
+  if (clip) {
+    await expect(video).toBeVisible();
+    await shot(page, info, "61b-firmware-video");
+  } else await expect(video).toHaveCount(0);
 
   const done = page.getByRole("region", { name: "Update done" });
   await expect(done).toBeVisible({ timeout: 45_000 });
+  await expect(video).toHaveCount(0); // gone when done
   await expect(done.locator('[data-k="after"]')).toHaveText(/^v\d+\.\d+\.\d+/);
   await expect(done).toContainText("The file said v9.8.7"); // the simulator keeps its own version
   await expect(page.getByRole("status")).toContainText("Connected: Bridge");
@@ -367,4 +387,34 @@ test("firmware: a radio on 0.9.4 or earlier is turned off and on before Update (
   await shot(page, info, "66-firmware-power-cycle");
   await page.locator('[data-k="power-cycled"]').check();
   await expect(updateButton(page)).toBeEnabled();
+});
+
+test("firmware: an update video that can't load shows nothing, and the update goes on", async ({ page }) => {
+  setMode({});
+  await page.route("**/video/index.json", (route) => route.abort()); // offline: no list, no video
+  await openConsole(page, "firmware");
+  await connect(page);
+  await pickFile(page, "ferrite-test.btf", testBtf(24));
+  await update(page);
+  await expect(page.getByRole("status")).toContainText("Firmware Update holds");
+  await expect(page.locator('[data-k="update-video"]')).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 45_000 });
+});
+
+test("firmware: the update video's Hide hides it for this update", async ({ page }) => {
+  setMode({});
+  const clip = tinyMp4();
+  test.skip(!clip, "needs ffmpeg for a clip");
+  await page.route("**/video/index.json", (route) => route.fulfill({ json: { update: "clip", videos: [] } }));
+  await page.route("**/video/clip.jpg", (route) => route.abort());
+  await page.route("**/video/clip.mp4", (route) => route.fulfill({ body: clip!, contentType: "video/mp4" }));
+  await openConsole(page, "firmware");
+  await connect(page);
+  await pickFile(page, "ferrite-test.btf", testBtf(24));
+  await update(page);
+  const video = page.locator('[data-k="update-video"]');
+  await expect(video).toBeVisible();
+  await video.getByRole("button", { name: "Hide" }).click();
+  await expect(video).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 45_000 });
 });

@@ -25,6 +25,7 @@
   import { channels } from "./lib/channels.svelte";
   import { library } from "./lib/library.svelte";
   import ActivityLog from "./lib/pages/ActivityLog.svelte";
+  import Videos from "./lib/pages/Videos.svelte";
   import AprsHeard from "./lib/pages/AprsHeard.svelte";
   import AprsMessages from "./lib/pages/AprsMessages.svelte";
   import AprsMap from "./lib/pages/AprsMap.svelte";
@@ -86,6 +87,7 @@
   const more: Page[] = [
     { id: "activity", name: "Event Log" },
     { id: "terminal", name: "Terminal" },
+    { id: "videos", name: "Videos" },
     { id: "about", name: "About" },
   ];
   const all: Page[] = [...sections.flatMap((x) => x.tabs ?? [{ id: x.id, name: x.name }]), ...more];
@@ -241,6 +243,8 @@
         <About />
       {:else if page === "activity"}
         <ActivityLog />
+      {:else if page === "videos"}
+        <Videos />
       {:else if page === "aprs-messages"}
         <AprsMessages />
       {:else if page === "aprs-heard"}
