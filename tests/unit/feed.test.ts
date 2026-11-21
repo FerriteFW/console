@@ -16,6 +16,7 @@ test("feed: a well-formed feed passes; a bad one doesn't", () => {
   assert.ok(!isFeed({ ...feed("0.8.6"), ferrite: { ...feed("0.8.6").ferrite, sha256: "zz" } }));
   // UPD-27: a signed update file only, never a bare .btf (it would install without a signature)
   assert.ok(!isFeed({ ...feed("0.8.6"), ferrite: { ...feed("0.8.6").ferrite, file: "ferrite-0.8.6.btf" } }), ".ffw only");
+  assert.ok(isFeed({ ...feed("0.8.6"), ferrite: { ...feed("0.8.6").ferrite, file: "FERRITE-0.8.6.FFW" } }), "the extension in any case");
   assert.ok(!isFeed(null));
 });
 
@@ -26,4 +27,8 @@ test("feed: offers a newer Ferrite on this protocol, asks for Console on another
   assert.equal(newerIn(feed("0.8.4"), "0.8.5", 1), null);
   assert.equal(newerIn(null, "0.8.5", 1), null);
   assert.deepEqual(newerIn(feed("0.8.6"), "", 1), { usable: feed("0.8.6").ferrite }, "no bundled release: the feed's");
+});
+
+test("feed: a .btf named anywhere in the file name but its end is still not a .ffw (UPD-27)", () => {
+  assert.ok(!isFeed({ ...feed("0.8.6"), ferrite: { ...feed("0.8.6").ferrite, file: "ferrite.ffw.btf" } }));
 });
