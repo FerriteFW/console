@@ -188,6 +188,8 @@ test("an update whose firmware stores another layout moves the data as part of i
   await connectWaiting(page, "firmware");
   await allowUnsigned(page); // a local, unsigned test image (UPD-27)
   await page.getByLabel("Firmware file").setInputFiles({ name: "test.btf", mimeType: "application/octet-stream", buffer: testBtf() });
+  const pc = page.locator('[data-k="power-cycled"]'); // a v0.9.4 radio asks for the power-cycle first
+  if (await pc.count()) await pc.check();
   await page.getByRole("button", { name: /^(Update|Install again)…$/ }).click();
   const wizard = page.getByRole("dialog", { name: "Update Ferrite" });
   await wizard.getByRole("checkbox").uncheck(); // the backup kept in Console only (no download)

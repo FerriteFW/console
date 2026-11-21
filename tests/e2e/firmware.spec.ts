@@ -398,6 +398,7 @@ test("firmware: an update video that can't load shows nothing, and the update go
   setMode({});
   await page.route("**/video/index.json", (route) => route.abort()); // offline: no list, no video
   await openConsole(page, "firmware");
+  await allowUnsigned(page); // a local, unsigned test image (UPD-27)
   await connect(page);
   await pickFile(page, "ferrite-test.btf", testBtf(24));
   await update(page);
@@ -414,6 +415,7 @@ test("firmware: the update video's Hide hides it for this update", async ({ page
   await page.route("**/video/clip.jpg", (route) => route.abort());
   await page.route("**/video/clip.mp4", (route) => route.fulfill({ body: clip!, contentType: "video/mp4" }));
   await openConsole(page, "firmware");
+  await allowUnsigned(page); // a local, unsigned test image (UPD-27)
   await connect(page);
   await pickFile(page, "ferrite-test.btf", testBtf(24));
   await update(page);
@@ -433,5 +435,7 @@ test("firmware: an unsigned .btf is refused until Allow unsigned files is ticked
   await expect(updateButton(page)).toBeDisabled();
   await expect(page.locator(".banner")).toContainText("only a release signed with Ferrite's key installs");
   await allowUnsigned(page);
+  const pc = page.locator('[data-k="power-cycled"]'); // the simulator says v0.9.4: the power-cycle box too
+  if (await pc.count()) await pc.check();
   await expect(updateButton(page)).toBeEnabled();
 });

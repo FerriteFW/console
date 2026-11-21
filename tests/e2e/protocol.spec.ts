@@ -58,6 +58,8 @@ test("protocol: an old radio is only updated, then connects as usual", async ({ 
 
   await why.getByRole("link", { name: "Update the radio" }).click();
   await page.getByLabel("Firmware file").setInputFiles({ name: "ferrite-test.btf", mimeType: "application/octet-stream", buffer: testBtf() });
+  const pc = page.locator('[data-k="power-cycled"]'); // a v0.9.4 radio asks for the power-cycle first
+  if (await pc.count()) await pc.check();
   await page.getByRole("button", { name: /^(Update|Install again)…$/ }).click();
   const w = page.getByRole("dialog", { name: "Update Ferrite" });
   await expect(w.locator('[data-k="now"]')).toHaveText(/^v?\d+\.\d+\.\d+/);
