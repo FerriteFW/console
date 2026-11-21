@@ -4,7 +4,7 @@
 // back as a usual connection. Never on a radio.
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
+import { allowUnsigned, connect, disconnect, expect, onRadio, openConsole, shot, state, test } from "./helpers";
 
 test.skip(onRadio(), "the HELLO hook and the fake bootloader run on the simulator only");
 test.afterEach(async ({ page }) => {
@@ -33,6 +33,7 @@ test("protocol: an old radio is only updated, then connects as usual", async ({ 
   const result = join(dirname(modeFile()), "mode.result.json");
   if (existsSync(result)) rmSync(result);
   await openConsole(page, "live");
+  await allowUnsigned(page); // the update it offers is the e2e build's local, unsigned image (UPD-27)
   // The hook is for the bridge's next session: set from this one, then connect again.
   await connect(page);
   expect(await page.evaluate(() => (window as any).ferrite.radio.bridgeControl({ hello_protocol: 3 }))).toBe(true);

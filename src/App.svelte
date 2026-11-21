@@ -26,6 +26,7 @@
   import { library } from "./lib/library.svelte";
   import ActivityLog from "./lib/pages/ActivityLog.svelte";
   import Videos from "./lib/pages/Videos.svelte";
+  import { devOpts } from "./lib/devopts.svelte";
   import AprsHeard from "./lib/pages/AprsHeard.svelte";
   import AprsMessages from "./lib/pages/AprsMessages.svelte";
   import AprsMap from "./lib/pages/AprsMap.svelte";
@@ -140,7 +141,7 @@
   // ?demo connects the demo radio at once; ?demo&press=MENU,DOWN then presses keys (NAME:long for a long one), one
   // every 300 ms: for trying the UI and for scripted checks. window.ferrite is the same for browser automation.
   const params = new URLSearchParams(location.search);
-  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts, lists, migrate, satellites, debugLines };
+  (window as unknown as { ferrite: unknown }).ferrite = { radio, channels, library, settings, firmware, install, aprs, aprsSettings, activity, contacts, lists, migrate, satellites, debugLines, devOpts };
   /** The sidebar's "N unwritten": the edits each section holds that aren't on the radio yet. */
   const unwritten = (id: string) =>
     id === "channels" ? channels.pending : id === "settings" ? settings.dirty.size + lists.dtmf.pending : id === "aprs" ? lists.quick.pending + lists.waypoints.pending : 0;

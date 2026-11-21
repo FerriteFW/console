@@ -52,7 +52,7 @@ import {
   type RestoreSummary,
   type SsbFound,
 } from "./core";
-import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
+import { signatureOf, signatureProblem, splitPicked, type Signed } from "./signature";
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
 import { Link, TimeoutError } from "./link";
@@ -395,6 +395,7 @@ class Install {
   ferriteFfw = $state<FfwSummary | null>(null);
   /** The Ferrite file as picked or bundled (a .ffw is checked again when the developer option changes). */
   private ferriteOrig: { p: Picked; source: "bundled" | "file"; minisig: string | null } | null = null;
+  private readerOrig: { p: Picked; source: "bundled" | "file"; minisig: string | null } | null = null;
   private ffw: FfwFile | null = null;
   /** BACKUP-13: the restorer image (bundled, signed by Ferrite's CI) for Back to stock when Ferrite isn't running. */
   restorerFile = $state<Picked | null>(null);
@@ -483,7 +484,8 @@ class Install {
       if (b) {
         const c = imageCheck("restorer", b);
         const sig = signatureOf(b, m.restorer.minisig ?? null);
-        if (sig.kind === "bad") c.problems.push(signatureText(sig));
+        const why = signatureProblem(sig, devOpts.allowUnsigned); // UPD-27
+        if (why) c.problems.push(why);
         this.restorerFile = c.problems.length ? null : { name: m.restorer.file, bytes: b };
         this.restorerProblem = c.problems.join(" ");
       }
@@ -538,7 +540,8 @@ class Install {
     }
     const sig = signatureOf(p.bytes, minisig);
     const c = firmwareCheck(p.bytes);
-    if (sig.kind === "bad") c.problems.push(signatureText(sig));
+    const why = signatureProblem(sig, devOpts.allowUnsigned); // UPD-27
+    if (why) c.problems.push(why);
     this.ferrite = p;
     this.ferriteCheck = c;
     this.ferriteSignature = sig;
@@ -548,7 +551,9 @@ class Install {
   setReader(p: Picked, source: "bundled" | "file", minisig: string | null) {
     const sig = signatureOf(p.bytes, minisig);
     const c = imageCheck("reader", p.bytes);
-    if (sig.kind === "bad") c.problems.push(signatureText(sig));
+    const why = signatureProblem(sig, devOpts.allowUnsigned); // UPD-27
+    if (why) c.problems.push(why);
+    this.readerOrig = { p, source, minisig };
     this.readerFile = p;
     this.readerCheck = c;
     this.readerSignature = sig;
@@ -559,6 +564,8 @@ class Install {
   recheckFerrite() {
     const o = this.ferriteOrig;
     if (o && !this.running) this.setFerrite(o.p, o.source, o.minisig);
+    const r = this.readerOrig; // the reader too (UPD-27)
+    if (r && !this.running) this.setReader(r.p, r.source, r.minisig);
   }
 
   /** Ferrite takes a .ffw, or a .btf with its .minisig (signature.ts), as the reader does; stock and backup the

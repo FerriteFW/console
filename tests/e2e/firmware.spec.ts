@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32 } from "../../src/lib/zip";
-import { closeWelcome, connect, disconnect, expect, onRadio, openConsole, shot, test } from "./helpers";
+import { allowUnsigned, closeWelcome, connect, disconnect, expect, onRadio, openConsole, shot, test } from "./helpers";
 
 // The worker's bridge sets the mode file once its fixture has run, so it is read when a test runs.
 const modeFile = () => process.env.FERRITE_E2E_FAKEBOOT ?? "";
@@ -112,6 +112,7 @@ test("firmware: a whole update through the fake bootloader, then connected again
   if (clip) await page.route("**/video/clip.mp4", (route) => route.fulfill({ body: clip, contentType: "video/mp4" }));
   else await page.route("**/video/clip.mp4", (route) => route.abort());
   await openConsole(page, "firmware");
+  await allowUnsigned(page); // local, unsigned images (UPD-27)
   await connect(page);
   await pickFile(page, "ferrite-test.btf", btf);
   await expect(fact(page, "version")).toHaveText("v9.8.7");
@@ -179,6 +180,7 @@ test("firmware: the bundled release, checked by its SHA-256 (Ferrite to the next
     return name === "ferrite-rel.btf" ? route.fulfill({ body: served, contentType: "application/octet-stream" }) : route.fulfill({ status: 404 });
   });
   await openConsole(page, "firmware");
+  await allowUnsigned(page); // local, unsigned images (UPD-27)
   await connect(page);
   // The page names the bundled release; the wizard loads and checks it.
   await expect(fact(page, "latest")).toHaveText("v9.8.7");
@@ -227,6 +229,7 @@ test("firmware: a refused block leaves the radio in the bootloader; Resume finis
   setMode({ nak_block: 5 });
   const btf = testBtf(16);
   await openConsole(page, "firmware");
+  await allowUnsigned(page); // local, unsigned images (UPD-27)
   await connect(page);
   await pickFile(page, "ferrite-test.btf", btf);
   await update(page);
@@ -251,6 +254,7 @@ test("firmware: after giving up, the cable opened as it is finds the radio waiti
   setMode({ nak_block: 2 });
   const btf = testBtf(12);
   await openConsole(page, "firmware");
+  await allowUnsigned(page); // local, unsigned images (UPD-27)
   await connect(page);
   await pickFile(page, "ferrite-test.btf", btf);
   await update(page);
@@ -275,6 +279,7 @@ test("firmware: after giving up, the cable opened as it is finds the radio waiti
 test("firmware: REBOOT refused busy (transmitting) says so and keeps the connection", async ({ page }) => {
   setMode({ reboot: "busy" });
   await openConsole(page, "firmware");
+  await allowUnsigned(page); // local, unsigned images (UPD-27)
   await connect(page);
   await pickFile(page, "ferrite-test.btf", testBtf(8));
   await update(page);
@@ -417,4 +422,16 @@ test("firmware: the update video's Hide hides it for this update", async ({ page
   await video.getByRole("button", { name: "Hide" }).click();
   await expect(video).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 45_000 });
+});
+
+test("firmware: an unsigned .btf is refused until Allow unsigned files is ticked (UPD-27)", async ({ page }) => {
+  setMode({});
+  await openConsole(page, "firmware");
+  await connect(page);
+  await pickFile(page, "ferrite-test.btf", testBtf(24));
+  await expect(fact(page, "signature")).toHaveText("Not signed: not a Ferrite release");
+  await expect(updateButton(page)).toBeDisabled();
+  await expect(page.locator(".banner")).toContainText("only a release signed with Ferrite's key installs");
+  await allowUnsigned(page);
+  await expect(updateButton(page)).toBeEnabled();
 });

@@ -18,6 +18,7 @@ export function isFeed(j: unknown): j is Feed {
     typeof f.ferrite.url === "string" &&
     /^https:\/\//.test(f.ferrite.url) &&
     typeof f.ferrite.file === "string" &&
+    /\.ffw$/i.test(f.ferrite.file) && // UPD-27: a signed update file, never a bare .btf
     /^[0-9a-f]{64}$/i.test(f.ferrite.sha256 ?? "") &&
     typeof f.console?.version === "string"
   );

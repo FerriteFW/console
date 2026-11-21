@@ -7,7 +7,7 @@ import { type Page, type Route } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { expect, onRadio, shot, test } from "./helpers";
+import { allowUnsigned, expect, onRadio, shot, test } from "./helpers";
 
 test.skip(onRadio(), "the fakes run on the simulator only");
 test.setTimeout(150_000);
@@ -153,6 +153,7 @@ async function open(page: Page, picker = false, at: "install" | "restore" = "ins
     await card(page, "Back to stock").getByRole("button", { name: "Bridge" }).click();
   }
   await expect(page.locator('[data-k="port"]')).toContainText("Bridge");
+  await allowUnsigned(page); // the e2e build's reader, restorer and test firmware are local and unsigned (UPD-27)
 }
 
 const card = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
