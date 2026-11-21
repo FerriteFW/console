@@ -98,10 +98,12 @@ function tinyMp4(): Buffer | null {
 test("firmware: a whole update through the fake bootloader, then connected again", async ({ page }, info) => {
   setMode({});
   const btf = testBtf(24);
-  // The update's feature video (from ferritefw.dev): a short clip here, so it shows while the update runs
+  // The update's feature video (ferritefw.dev's list names it): a short clip here, so it shows while the update runs
   const clip = tinyMp4();
-  if (clip) await page.route("**/video/console-update.mp4", (route) => route.fulfill({ body: clip, contentType: "video/mp4" }));
-  else await page.route("**/video/console-update.mp4", (route) => route.abort());
+  await page.route("**/video/index.json", (route) => route.fulfill({ json: { update: "clip", videos: [] } }));
+  await page.route("**/video/clip.jpg", (route) => route.abort());
+  if (clip) await page.route("**/video/clip.mp4", (route) => route.fulfill({ body: clip, contentType: "video/mp4" }));
+  else await page.route("**/video/clip.mp4", (route) => route.abort());
   await openConsole(page, "firmware");
   await connect(page);
   await pickFile(page, "ferrite-test.btf", btf);
@@ -362,7 +364,7 @@ test("firmware: one frame lost in the SPI parts: a resync and the parts go on (n
 
 test("firmware: an update video that can't load shows nothing, and the update goes on", async ({ page }) => {
   setMode({});
-  await page.route("**/video/console-update.mp4", (route) => route.abort());
+  await page.route("**/video/index.json", (route) => route.abort()); // offline: no list, no video
   await openConsole(page, "firmware");
   await connect(page);
   await pickFile(page, "ferrite-test.btf", testBtf(24));

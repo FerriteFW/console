@@ -1,8 +1,9 @@
 <script lang="ts">
-  // While the update runs (about two minutes), a feature video from ferritefw.dev, muted; each release replaces the
-  // file. Offline or missing: nothing shows. Skip hides it for this update.
-  const UPDATE_VIDEO = "https://ferritefw.dev/video/console-update.mp4";
+  import { videos } from "../videos.svelte";
+  // While the update runs (about two minutes), a feature video from ferritefw.dev, muted: the one the website's video
+  // list names for updates (videos.svelte.ts), so each release can change it. Offline or none: nothing shows.
   let videoOk = $state(true);
+  void videos.load();
   let videoSkipped = $state(false);
   // Firmware Update as a focused modal (Alex, Oct 29: the wizard): Check (versions, signature) → Update (progress,
   // keep the cable in) → Done. The flow itself is firmware.svelte.ts; the image is the bundled release unless a file
@@ -104,9 +105,9 @@
       {/if}
       {#if firmware.running}
         <p class="warn">Keep the cable in until this says done.</p>
-        {#if videoOk && !videoSkipped}
+        {#if videoOk && !videoSkipped && videos.update}
           <figure class="feature" data-k="update-video">
-            <video src={UPDATE_VIDEO} autoplay muted loop playsinline controls onerror={() => (videoOk = false)} aria-label="While you wait: a Ferrite feature"></video>
+            <video src={videos.mp4(videos.update)} poster={videos.poster(videos.update)} autoplay muted loop playsinline controls onerror={() => (videoOk = false)} aria-label="While you wait: a Ferrite feature"></video>
             <figcaption>While you wait <button class="link" onclick={() => (videoSkipped = true)}>Hide</button></figcaption>
           </figure>
         {/if}
