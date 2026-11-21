@@ -40,6 +40,7 @@ if [ "$what" = mac ]; then
   [ "$(uname)" = Darwin ] || { echo "mac: build on a Mac" >&2; exit 1; }
   cd "$here"
   node scripts/bundle-firmware.mjs ${FIRMWARE:-} >/dev/null # as the Docker builds below
+  [ -n "${UNSIGNED:-}" ] || node "$here/tools/check-bundle.mjs" "$here/public/firmware/manifest.json" || exit 1 # UPD-27
   # Signed with the team's Developer ID and notarized, so macOS opens it without a warning. The certificate is in
   # this Mac's keychain; the notarization login is the keychain profile FerriteConsole (made once with
   # `xcrun notarytool store-credentials FerriteConsole --team-id TEAM --apple-id APPLE_ID`; org/signing.md).
@@ -92,6 +93,7 @@ git -C "$here" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite-console"
 # so it goes along from here.
 # FIRMWARE="RELEASE.ffw READER.btf RESTORER.btf" bundles a signed release (its .minisig files beside); else ../ferrite/target's.
 node "$here/scripts/bundle-firmware.mjs" ${FIRMWARE:-} >/dev/null
+[ -n "${UNSIGNED:-}" ] || node "$here/tools/check-bundle.mjs" "$here/public/firmware/manifest.json" || exit 1 # UPD-27
 COPYFILE_DISABLE=1 tar -C "$here" -c public/firmware | $ssh "$host" "rm -rf $dir/ferrite-console/public/firmware && tar -x -C $dir/ferrite-console"
 # The updater key goes over as an env file only the build reads (mode 600), deleted when the build ends.
 if [ ${#upd[@]} -gt 0 ]; then
