@@ -8,6 +8,7 @@
   import { bridgeEnabled } from "../transport/bridge";
   import UpdateWizard from "../components/UpdateWizard.svelte";
   import { CONSOLE_DOWNLOADS } from "../updates.svelte";
+  import { olderThan } from "../version";
 
   let fileInput: HTMLInputElement;
   let wizard = $state(false);
@@ -37,6 +38,11 @@
   // A file chosen here (not the bundled release): Advanced stays open to show its checks.
   const chosen = $derived(!!firmware.fileName && firmware.fileName !== firmware.bundled?.file);
   const current = $derived(!!mine && !!latest && bare(mine).startsWith(bare(latest)));
+  // Ferrite 0.9.4 and earlier could leave some radios' memory chips (Macronix) stuck mid-write; only a power-off clears
+  // a chip, and an update's restart doesn't cut its power. So a radio on one of those is turned off and on first, and
+  // Update waits for the owner to say so (ferrite SAFE-1.3, Nov 20, 2026).
+  const needsPowerCycle = $derived(connected && !!mine && olderThan(mine, "0.9.5"));
+  let powerCycled = $state(false);
 
   void firmware.loadBundled();
 
@@ -57,8 +63,15 @@
     {#if firmware.needsConsole}
       <p class="sub" data-k="needs-console">Ferrite {firmware.needsConsole} is out; it needs a newer Console. <a href={CONSOLE_DOWNLOADS} target="_blank" rel="noopener">Get it</a>.</p>
     {/if}
+    {#if needsPowerCycle}
+      <div class="power" role="alert" data-k="power-cycle">
+        <strong>Turn the radio off and on before updating.</strong>
+        <p>Ferrite {mine} can leave some radios' memory chip stuck, and only switching the radio off clears it (an update's restart doesn't). Turn the radio off with the knob, wait 10 seconds, turn it on, connect again here, then update. After the update, write your channels again.</p>
+        <label><input type="checkbox" bind:checked={powerCycled} data-k="power-cycled" /> I turned the radio off for 10 seconds and back on</label>
+      </div>
+    {/if}
     <div class="row">
-      <button class="btn primary" disabled={!latest || (!!check && !ok)} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
+      <button class="btn primary" disabled={!latest || (!!check && !ok) || (needsPowerCycle && !powerCycled)} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
       {#if connected && current}<span class="sub">Up to date.</span>{/if}
     </div>
     <p class="sub hint">Channels and settings stay. Over the cable only. A radio still on its stock firmware: use the <a href="#/install">Install</a> tab.</p>
@@ -193,6 +206,25 @@
   }
   dd.bad {
     color: var(--red);
+  }
+  .power {
+    margin: 12px 0 4px;
+    padding: 14px 16px;
+    border: 2px solid var(--red);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--red) 12%, transparent);
+  }
+  .power strong {
+    display: block;
+    color: var(--red);
+    font-size: 17px;
+  }
+  .power p {
+    margin: 6px 0 10px;
+  }
+  .power label {
+    font-weight: 600;
+    cursor: pointer;
   }
   .banner {
     margin-top: 10px;

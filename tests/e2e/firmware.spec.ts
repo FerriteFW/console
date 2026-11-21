@@ -82,9 +82,16 @@ const fact = (page: Page, k: string) => page.locator(`[data-k="${k}"]`);
 /** The page's button: "Install again…" when the radio already has that version (the e2e build bundles one). */
 const updateButton = (page: Page) => page.getByRole("button", { name: /^(Update|Install again)…$/ });
 const wizard = (page: Page) => page.getByRole("dialog", { name: "Update Ferrite" });
+/** The page's Update button, after its power-cycle box when a radio on 0.9.4 or earlier asks for one (the simulator
+ * says v0.9.4 until the release). */
+async function pressUpdate(page: Page) {
+  const box = page.locator('[data-k="power-cycled"]');
+  if (await box.count()) await box.check();
+  await updateButton(page).click();
+}
 /** The page's Update button, then the wizard's Update: the update starts. */
 async function update(page: Page) {
-  await updateButton(page).click();
+  await pressUpdate(page);
   await wizard(page).getByRole("button", { name: "Update", exact: true }).click();
 }
 
@@ -100,7 +107,7 @@ test("firmware: a whole update through the fake bootloader, then connected again
   await expect(fact(page, "signature")).toHaveText("Not signed: not a Ferrite release");
   await shot(page, info, "60-firmware-checked");
 
-  await updateButton(page).click();
+  await pressUpdate(page);
   const w = wizard(page);
   await expect(w.locator('[data-k="now"]')).toHaveText(/^v\d+\.\d+\.\d+/);
   await expect(w.locator('[data-k="new"]')).toHaveText("v9.8.7");
@@ -155,7 +162,7 @@ test("firmware: the bundled release, checked by its SHA-256 (Ferrite to the next
   await connect(page);
   // The page names the bundled release; the wizard loads and checks it.
   await expect(fact(page, "latest")).toHaveText("v9.8.7");
-  await updateButton(page).click();
+  await pressUpdate(page);
   await expect(wizard(page).locator('[data-k="new"]')).toHaveText("v9.8.7");
   await expect(wizard(page).getByRole("button", { name: "Update", exact: true })).toBeEnabled();
   await wizard(page).getByRole("button", { name: "Cancel" }).click();
@@ -340,4 +347,24 @@ test("firmware: one frame lost in the SPI parts: a resync and the parts go on (n
   await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 120_000 });
   expect(await page.evaluate(() => (window as any).__dropped)).toBe(true);
   await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.hello?.layouts?.chip)).toBe(3);
+});
+
+test("firmware: a radio on 0.9.4 or earlier is turned off and on before Update (some radios' memory chips stick)", async ({ page }, info) => {
+  setMode({});
+  await openConsole(page, "firmware");
+  await connect(page);
+  const warn = page.locator('[data-k="power-cycle"]');
+  const radioSays = (await page.locator('[data-k="now"]').first().textContent()) ?? "";
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(radioSays.trim());
+  const older = !!m && (Number(m[1]) * 1e6 + Number(m[2]) * 1e3 + Number(m[3])) < 9005;
+  if (!older) {
+    await expect(warn).toHaveCount(0); // 0.9.5 and later: no warning
+    return;
+  }
+  await expect(warn).toBeVisible();
+  await expect(warn).toContainText("Turn the radio off and on before updating.");
+  await expect(updateButton(page)).toBeDisabled();
+  await shot(page, info, "66-firmware-power-cycle");
+  await page.locator('[data-k="power-cycled"]').check();
+  await expect(updateButton(page)).toBeEnabled();
 });
