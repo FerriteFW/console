@@ -373,3 +373,21 @@ test("firmware: an update video that can't load shows nothing, and the update go
   await expect(page.locator('[data-k="update-video"]')).toHaveCount(0, { timeout: 10_000 });
   await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 45_000 });
 });
+
+test("firmware: the update video's Hide hides it for this update", async ({ page }) => {
+  setMode({});
+  const clip = tinyMp4();
+  test.skip(!clip, "needs ffmpeg for a clip");
+  await page.route("**/video/index.json", (route) => route.fulfill({ json: { update: "clip", videos: [] } }));
+  await page.route("**/video/clip.jpg", (route) => route.abort());
+  await page.route("**/video/clip.mp4", (route) => route.fulfill({ body: clip!, contentType: "video/mp4" }));
+  await openConsole(page, "firmware");
+  await connect(page);
+  await pickFile(page, "ferrite-test.btf", testBtf(24));
+  await update(page);
+  const video = page.locator('[data-k="update-video"]');
+  await expect(video).toBeVisible();
+  await video.getByRole("button", { name: "Hide" }).click();
+  await expect(video).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 45_000 });
+});
