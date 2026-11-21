@@ -9,7 +9,7 @@ import { type Page } from "@playwright/test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { disconnect, expect, onRadio, openConsole, test } from "./helpers";
+import { allowUnsigned, disconnect, expect, onRadio, openConsole, test } from "./helpers";
 import { startBridge, type Bridges } from "./procs";
 
 test.skip(onRadio(), "the simulator only");
@@ -186,6 +186,7 @@ function testBtf(kb = 24): Buffer {
 test("an update whose firmware stores another layout moves the data as part of it (one flow)", async ({ page }) => {
   writeFileSync(b.fakeboot!, JSON.stringify({ deaf_ms: 300 }));
   await connectWaiting(page, "firmware");
+  await allowUnsigned(page); // a local, unsigned test image (UPD-27)
   await page.getByLabel("Firmware file").setInputFiles({ name: "test.btf", mimeType: "application/octet-stream", buffer: testBtf() });
   await page.getByRole("button", { name: /^(Update|Install again)…$/ }).click();
   const wizard = page.getByRole("dialog", { name: "Update Ferrite" });

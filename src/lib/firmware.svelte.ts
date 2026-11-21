@@ -21,7 +21,7 @@ import {
 } from "./core";
 import { Link, TimeoutError } from "./link";
 import { radio } from "./radio.svelte";
-import { signatureOf, signatureText, splitPicked, type Signed } from "./signature";
+import { signatureOf, signatureProblem, splitPicked, type Signed } from "./signature";
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
 import { newerFirmware } from "./updates.svelte";
@@ -87,6 +87,8 @@ class Firmware {
   get devUnsigned() {
     return devOpts.allowUnsigned;
   }
+  /** The picked files came from the update feed: signed, whatever the option (UPD-27). */
+  private fromRelease = false;
   /** The parts written so far (the "parts" stage). */
   partsDone = $state(0);
   partsTotal = $state(0);
@@ -154,7 +156,7 @@ class Firmware {
       const files = [new File([b as BlobPart], r.file)];
       // A .ffw carries its signature inside; a bare .btf's comes from the manifest.
       if (r.minisig) files.push(new File([r.minisig], `${r.file}.minisig`));
-      await this.pick(files);
+      await this.pick(files, !!r.url); // UPD-27: one from the update feed is signed, developer option or not
     } catch (e) {
       this.error = `The release didn't load (${(e as Error).message}). Choose a file instead.`;
     }
@@ -163,21 +165,22 @@ class Firmware {
   /** The developer option changed: the last picked file is checked again under it. */
   async setDevUnsigned(on: boolean) {
     devOpts.allowUnsigned = on;
-    if (this.picked.length && !this.running) await this.pick(this.picked);
+    if (this.picked.length && !this.running) await this.pick(this.picked, this.fromRelease);
   }
 
   /** The picked files (a .ffw; or a .btf, and its .minisig when there is one), checked by the core. */
-  async pick(picked: FileList | File[]) {
+  async pick(picked: FileList | File[], release = false) {
     if (this.running) return;
     const files = Array.from(picked);
     if (!files.length) return;
     this.picked = files;
+    this.fromRelease = release;
     await loadCore();
     this.ffw?.free();
     this.ffw = null;
     this.ffwSummary = null;
     const ffwFile = files.find((f) => /\.ffw$/i.test(f.name));
-    if (ffwFile) return this.pickFfw(ffwFile);
+    if (ffwFile) return this.pickFfw(ffwFile, release);
     const { btf: file, sig } = splitPicked(files);
     this.fileName = file?.name ?? files[0].name;
     this.error = "";
@@ -195,8 +198,9 @@ class Firmware {
     const signature = signatureOf(bytes, sig ? await sig.text() : null);
     this.signature = signature;
     const c = firmwareCheck(bytes);
-    // A signature that doesn't verify refuses the image like a failed check.
-    if (signature.kind === "bad") c.problems.push(signatureText(signature));
+    // UPD-27: a signature that doesn't verify refuses the image like a failed check; none, unless allowed
+    const why = signatureProblem(signature, this.devUnsigned, release);
+    if (why) c.problems.push(why);
     this.check = c;
     this.bytes = c.problems.length ? null : bytes;
     this.blocks = c.blocks;
@@ -205,7 +209,7 @@ class Firmware {
 
   /** UPD-21, UPD-24: a .ffw checked whole by the core (its signature, every hash, each part's target); then its
    *  image as a picked .btf. */
-  private async pickFfw(file: File) {
+  private async pickFfw(file: File, release = false) {
     this.fileName = file.name;
     this.error = "";
     this.after = null;
@@ -213,7 +217,7 @@ class Firmware {
     this.signature = null;
     let f: FfwFile;
     try {
-      f = new FfwFile(new Uint8Array(await file.arrayBuffer()), this.devUnsigned);
+      f = new FfwFile(new Uint8Array(await file.arrayBuffer()), this.devUnsigned && !release); // UPD-27
     } catch (e) {
       this.check = null;
       this.bytes = null;

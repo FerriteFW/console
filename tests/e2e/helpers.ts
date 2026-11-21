@@ -94,3 +94,13 @@ export const state = <T>(page: Page, f: (w: Win["ferrite"]) => T) =>
 export async function expectScreen(page: Page, id: string) {
   await expect.poll(() => screenId(page), { message: `the radio's screen is ${id}` }).toBe(id);
 }
+
+/** UPD-27: "Allow unsigned files" on, as a developer ticks it: the e2e build bundles local, unsigned images (the
+ *  reader, the restorer, test firmware), which Console otherwise refuses. The files already loaded are checked again. */
+export async function allowUnsigned(page: Page) {
+  await page.evaluate(async () => {
+    const f = (window as any).ferrite;
+    await f.firmware.setDevUnsigned(true);
+    f.install.recheckFerrite();
+  });
+}

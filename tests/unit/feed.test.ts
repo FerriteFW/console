@@ -14,6 +14,8 @@ test("feed: a well-formed feed passes; a bad one doesn't", () => {
   assert.ok(!isFeed({ ...feed("0.8.6"), format: "other" }));
   assert.ok(!isFeed({ ...feed("0.8.6"), ferrite: { ...feed("0.8.6").ferrite, url: "http://x/y.ffw" } }), "https only");
   assert.ok(!isFeed({ ...feed("0.8.6"), ferrite: { ...feed("0.8.6").ferrite, sha256: "zz" } }));
+  // UPD-27: a signed update file only, never a bare .btf (it would install without a signature)
+  assert.ok(!isFeed({ ...feed("0.8.6"), ferrite: { ...feed("0.8.6").ferrite, file: "ferrite-0.8.6.btf" } }), ".ffw only");
   assert.ok(!isFeed(null));
 });
 
