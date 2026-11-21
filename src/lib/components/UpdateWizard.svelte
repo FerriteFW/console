@@ -1,4 +1,9 @@
 <script lang="ts">
+  // While the update runs (about two minutes), a feature video from ferritefw.dev, muted; each release replaces the
+  // file. Offline or missing: nothing shows. Skip hides it for this update.
+  const UPDATE_VIDEO = "https://ferritefw.dev/video/console-update.mp4";
+  let videoOk = $state(true);
+  let videoSkipped = $state(false);
   // Firmware Update as a focused modal (Alex, Oct 29: the wizard): Check (versions, signature) → Update (progress,
   // keep the cable in) → Done. The flow itself is firmware.svelte.ts; the image is the bundled release unless a file
   // was chosen under Advanced. It can't be closed while the radio is in the middle of it.
@@ -99,6 +104,12 @@
       {/if}
       {#if firmware.running}
         <p class="warn">Keep the cable in until this says done.</p>
+        {#if videoOk && !videoSkipped}
+          <figure class="feature" data-k="update-video">
+            <video src={UPDATE_VIDEO} autoplay muted loop playsinline controls onerror={() => (videoOk = false)} aria-label="While you wait: a Ferrite feature"></video>
+            <figcaption>While you wait <button class="link" onclick={() => (videoSkipped = true)}>Hide</button></figcaption>
+          </figure>
+        {/if}
       {/if}
       {#if firmware.error}<div class="err" role="alert" aria-label="Update error">{firmware.error}</div>{/if}
       {#if firmware.stage === "failed" && !firmware.running}
@@ -266,5 +277,28 @@
     font-size: 22px;
     font-weight: 600;
     color: var(--green);
+  }
+  .feature {
+    margin: 12px 0 0;
+  }
+  .feature video {
+    display: block;
+    width: 100%;
+    border-radius: 6px;
+    background: #000;
+  }
+  .feature figcaption {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--sub);
+  }
+  .feature .link {
+    background: none;
+    border: 0;
+    padding: 0 0 0 8px;
+    color: var(--accent, inherit);
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
   }
 </style>
