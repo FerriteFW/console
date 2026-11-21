@@ -94,7 +94,7 @@ function readBackDiff(back: ChannelSet, want: ChannelSet): string {
   const by = <T extends { number: number }>(xs: T[]) => new Map(xs.map((x) => [x.number, x]));
   for (const [what, a, b] of [["zone", by(back.zones), by(want.zones)], ["channel", by(back.channels), by(want.channels)]] as const) {
     const nums = [...new Set([...a.keys(), ...b.keys()])].sort((x, y) => x - y);
-    const bad = nums.filter((n) => JSON.stringify(a.get(n)) !== JSON.stringify(b.get(n)));
+    const bad = nums.filter((n) => !sameJson(a.get(n), b.get(n))); // key order is no difference (console#40)
     if (bad.length) out.push(`${bad.length} ${what}s: ${bad.slice(0, 12).map((n) => `${n} (${fields(a.get(n) as never, b.get(n) as never)})`).join("; ")}`);
   }
   return out.join(" | ") || "(no record differs: the order or a field Console adds)";
@@ -253,6 +253,10 @@ class Channels {
           ? { label: `Reading channels: ${got} of ${info.channels}`, done: got, total: info.channels }
           : { label: `Reading channels: at ${Math.min(at, max)} of ${max}`, done: at, total: max };
       });
+      // console#40: a read short of INFO's count is no read: a backup or a verify missing channels would take the
+      // missing ones as deleted.
+      if (info.channels && cmap.size !== info.channels)
+        throw new Error(`Read ${cmap.size} of the ${info.channels} channels the radio says it has: read again, and if it keeps happening, save the debug info.`);
       const zones: Uint8Array[] = [];
       for (let i = 0; i < info.zones; i++) {
         const r = zmap.get(i);
@@ -510,14 +514,17 @@ class Channels {
       if (!verified) debugLog(`write: read back DIFFERS: ${readBackDiff(back, this.table)}${presetsSame ? "" : "; range presets differ"}${this.home !== undefined && backHome !== this.home ? `; home ${backHome} not ${this.home}` : ""}`);
       else debugLog("write: read back matches");
       if (backPresets) this.basePresets = backPresets;
-      if (!error) {
+      // console#40: the table becomes the radio's only when the read back matched it. Otherwise it keeps the edits:
+      // against the fresh read back (the base), Write shows what didn't reach the radio, to try again.
+      if (verified) {
         this.table = clone(back);
         this.home = backHome;
         if (backPresets) this.presets = clone(backPresets);
         this.history = [];
         this.restored = 0;
       }
-      this.source = `Written to ${radio.label} and read back at ${new Date().toLocaleTimeString()}`;
+      const at = new Date().toLocaleTimeString();
+      this.source = verified ? `Written to ${radio.label} and read back at ${at}` : `Written to ${radio.label} at ${at}, not verified: your edits are kept`;
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
     }

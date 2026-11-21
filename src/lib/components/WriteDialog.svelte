@@ -126,7 +126,7 @@
             Written: {writeCount(w)} {writeCount(w) === 1 ? "change" : "changes"}. Read back: the radio holds the table.
           </p>
         {:else}
-          <p class="note">Written, but the read back differs from the table: the table now shows what the radio holds.</p>
+          <p class="note">Written, but the read back differs from the table. The table keeps your edits; Write again shows what didn't reach the radio.</p>
         {/if}
         <div class="actions"><button class="btn primary" onclick={() => channels.closeWrite()}>Close</button></div>
       {/if}
