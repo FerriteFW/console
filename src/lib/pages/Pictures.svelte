@@ -77,7 +77,7 @@
 </script>
 
 <div class="pg">
-  <div class="pg-bar" role="toolbar" aria-label="Pictures">
+  <div class="pg-bar" role="toolbar" aria-label="SSTV">
     <div class="grp">
       <button class="btn" disabled={!connected || busy} onclick={() => pictures.read()} title="Read the pictures on the radio">Read from radio</button>
     </div>

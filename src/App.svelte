@@ -76,7 +76,7 @@
       ],
     },
     { id: "satellites", name: "Satellites" },
-    { id: "pictures", name: "Pictures" },
+    { id: "sstv", name: "SSTV" },
     {
       id: "firmware",
       name: "Firmware",
@@ -266,7 +266,7 @@
         <DtmfMemories />
       {:else if page === "satellites"}
         <Satellites />
-      {:else if page === "pictures"}
+      {:else if page === "sstv"}
         <Pictures />
       {/if}
     </main>
