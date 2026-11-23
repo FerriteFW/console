@@ -7,6 +7,7 @@
   import { ago, aprs, when, type MsgRow } from "../aprs.svelte";
   import { radio } from "../radio.svelte";
   import { route } from "../route.svelte";
+  import { tick } from "svelte";
 
   let now = $state(Date.now());
   let peer = $state<string | null>(null);
@@ -39,6 +40,25 @@
 
   const threads = $derived(aprs.threads);
   const open = $derived(threads.find((t) => t.peer === peer) ?? null);
+
+  // console#56: the newest message stays in view. Opening a conversation scrolls to its end; a new message
+  // follows it while the list is at (or near) the bottom, and leaves you be once you've scrolled up to read.
+  let list = $state<HTMLOListElement | undefined>();
+  let stick = true;
+  let shownPeer: string | null = null;
+  function onScroll() {
+    if (list) stick = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  }
+  $effect(() => {
+    const p = open?.peer ?? null;
+    const n = open?.messages.length ?? 0;
+    if (!list || !n) return;
+    if (p !== shownPeer) {
+      shownPeer = p;
+      stick = true;
+    }
+    if (stick) tick().then(() => list && (list.scrollTop = list.scrollHeight));
+  });
   const left = $derived(67 - new TextEncoder().encode(text).length);
 
   function pick(p: string) {
@@ -129,7 +149,7 @@
     <section class="conv" aria-label={peer ? `Conversation with ${peer}` : "New message"}>
       {#if open}
         <h2>{open.peer}</h2>
-        <ol class="bubbles">
+        <ol class="bubbles" bind:this={list} onscroll={onScroll}>
           {#each open.messages as m (m.id)}
             <li class:out={!m.inbound} class:fresh={m.at !== null && now - m.at < 10_000} data-state={m.state}>
               <div class="text">{m.text}</div>

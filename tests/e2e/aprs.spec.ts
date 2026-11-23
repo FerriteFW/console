@@ -101,6 +101,32 @@ test("messages: conversations by station, and one sent (queued: waits for APRS m
   await shot(page, info, "aprs-05-sent");
 });
 
+test("messages: the newest stays in view (console#56)", async ({ page }) => {
+  if (onRadio()) return; // MSG_SEND only against the simulator
+  await page.setViewportSize({ width: 1100, height: 480 }); // a short list, so the conversation scrolls
+  await openConsole(page, "aprs-messages");
+  await connect(page);
+  await loaded(page);
+  await page.getByRole("navigation", { name: "Conversations" }).locator("[data-peer]").filter({ hasText: "VA3RTX" }).click();
+  const conv = page.getByRole("region", { name: "Conversation with VA3RTX" });
+  const list = conv.locator("ol.bubbles");
+  const atEnd = () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 2);
+  await subscribed(page, 3);
+  for (const t of ["scroll one", "scroll two", "scroll three"]) {
+    await page.getByLabel("Message", { exact: true }).fill(t);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(conv.locator("li").last()).toContainText(t);
+  }
+  expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  await expect.poll(atEnd).toBe(true);
+  // scrolled up to read: a new one doesn't pull the list down
+  await list.evaluate((el) => (el.scrollTop = 0));
+  await page.getByLabel("Message", { exact: true }).fill("scroll four");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(conv.locator("li").last()).toContainText("scroll four");
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
+});
+
 test("messages: one deleted on the radio (MSG_DELETE, LINK-52) after an in-page confirm; the list reads again", async ({ page }, info) => {
   await openConsole(page, "aprs-messages");
   await connect(page);
