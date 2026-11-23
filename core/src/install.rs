@@ -545,7 +545,7 @@ impl Fdump {
                     continue;
                 }
                 let want = FD_ZCHUNK.min(self.len as usize - self.data.len());
-                let chunk = match (payload.first(), payload.len() - 1) {
+                let chunk = match (payload.first(), payload.len().saturating_sub(1)) {
                     (Some(&Z_ERASED), 0) => Some(vec![0xFF; want]),
                     (Some(&Z_RAW), k) if k == want => Some(payload[1..].to_vec()),
                     (Some(&Z_DEFLATE), k) if k > 0 => {
@@ -1177,6 +1177,10 @@ mod tests {
         let mut fd2 = Fdump::new_z(0, 100);
         fd2.feed(b"FDOK");
         assert!(fd2.feed(&fd_frame(b'Z', 0, &[Z_RAW, 1, 2])).error.unwrap().contains("doesn't decode"));
+        // An empty chunk (found by fuzz::outside::fdump_stream: `payload.len() - 1` underflowed): doesn't decode.
+        let mut fd3 = Fdump::new_z(0, 100);
+        fd3.feed(b"FDOK");
+        assert!(fd3.feed(&fd_frame(b'Z', 0, &[])).error.unwrap().contains("doesn't decode"));
         assert!(fd2.feed(&fd_frame(b'B', 0, &[1; 100])).nak, "fdump's frames aren't fdumpz's");
         // The run again to the end: the inflated chunk ACKed, then the end frame's CRC over the decoded data.
         let mut fd = Fdump::new_z(0x1000, len as u32);
