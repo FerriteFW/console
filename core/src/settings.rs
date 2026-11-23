@@ -1061,9 +1061,18 @@ pub fn view(rec: &[u8], ex: &Extras) -> View {
                 }
                 continue;
             }
-            let (mut kind, choices, hint, mut note) = classify(sc, &s, &p, name, &got.value);
+            let (mut kind, mut choices, hint, mut note) = classify(sc, &s, &p, name, &got.value);
             if class.linked == Some(false) {
                 (kind, note) = (Kind::Readonly, RADIO_ONLY.into());
+            }
+            // APRS-29.2, KISS-7 (decision 440): 0 5 3's KISS goes on and off only on the radio (the link keeps the
+            // radio's KISS): offered without it, and read only while the radio has it on.
+            if p == [5, 3] {
+                if s.aprs_select() == 3 {
+                    (kind, note) = (Kind::Readonly, RADIO_ONLY.into());
+                } else {
+                    choices.retain(|c| c != "KISS");
+                }
             }
             groups[g].items.push(Item {
                 id: id.clone(),
@@ -1131,6 +1140,10 @@ pub fn set(rec: &[u8], ex: &Extras, id: &str, value: &str) -> Result<(Vec<u8>, E
     }
     if class_of(&p).is_some_and(|c| c.linked == Some(false)) {
         return Err(format!("{id}: {RADIO_ONLY}"));
+    }
+    // APRS-29.2, KISS-7: KISS on or off is the radio's own (the link keeps the radio's KISS).
+    if p == [5, 3] && (value.trim().eq_ignore_ascii_case("KISS") || settings_of(rec).aprs_select() == 3) {
+        return Err(format!("{id} APRS mode: KISS {RADIO_ONLY}"));
     }
     let name = path_name(&p).ok_or_else(|| format!("{id}: not a setting"))?;
     let value = value.trim();
@@ -1506,10 +1519,19 @@ mod tests {
         assert_eq!(tot.kind, Kind::Level);
         assert_eq!((tot.choices.first().unwrap().as_str(), tot.choices.last().unwrap().as_str()), ("30 s", "600 s"));
         // LINK-5: never changed over the link.
-        for id in ["0 9 4", "0 8 8 4", "0 9 3 1", "0 9 2 3", "0 5 8"] {
+        for id in ["0 9 4", "0 8 8 4", "0 9 3 1", "0 9 2 3"] {
             let i = item(&v, id);
             assert_eq!((i.kind, i.note.as_str()), (Kind::Readonly, RADIO_ONLY), "{id}");
         }
+        // APRS-29.2, KISS-6.1, KISS-7 (decision 440): 0 5 3 is Off, Tracker, On, KISS; 0 5 8 only KISS's port. KISS
+        // itself goes on only on the radio (the link keeps the radio's KISS), so choosing it here is refused.
+        let mode = item(&v, "0 5 3");
+        assert_eq!(mode.value, "Off");
+        assert!(mode.choices.iter().any(|c| c == "Tracker") && mode.choices.iter().any(|c| c == "On"), "{:?}", mode.choices);
+        let mut ports = item(&v, "0 5 8").choices.clone();
+        ports.sort();
+        assert_eq!(ports, ["Bluetooth", "Cable"]);
+        assert!(set(&rec, "0 5 3", "KISS").is_err(), "KISS on is the radio's own (KISS-7)");
         assert_eq!(item(&v, "0 9 4").value, "United States");
         // PWR-24.1 (decision 328): Low Power Mode and its Auto level go over the link now.
         for id in ["0 7 7 2", "0 7 7 3"] {
