@@ -153,13 +153,14 @@ pub fn parse_flash(line: &str) -> Option<(String, String, u32)> {
     let (vendor, rest) = rest.split_once(", ")?;
     let kb: u32 = rest.split(' ').next()?.parse().ok()?;
     rest.split(' ').nth(1).filter(|u| u.starts_with("KB"))?;
-    (id.chars().all(|c| c.is_ascii_hexdigit()) && kb > 0).then(|| (id.to_string(), vendor.to_string(), kb * 1024))
+    let bytes = kb.checked_mul(1024)?;
+    (id.chars().all(|c| c.is_ascii_hexdigit()) && kb > 0).then(|| (id.to_string(), vendor.to_string(), bytes))
 }
 
 /// `sys`: "... uid 0123ABCD4567EF0189ABCDEF" -> the MCU's three ID words, lowest first.
 pub fn parse_uid(line: &str) -> Option<[u32; 3]> {
     let rest = &line[line.find(" uid ")? + 5..];
-    let h = rest.get(..24)?;
+    let h = rest.get(..24).filter(|h| h.is_ascii())?;
     let w = |i: usize| u32::from_str_radix(&h[8 * i..8 * i + 8], 16).ok();
     Some([w(0)?, w(1)?, w(2)?])
 }
@@ -319,7 +320,7 @@ pub fn parse_flashcrc(line: &str) -> Option<(u32, u32)> {
     let rest = &line[line.find("flash crc32 ")? + 12..];
     let crc = u32::from_str_radix(rest.get(..8)?, 16).ok()?;
     let kb: u32 = rest.get(8..)?.strip_prefix(" over ")?.split(' ').next()?.parse().ok()?;
-    Some((crc, kb * 1024))
+    Some((crc, kb.checked_mul(1024)?))
 }
 
 // ---- fdump: hwtest's binary dump (src/core/fdump.h; fdump_proto.py), and fdumpz (BACKUP-9.6) ----
@@ -1015,6 +1016,11 @@ mod tests {
         assert_eq!(uid_text([0x3F2A_91C0, 0x7D44_0123, 0x89AB_CDEF]).len(), 23);
         assert_eq!(parse_flashcrc("flash crc32 1A2B3C4D over 4096 KB, 52 s"), Some((0x1A2B_3C4D, 4 << 20)));
         assert_eq!(parse_flashcrc("flash crc32 nope"), None);
+        // Cable noise in a line, sizes past u32 (found by fuzz::outside::reader_lines: a slice inside a character
+        // panicked, a release build too; KB * 1024 overflowed): not a line, never a panic.
+        assert_eq!(parse_uid("sys uid 00123ABCD457EF\u{fffd}0189ABADEF"), None);
+        assert_eq!(parse_flash("flash id 5E4016 (Zbit, 4194304 KB)"), None);
+        assert_eq!(parse_flashcrc("flash crc32 1A2B3C4D over 4194304 KB, 52 s"), None);
     }
 
     /// fdump_proto.py's vectors: the header and a block's CRC (tests/host/test_fdump.c checks the same on the C side).
