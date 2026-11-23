@@ -187,6 +187,7 @@ pub fn view(settings_rec: &[u8], rec: &[u8], ex: &Extras) -> View {
         }
         if rec.len() == RECORD_LEN {
             items.extend(reply_items(rec));
+            items.push(retries_item(rec));
         }
         sc.aprs = None;
         sc.term = None;
@@ -224,6 +225,44 @@ fn reply_items(rec: &[u8]) -> Vec<Item> {
         item("reply.delay", "Delay", "How long after a message the reply goes.", REPLY_DELAY_NAMES[delay].into(), delay != 0, Kind::Pick, REPLY_DELAY_NAMES.iter().map(|n| n.to_string()).collect(), ""),
         item("reply.text", "Message", "What is sent, once per station in 30 minutes. None is sent without one.", reply.clone(), !reply.is_empty(), Kind::Text, Vec::new(), "up to 45 characters"),
     ]
+}
+
+/// APRS-13.6: message retries, from the record's end (0.9.6). On the radio it's in the Messages options (hold MENU
+/// in 0 5 2), not MENU 0 5, so its id isn't a menu number: `retries`.
+pub const RETRY_NAMES: [&str; 5] = ["Off", "1", "2", "3", "4"];
+
+fn retries_item(rec: &[u8]) -> Item {
+    let n = (rec[ferrite_app::link::APRS_RETRIES_AT] as usize).min(RETRY_NAMES.len() - 1);
+    Item {
+        id: "retries".into(),
+        path: "0 5 2".into(),
+        name: "Message retries".into(),
+        sub: "Messages".into(),
+        help: "Tries after the first while no ack comes. Off sends each message once (a receive-only iGate never acks).".into(),
+        value: RETRY_NAMES[n].into(),
+        changed: n != ferrite_app::aprs::RETRIES_DEFAULT as usize,
+        kind: Kind::Pick,
+        choices: RETRY_NAMES.iter().map(|n| n.to_string()).collect(),
+        hint: String::new(),
+        note: String::new(),
+    }
+}
+
+/// APRS-13.6: message retries set, checked by ferrite's own link session.
+fn set_retries(s: &Settings, rec: &[u8], ex: &Extras, value: &str) -> Result<(Vec<u8>, Extras), String> {
+    if rec.len() != RECORD_LEN {
+        return Err("message retries need Ferrite 0.9.6 or later on the radio".into());
+    }
+    let i = RETRY_NAMES.iter().position(|n| n.eq_ignore_ascii_case(value)).ok_or_else(|| format!("Message retries: one of {}", RETRY_NAMES.join(", ")))?;
+    let mut r = rec.to_vec();
+    r[ferrite_app::link::APRS_RETRIES_AT] = i as u8;
+    scratch(|sc| {
+        sc.aprs = None;
+        sc.load(s);
+        sc.write_record(what::APRS, &r)?;
+        let back = sc.read_record(what::APRS)?;
+        Ok((back, ex.clone()))
+    })
 }
 
 /// APRS-57: one of auto reply's page values set: the record with it changed, checked by ferrite's own link session
@@ -267,6 +306,9 @@ pub fn set(settings_rec: &[u8], rec: &[u8], ex: &Extras, id: &str, value: &str) 
     let s = settings_or_default(settings_rec);
     if let Some(field) = id.strip_prefix("reply.") {
         return set_reply(&s, rec, ex, field, value.trim()); // APRS-57
+    }
+    if id == "retries" {
+        return set_retries(&s, rec, ex, value.trim()); // APRS-13.6
     }
     let p = parse_path(id).filter(|p| p[0] == 5).ok_or_else(|| format!("{id}: not an APRS setting"))?;
     let name = path_name(&p).ok_or_else(|| format!("{id}: not a setting"))?;
@@ -465,6 +507,10 @@ pub fn restore(text: &str) -> Result<(Vec<u8>, Backup), String> {
     if rec.len() == ferrite_app::link::APRS_TEXT_AT {
         rec.push(0);
     }
+    // A backup from before message retries (0.9.5 and older): four, the default (APRS-13.6).
+    if rec.len() == ferrite_app::link::APRS_RETRIES_AT {
+        rec.push(ferrite_app::aprs::RETRIES_DEFAULT);
+    }
     Ok((rec, b))
 }
 
@@ -569,6 +615,29 @@ mod tests {
         assert_eq!(back, rec, "the defaults after it");
     }
 
+    /// APRS-13.6, LINK-43: message retries on this page (the radio's Messages options): 4 by default, Off to 4, a
+    /// bad one refused; a 0.9.5 radio's record can't take it; a backup from before it restores with the default.
+    #[test]
+    fn message_retries() {
+        let srec = record_of(&Settings::DEFAULT);
+        let rec = default_record();
+        let v = view(&srec, &rec);
+        let it = item(&v, "retries");
+        assert_eq!((it.value.as_str(), it.changed, it.kind), ("4", false, Kind::Pick));
+        assert_eq!(it.choices, ["Off", "1", "2", "3", "4"]);
+        let r = set(&srec, &rec, "retries", "off").unwrap();
+        assert_eq!(r[ferrite_app::link::APRS_RETRIES_AT], 0);
+        let v = view(&srec, &r);
+        assert_eq!((item(&v, "retries").value.as_str(), item(&v, "retries").changed), ("Off", true));
+        assert!(set(&srec, &r, "retries", "5").is_err());
+        let d = diff(&srec, &rec, &Extras::default(), &r, &Extras::default());
+        assert!(d.iter().any(|c| c.name == "Message retries" && c.to == "Off"), "{d:?}");
+        assert!(set(&srec, &rec[..ferrite_app::link::APRS_RETRIES_AT], "retries", "2").unwrap_err().contains("0.9.6"));
+        let old = backup(&srec, &rec[..ferrite_app::link::APRS_RETRIES_AT], "2026-11-21T22:00:00.000Z", BTreeMap::new());
+        let (back, _) = restore(&old).unwrap();
+        assert_eq!(back, rec, "four, the default, after it");
+    }
+
     /// LINK-43: a change is the menu's; a refusal is the radio's; the plan writes through ferrite's link session and
     /// the radio's record afterwards is the one asked for.
     #[test]
@@ -632,7 +701,8 @@ mod tests {
             ids,
             [
                 "0 5 4", "0 5 5 1", "0 5 5 2", "0 5 5 3", "0 5 5 6", "0 5 5 7", "0 5 6 1", "0 5 6 2", "0 5 6 3",
-                "0 5 6 4", "0 5 6 5", "0 5 7 1", "0 5 7 2", "0 5 7 3", "0 5 9 1", "0 5 9 2", "0 5 9 3", "0 5 9 4", "0 5 9 5", "0 5 9 9", "reply.to", "reply.delay", "reply.text"
+                "0 5 6 4", "0 5 6 5", "0 5 7 1", "0 5 7 2", "0 5 7 3", "0 5 9 1", "0 5 9 2", "0 5 9 3", "0 5 9 4", "0 5 9 5", "0 5 9 9", "reply.to", "reply.delay", "reply.text",
+                "retries"
             ]
         );
         assert_eq!(v.elsewhere.iter().filter(|e| e.starts_with("0 5 9 7")).count(), 1, "{:?}", v.elsewhere);
