@@ -1738,11 +1738,12 @@ mod tests {
         assert!(missing.is_empty(), "menu settings Console doesn't show: {missing:?}");
         // Shown from the settings record, not in the dump (not in `SETTINGS`: their own editors on the radio): the
         // weather location codes, the fixed positions (`set` takes them typed), the callsign, Extend TX, the PIN
-        // lock's three and the region (LINK-5: read only here); auto reply's page (APRS-57: its own rows, MENU 0 5 9 9).
+        // lock's three and the region (LINK-5: read only here); auto reply's page (APRS-57: its own rows, MENU 0 5 9 9);
+        // message retries (APRS-13.6: the Messages options' row).
         let extra: Vec<&String> = console.keys().filter(|id| !radio_list.contains_key(*id)).collect();
         assert_eq!(
             extra,
-            ["0 4 5 2", "0 5 5 5", "0 6 9", "0 8 6 1", "0 8 8 4", "0 9 3 1", "0 9 3 2", "0 9 3 3", "0 9 4", "reply.delay", "reply.text", "reply.to"],
+            ["0 4 5 2", "0 5 5 5", "0 6 9", "0 8 6 1", "0 8 8 4", "0 9 3 1", "0 9 3 2", "0 9 3 3", "0 9 4", "reply.delay", "reply.text", "reply.to", "retries"],
             "rows Console shows that aren't in the radio's settings list"
         );
         // Editable in Console exactly when the radio takes a change over the link: another of its choices (or the
