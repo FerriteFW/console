@@ -16,6 +16,17 @@ const PASS_STEP_S: u32 = 20;
 const PASS_HORIZON_S: u32 = 2 * 86_400;
 const MAP_PASSES: usize = 3;
 
+/// Seconds from the elements' epoch to `t`, when an i32 holds them (a damaged record's epoch may be anywhere).
+fn since(t: u32, epoch: u32) -> Option<i32> {
+    i32::try_from(t as i64 - epoch as i64).ok()
+}
+
+/// A clock the map can work from: past the first hour of 1970 (the pass search looks back an hour) and three days
+/// short of u32's end (two orbits and two days ahead); a radio's clock may say anything.
+fn clock_ok(now: u32) -> bool {
+    (3600..u32::MAX - 3 * 86_400).contains(&now)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Point {
     pub lat: f32,
@@ -92,7 +103,10 @@ pub fn next_passes(records: &[Vec<u8>], now: u32, place: (f64, f64)) -> Vec<Opti
             let sat = wire::decode(r).ok()?;
             let sgp = Sgp4::new(&sat.el).ok()?;
             let epoch = sat.el.epoch_unix();
-            find_passes(&|t: u32| sgp.at(t as i32 - epoch as i32).ok(), now, place, 1).into_iter().next()
+            if !clock_ok(now) {
+                return None;
+            }
+            find_passes(&|t: u32| sgp.at(since(t, epoch)?).ok(), now, place, 1).into_iter().next()
         })
         .collect()
 }
@@ -103,7 +117,10 @@ pub fn sat_map(record: &[u8], now: u32, place: Option<(f64, f64)>) -> Result<Sat
     let sat = wire::decode(record).map_err(|e| e.to_string())?;
     let sgp = Sgp4::new(&sat.el).map_err(|e| format!("{e:?}"))?;
     let epoch = sat.el.epoch_unix();
-    let at = |t: u32| sgp.at(t as i32 - epoch as i32).ok();
+    if !clock_ok(now) {
+        return Err(format!("the clock says {now}: no map from it"));
+    }
+    let at = |t: u32| sgp.at(since(t, epoch)?).ok();
     let state = at(now).ok_or("the orbit has decayed by now")?;
     let (here, alt) = under(state.r, now);
     let footprint_km = R_EARTH * (R_EARTH / (R_EARTH + alt.max(0.0))).acos();
@@ -177,5 +194,11 @@ mod tests {
         let n = next_passes(&[iss(now - 3600), vec![0u8; 3]], now, (49.25, -123.1));
         assert_eq!((n[0], n[1]), (Some(m.passes[0]), None));
         assert!(sat_map(&[0u8; 3], now, None).is_err());
+        // A clock at either end, an epoch far from it (found by fuzz::outside::satellites: the seconds overflowed):
+        // refused or no orbit, never a panic.
+        assert!(sat_map(&iss(now - 3600), u32::MAX - 10, None).is_err());
+        assert!(sat_map(&iss(now - 3600), 5, Some((0.0, 0.0))).is_err());
+        assert_eq!(next_passes(&[iss(now - 3600)], u32::MAX, (0.0, 0.0)), vec![None]);
+        assert!(sat_map(&iss(now - 3600), 4_000_000_000, None).is_err(), "decades from the epoch");
     }
 }
