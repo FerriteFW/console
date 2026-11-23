@@ -1065,7 +1065,7 @@ pub fn view(rec: &[u8], ex: &Extras) -> View {
             if class.linked == Some(false) {
                 (kind, note) = (Kind::Readonly, RADIO_ONLY.into());
             }
-            // APRS-29.2, KISS-7 (decision 437): 0 5 3's KISS goes on and off only on the radio (the link keeps the
+            // APRS-29.2, KISS-7 (decision 440): 0 5 3's KISS goes on and off only on the radio (the link keeps the
             // radio's KISS): offered without it, and read only while the radio has it on.
             if p == [5, 3] {
                 if s.aprs_select() == 3 {
@@ -1523,7 +1523,7 @@ mod tests {
             let i = item(&v, id);
             assert_eq!((i.kind, i.note.as_str()), (Kind::Readonly, RADIO_ONLY), "{id}");
         }
-        // APRS-29.2, KISS-6.1, KISS-7 (decision 437): 0 5 3 is Off, Tracker, On, KISS; 0 5 8 only KISS's port. KISS
+        // APRS-29.2, KISS-6.1, KISS-7 (decision 440): 0 5 3 is Off, Tracker, On, KISS; 0 5 8 only KISS's port. KISS
         // itself goes on only on the radio (the link keeps the radio's KISS), so choosing it here is refused.
         let mode = item(&v, "0 5 3");
         assert_eq!(mode.value, "Off");
