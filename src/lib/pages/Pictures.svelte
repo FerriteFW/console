@@ -8,7 +8,7 @@
 
   const connected = $derived(radio.phase === "connected");
   const cable = $derived(radio.kind === "cable");
-  // LINK-61: before 0.9.1 any raw write starts an update, so the slots to send are shown read-only there
+  // LINK-61: before 0.9.6 a raw write there starts an update, so the slots to send are shown read-only there
   const writable = $derived(!connected || canWrite());
   const busy = $derived(!!pictures.busy || !!radio.busy);
   const slot = (k: number) => pictures.slots?.[k] ?? null;

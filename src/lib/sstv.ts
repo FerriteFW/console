@@ -25,10 +25,8 @@ const PAGE = 256;
 const PROGRAM_MAX = 64;
 
 /** The first Ferrite with the picture slots: before it any `DATA_WRITE` starts an update (LINK-61), so Console
- *  writes pictures only to this or newer (reading is safe on any). AT MERGE: set to the release that carries SSTV;
- *  no release has it yet (SSTV is held on the ferrite and console `sstv` branches, Nov 17, 2026), so this branch's
- *  value only lets a test build (which says the version it was built from) be written to. */
-export const PICTURES_FROM = "0.9.1";
+ *  writes pictures only to this or newer (reading is safe on any). 0.9.6 is the first release that carries SSTV. */
+export const PICTURES_FROM = "0.9.6";
 
 export const slotAddr = (k: number) => BASE + k * SLOT_SIZE;
 export const pixelsAddr = (k: number) => slotAddr(k) + PIXELS_AT;
