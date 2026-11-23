@@ -144,7 +144,11 @@ fn poke(rng: &mut Rng, v: &mut serde_json::Value, depth: usize) {
         V::String(s) => {
             *s = match rng.below(6) {
                 0 => String::new(),
-                1 if !s.is_empty() => s[..s.len() - 1].to_string(),
+                1 if !s.is_empty() => {
+                    let mut t = s.clone();
+                    t.pop();
+                    t
+                }
                 2 => format!("{s}0"),
                 3 => s.to_ascii_uppercase(),
                 4 => mutate_text(rng, s),

@@ -183,11 +183,11 @@ fn satellites() {
 fn reader_lines() {
     use crate::install::*;
     const LINES: &[&str] = &[
-        "flash: id EF4017 Winbond 8 MB",
-        "uid 12345678 9abcdef0 11223344",
-        "flashcrc 0x1234abcd 4194304",
-        "080F0000: 00 11 22 33 44 55 66 77 88 99 aa bb cc dd ee ff",
-        "RT950-12345-67890-ABCDE-FGHIJ-2026-11-23-stock-ABCD.bin",
+        "flash id EF4016 (Winbond, 4096 KB) sfdp ok",
+        "sys: clock 240 MHz uid 0123ABCD4567EF0189ABCDEF",
+        "flash crc32 1A2B3C4D over 4096 KB, 52 s",
+        "80F0000:55563835FFFFFFFFFFFFFFFFFFFFFFFF*0C",
+        "rt950pro-backup-N0EQ80R081H4T84MXM3T-20261101-UV85.bin",
     ];
     timed("reader_lines", || {
         for seed in seeds(4000) {
