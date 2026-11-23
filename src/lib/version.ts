@@ -14,3 +14,8 @@ export function olderThan(radio: string, latest: string): boolean {
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i];
   return false;
 }
+
+/** True when `v` is `min` or newer; a missing or odd version never counts. */
+export function atLeast(v: string, min: string): boolean {
+  return parse(v) !== null && parse(min) !== null && !olderThan(v, min);
+}

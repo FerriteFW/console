@@ -1072,6 +1072,7 @@ dependencies = [
  "udsc",
  "udsp",
  "upocsag",
+ "usstv",
 ]
 
 [[package]]
@@ -4792,6 +4793,10 @@ dependencies = [
  "serde",
  "url",
 ]
+
+[[package]]
+name = "usstv"
+version = "0.1.0"
 
 [[package]]
 name = "utf8_iter"
