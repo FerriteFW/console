@@ -217,7 +217,7 @@ pub fn marker_word(m: &[u8]) -> Option<String> {
 /// holds no such line or its sum is wrong (an older reader answers `?  (help)`).
 pub fn parse_mdump(text: &str) -> Option<Vec<u8>> {
     let rest = &text[text.find("80F0000:")? + 8..];
-    let hexs = rest.get(..2 * MARKER_LEN)?;
+    let hexs = rest.get(..2 * MARKER_LEN).filter(|h| h.is_ascii())?;
     let b: Vec<u8> =
         (0..MARKER_LEN).map(|i| u8::from_str_radix(&hexs[2 * i..2 * i + 2], 16).ok()).collect::<Option<_>>()?;
     let sum = u8::from_str_radix(rest.get(2 * MARKER_LEN..)?.strip_prefix('*')?.get(..2)?, 16).ok()?;
@@ -278,7 +278,7 @@ pub fn parse_mdump_range(text: &str, addr: u32, len: usize) -> Option<Vec<u8>> {
         let Some((a, rest)) = line.trim().split_once(':') else { continue };
         let Ok(at) = u32::from_str_radix(a, 16) else { continue };
         let Some((hexs, sum)) = rest.split_once('*') else { continue };
-        if at != addr + out.len() as u32 || hexs.len() % 2 != 0 {
+        if at != addr + out.len() as u32 || hexs.len() % 2 != 0 || !hexs.is_ascii() {
             return None;
         }
         let b: Vec<u8> = (0..hexs.len() / 2).map(|i| u8::from_str_radix(&hexs[2 * i..2 * i + 2], 16).ok()).collect::<Option<_>>()?;
@@ -1443,6 +1443,10 @@ mod tests {
         assert_eq!(parse_mdump(line).as_deref(), Some(&uv[..]));
         assert_eq!(parse_mdump(&line.replace("*0C", "*0D")), None, "a wrong sum");
         assert_eq!(parse_mdump("?  (help)\r\n"), None, "an older reader");
+        // Noise on the cable read as text (found by fuzz::outside::reader_lines: a slice inside a character
+        // panicked, in a release build too): no marker, no panic.
+        assert_eq!(parse_mdump("80F0000:5\u{fffd}563835FFFFFFFFFFFFFFFFFFFFFF*0C"), None);
+        assert_eq!(parse_mdump_range("80F0000:5\u{fffd}55*0C", 0x080F_0000, 2), None);
         let blank = parse_mdump("80F0000:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF*F0").unwrap();
         assert_eq!(blank, vec![0xFF; 16]);
         assert_eq!(marker_word(&blank), None);
