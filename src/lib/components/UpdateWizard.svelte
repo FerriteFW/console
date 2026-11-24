@@ -105,7 +105,7 @@
       {/if}
       {#if firmware.running}
         <p class="warn">Keep the cable in until this says done.</p>
-        {#if videoOk && !videoSkipped && videos.update}
+        {#if videoOk && !videoSkipped && videos.playable && videos.update}
           <figure class="feature" data-k="update-video">
             <video src={videos.mp4(videos.update)} poster={videos.poster(videos.update)} autoplay muted loop playsinline controls onerror={() => (videoOk = false)} aria-label="While you wait: a Ferrite feature"></video>
             <figcaption>While you wait <button class="link" onclick={() => (videoSkipped = true)}>Hide</button></figcaption>

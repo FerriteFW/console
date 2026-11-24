@@ -72,6 +72,51 @@ struct Opened {
     baud: Option<u32>,
 }
 
+/// Whether this desktop can play Console's videos (H.264 MP4 from ferritefw.dev). Linux's WebKitGTK plays media
+/// through the system's GStreamer: without its audio sink, MP4 demuxer or an H.264 decoder the web view can hang
+/// setting a `<video>` up, and no error reaches the page (Linux reports, Nov 23, 2026: the update wizard's video
+/// froze Console mid-update, and the radio went back to normal mode). So the page creates no `<video>` without
+/// them. Other systems play it natively.
+#[tauri::command]
+fn media_ok() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let ok = gstreamer_has_video();
+        debug::line(&format!("media_ok {ok}"));
+        ok
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn gstreamer_has_video() -> bool {
+    use std::path::PathBuf;
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for var in ["GST_PLUGIN_SYSTEM_PATH_1_0", "GST_PLUGIN_PATH_1_0", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_PATH"] {
+        if let Some(v) = std::env::var_os(var) {
+            dirs.extend(std::env::split_paths(&v));
+        }
+    }
+    for d in [
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0",
+        "/usr/lib/aarch64-linux-gnu/gstreamer-1.0",
+        "/usr/lib64/gstreamer-1.0",
+        "/usr/lib/gstreamer-1.0",
+        "/usr/local/lib/gstreamer-1.0",
+        "/usr/local/lib64/gstreamer-1.0",
+    ] {
+        dirs.push(PathBuf::from(d));
+    }
+    let has = |name: &str| dirs.iter().any(|d| d.join(name).is_file());
+    // autoaudiosink (gst-plugins-good), the MP4 demuxer (good), and any H.264 decoder
+    has("libgstautodetect.so")
+        && has("libgstisomp4.so")
+        && ["libgstlibav.so", "libgstopenh264.so", "libgstva.so", "libgstvaapi.so", "libgstnvcodec.so", "libgstfluh264dec.so"].iter().any(|n| has(n))
+}
+
 #[tauri::command]
 async fn serial_ports() -> Result<Vec<serial::PortRow>, String> {
     let r = tauri::async_runtime::spawn_blocking(serial::list).await.map_err(|e| e.to_string()).and_then(|r| r);
@@ -305,7 +350,8 @@ pub fn run() {
             debug_log,
             save_file,
             save_download,
-            open_url
+            open_url,
+            media_ok
         ])
         .run(tauri::generate_context!())
         .expect("error while running Ferrite Console");
