@@ -59,12 +59,10 @@ fn settings_records_from_the_radio() {
     settings_records(false);
 }
 
-/// The same with the fixed position anywhere: ferrite's `screens::lists::grid` overflows (`b'A' + ... as u8`) on a
-/// position past the poles or the date line, which the settings view shows as a grid square. A panic in a debug
-/// build; in a release one, characters past the letters. A damaged record only (the radio's own editor keeps it on
-/// the globe).
+/// The same with the fixed position anywhere: ferrite's `screens::lists::grid` overflowed (`b'A' + ... as u8`) on a
+/// position past the poles or the date line, which the settings view shows as a grid square (a panic in a debug
+/// build). Fixed in ferrite (GPS-3.2, ferrite#149): the position is kept on the globe.
 #[test]
-#[ignore = "found: ferrite's screens::lists::grid overflows on a settings record whose fixed position is off the globe"]
 fn settings_records_position_off_the_globe() {
     settings_records(true);
 }

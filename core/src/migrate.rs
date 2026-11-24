@@ -620,6 +620,7 @@ mod tests {
             comment: Buf::from(format!("row {i}").as_bytes()),
             msg: Buf::new(),
             msg_min: None,
+            msg_to: Default::default(),
             fx25: None,
             device: None,
         }
