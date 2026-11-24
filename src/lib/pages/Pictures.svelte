@@ -143,7 +143,7 @@
         {#each received as s (s.k)}
           {@const h = s.header!}
           <div class="pic" data-slot={s.k}>
-            {#if s.px}<canvas use:paint={{ px: s.px, rows: s.rows }} aria-label="Received picture"></canvas>{/if}
+            {#if s.px}<canvas use:paint={{ px: s.px, rows: s.rows }} aria-label="Received picture"></canvas>{:else if s.rows === 0}<p class="sub" data-k="no-lines">The signal was lost before the first line: nothing to show.</p>{/if}
             <div class="cap">
               <b>{modeName(h.vis) || "SSTV"}</b>
               {#if h.lines === RECEIVING}<span class="tag amber">being received</span>{:else if !complete(h)}<span class="tag amber">incomplete</span>{/if}
