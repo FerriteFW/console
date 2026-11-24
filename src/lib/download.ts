@@ -9,7 +9,7 @@ export async function saveDownload(name: string, blob: Blob): Promise<string> {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core");
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    return await invoke<string>("save_download", bytes, { headers: { "x-name": name } });
+    return await invoke<string>("save_download", bytes, { headers: { "x-name": name } }).catch(asError);
   }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -28,8 +28,14 @@ export async function saveAs(name: string, blob: Blob): Promise<string | null> {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core");
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    const path = await invoke<string | null>("save_file", bytes, { headers: { "x-name": name } });
+    const path = await invoke<string | null>("save_file", bytes, { headers: { "x-name": name } }).catch(asError);
     return path ? (path.split(/[\\/]/).pop() ?? name) : null;
   }
   return saveDownload(name, blob);
+}
+
+/** The desktop shell's commands reject with their message as a plain string: as an Error, so callers' `e.message`
+ *  says what failed (a backup before a write showed "the backup read failed (undefined)", Nov 24, 2026). */
+function asError(e: unknown): never {
+  throw e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e));
 }

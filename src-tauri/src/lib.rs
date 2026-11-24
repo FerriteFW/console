@@ -229,16 +229,45 @@ async fn transport_close(app: State<'_, App>) -> Result<(), String> {
 /// is taken), with no dialog, read back. The path.
 #[tauri::command]
 async fn save_download(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
-    use tauri::Manager;
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("No file bytes.".into());
-    };
     let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).unwrap_or("ferrite.bin");
     let name = std::path::Path::new(name).file_name().and_then(|n| n.to_str()).unwrap_or("ferrite.bin").to_string();
-    let dir = app.path().download_dir().map_err(|e| format!("No Downloads folder: {e}"))?;
+    let r = save_download_to(&app, request.body(), &name);
+    debug::result(&format!("save_download {name}"), &r);
+    r
+}
+
+/// The file's bytes: raw (the IPC's custom protocol), or the JSON array the postMessage fallback sends (Linux, when
+/// WebKitGTK refuses the custom protocol: a backup before a write failed "(undefined)" on Linux Mint, Nov 24, 2026).
+fn body_bytes(body: &tauri::ipc::InvokeBody) -> Result<std::borrow::Cow<'_, [u8]>, String> {
+    use std::borrow::Cow;
+    match body {
+        tauri::ipc::InvokeBody::Raw(b) => Ok(Cow::Borrowed(b.as_slice())),
+        tauri::ipc::InvokeBody::Json(v) => json_bytes(v).map(Cow::Owned).ok_or_else(|| "No file bytes (the message held no byte array).".to_string()),
+    }
+}
+
+/// A byte array as JSON: `[1, 2, 3]`, or a typed array's `{"0": 1, "1": 2}`.
+fn json_bytes(v: &serde_json::Value) -> Option<Vec<u8>> {
+    let byte = |x: &serde_json::Value| x.as_u64().filter(|&n| n <= 255).map(|n| n as u8);
+    match v {
+        serde_json::Value::Array(a) => a.iter().map(byte).collect(),
+        serde_json::Value::Object(m) => (0..m.len()).map(|i| m.get(&i.to_string()).and_then(byte)).collect(),
+        _ => None,
+    }
+}
+
+/// The Downloads folder: the system's (XDG on Linux), else `~/Downloads`.
+fn downloads(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    use tauri::Manager;
+    app.path().download_dir().or_else(|e| app.path().home_dir().map(|h| h.join("Downloads")).map_err(|_| format!("No Downloads folder: {e}")))
+}
+
+fn save_download_to(app: &tauri::AppHandle, body: &tauri::ipc::InvokeBody, name: &str) -> Result<String, String> {
+    let bytes = body_bytes(body)?;
+    let dir = downloads(app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make {}: {e}", dir.display()))?;
-    let path = free_name(&dir, &name);
-    std::fs::write(&path, bytes).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+    let path = free_name(&dir, name);
+    std::fs::write(&path, &bytes).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
     let back = std::fs::read(&path).map_err(|e| format!("Couldn't read {} back: {e}", path.display()))?;
     if back != *bytes {
         return Err(format!("{} doesn't read back as written.", path.display()));
@@ -274,15 +303,19 @@ fn open_url(url: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn save_file(request: tauri::ipc::Request<'_>) -> Result<Option<String>, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("No file bytes.".into());
-    };
+    let r = save_file_to(&request).await;
+    debug::result("save_file", &r);
+    r
+}
+
+async fn save_file_to(request: &tauri::ipc::Request<'_>) -> Result<Option<String>, String> {
+    let bytes = body_bytes(request.body())?;
     let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).unwrap_or("backup.bin").to_string();
     let Some(f) = rfd::AsyncFileDialog::new().set_file_name(&name).save_file().await else {
         return Ok(None);
     };
     let path = f.path().to_path_buf();
-    std::fs::write(&path, bytes).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+    std::fs::write(&path, &bytes).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
     // Read back: the page only goes on when the file on disk is the backup.
     let back = std::fs::read(&path).map_err(|e| format!("Couldn't read {} back: {e}", path.display()))?;
     if back != *bytes {
@@ -355,4 +388,21 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Ferrite Console");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::json_bytes;
+
+    /// The postMessage fallback's byte arrays: a plain array or a typed array's object; anything else, or a number past
+    /// a byte, is no file.
+    #[test]
+    fn json_bytes_both_shapes() {
+        assert_eq!(json_bytes(&serde_json::json!([1, 2, 255])), Some(vec![1, 2, 255]));
+        assert_eq!(json_bytes(&serde_json::json!({"0": 7, "1": 8})), Some(vec![7, 8]));
+        assert_eq!(json_bytes(&serde_json::json!([])), Some(vec![]));
+        assert_eq!(json_bytes(&serde_json::json!([256])), None);
+        assert_eq!(json_bytes(&serde_json::json!({"1": 7})), None, "a gap");
+        assert_eq!(json_bytes(&serde_json::json!("abc")), None);
+    }
 }
