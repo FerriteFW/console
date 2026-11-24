@@ -16,7 +16,7 @@ use crate::channels::{mhz_text, ChanView, ZoneView, ZONE_CAP};
 use crate::plan::{check_channel, Set};
 use crate::radioside::MAX_ZONES;
 use ferrite_app::chan::MAX_CHANNELS;
-use ferrite_app::slot::STEPS;
+use ferrite_app::slot::{NAM, STEPS};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -29,7 +29,7 @@ pub struct Item {
     /// MHz; absent or equal to `rx` for simplex.
     #[serde(default)]
     pub tx: Option<f64>,
-    /// FM, NFM or AM.
+    /// FM, NFM, AM or NAM. AM on the airband becomes NAM ([`airband_mode`]).
     pub mode: String,
     /// Low, Mid or High; absent: Low.
     #[serde(default)]
@@ -115,8 +115,12 @@ pub fn add(items: &[Item], table: &Set, split: bool) -> Added {
         .find(|&s| (s..s + want).all(|n| !used.contains(&n)))
         .unwrap_or(1);
     let mut full = false;
-    // What the table (and this add) already holds: (rx, duplex, offset, mode, zone).
-    let key = |c: &ChanView| (c.rx.clone(), c.duplex.clone(), c.offset.clone(), c.mode.clone(), c.zone);
+    // What the table (and this add) already holds: (rx, duplex, offset, mode, zone). AM and NAM count as one, so an
+    // airband channel kept from before NAM (AM) isn't added again.
+    let key = |c: &ChanView| {
+        let mode = if c.mode == "NAM" { "AM".to_string() } else { c.mode.clone() };
+        (c.rx.clone(), c.duplex.clone(), c.offset.clone(), mode, c.zone)
+    };
     let mut have: std::collections::BTreeSet<_> = table.channels.iter().map(key).collect();
     for it in items {
         let label = if it.name.is_empty() { format!("{:.4} MHz", it.rx) } else { it.name.clone() };
@@ -143,7 +147,7 @@ pub fn add(items: &[Item], table: &Set, split: bool) -> Added {
         let rx = ten_hz(it.rx);
         let mut v = ChanView::new(1, rx);
         v.name = clean_name(&it.name);
-        v.mode = it.mode.clone();
+        v.mode = airband_mode(&it.mode, it.rx).into();
         v.power = it.power.clone().unwrap_or_else(|| "Low".into());
         v.step = step_for(rx).into();
         v.zone = zone;
@@ -289,7 +293,7 @@ pub struct FixedSet {
     pub default_power: String,
     /// "12.5kHz" (NFM) or "25kHz" (FM).
     pub default_bandwidth: String,
-    /// "AM" makes AM channels (airband); anything else ("Analog") FM or NFM by the bandwidth.
+    /// "AM" makes AM channels (NAM on the airband: [`airband_mode`]); anything else ("Analog") FM or NFM by the bandwidth.
     #[serde(default)]
     pub default_mode: Option<String>,
     #[serde(default)]
@@ -706,15 +710,27 @@ pub fn tone_word(t: &str) -> Result<u16, String> {
     Ok(w)
 }
 
+/// The mode a library channel or tune gets: AM on the airband (108-137 MHz) is NAM, the radio's own airband default
+/// (ferrite VFO-4.2, decision 447: the narrow filter 8.33 kHz channels need); any other mode, or AM elsewhere (HF),
+/// stays as given.
+pub fn airband_mode(mode: &str, mhz: f64) -> &str {
+    if mode == "AM" && (108.0..=137.0).contains(&mhz) {
+        "NAM"
+    } else {
+        mode
+    }
+}
+
 /// `SLOT`'s payload (LINK-33, decision 347) that tunes slot `slot` (0-2) to a VFO as the library's Tune does:
 /// frequency, mode, both tones and the shift, every time, so nothing of the slot's last frequency lingers.
 pub fn slot_tune(slot: u8, hz: u64, mode: &str, tx_tone: &str, rx_tone: &str, shift_hz: i64) -> Result<Vec<u8>, String> {
     use ferrite_core::link::slot as f;
-    let m = match mode.to_ascii_uppercase().as_str() {
+    let m = match airband_mode(&mode.to_ascii_uppercase(), hz as f64 / 1e6) {
         "FM" => 0u8,
         "NFM" => 1,
         "AM" => 2,
-        _ => return Err(format!("{mode}: FM, NFM or AM")),
+        "NAM" => NAM,
+        _ => return Err(format!("{mode}: FM, NFM, AM or NAM")),
     };
     let f10 = u32::try_from(hz / 10).map_err(|_| "frequency out of range".to_string())?;
     let mut p = vec![slot, f::FREQ | f::MODE | f::RX_TONE | f::TX_TONE | f::VFO | f::OFFSET];
@@ -803,9 +819,39 @@ mod tests {
         let a = add(&[it, b], &Set::default(), true);
         assert!(a.notes.is_empty(), "{:?}", a.notes);
         assert_eq!(a.channels.len(), 2);
-        assert!(a.channels[0].rx_only && a.channels[0].mode == "AM");
+        // NAM on the airband, the radio's default there (ferrite VFO-4.2, decision 447).
+        assert!(a.channels[0].rx_only && a.channels[0].mode == "NAM");
         assert_eq!(a.channels[0].step, "25 kHz");
         assert_eq!(a.channels[1].step, "8.33 kHz");
+    }
+
+    /// AM becomes NAM on the airband (108-137 MHz) only; a mode given otherwise stays, and an AM channel already in
+    /// the table is not added again as NAM.
+    #[test]
+    fn airband_nam() {
+        assert_eq!(airband_mode("AM", 108.0), "NAM");
+        assert_eq!(airband_mode("AM", 137.0), "NAM");
+        assert_eq!(airband_mode("AM", 27.185), "AM");
+        assert_eq!(airband_mode("AM", 137.1), "AM");
+        assert_eq!((airband_mode("FM", 121.5), airband_mode("NAM", 121.5)), ("FM", "NAM"));
+        let items = [
+            item("Guard", 121.5, None, "AM", ""),
+            item("Explicit", 122.8, None, "NAM", ""),
+            item("FM air", 123.0, None, "FM", ""),
+            item("CB 19", 27.185, None, "AM", ""),
+        ];
+        let a = add(&items, &Set::default(), true);
+        let modes: Vec<&str> = a.channels.iter().map(|c| c.mode.as_str()).collect();
+        assert_eq!(modes, ["NAM", "NAM", "FM", "AM"], "{:?}", a.notes);
+        let c = a.channels[0].channel().unwrap();
+        assert_eq!((c.cfg.mode, c.cfg.narrow), (NAM, true));
+        // A table with Guard as AM from before: the same entry is a duplicate, not a second channel.
+        let mut t = Set::default();
+        let mut old = ChanView::new(1, 12_150_000);
+        old.mode = "AM".into();
+        t.channels.push(old);
+        let a = add(&items[..1], &t, true);
+        assert!(a.channels.is_empty(), "{:?}", a.channels);
     }
 
     /// Ferrite's refusals: a frequency it can't tune is skipped with its words; a mode it hasn't (DV) too.
@@ -981,7 +1027,7 @@ mod tests {
         let picks: Vec<usize> = (0..air.frequencies.len()).collect();
         let a = add(&fixed_items(air, &picks, "Airband"), &Set::default(), true);
         assert_eq!(a.channels.len(), air.frequencies.len());
-        assert!(a.channels.iter().all(|c| c.rx_only && c.mode == "AM"), "{:?}", a.channels);
+        assert!(a.channels.iter().all(|c| c.rx_only && c.mode == "NAM"), "{:?}", a.channels);
     }
 
     #[test]
@@ -1066,5 +1112,12 @@ mod tests {
         // The answer is the slot as it is after: its VFO at 146.940 MHz.
         assert!(a.windows(4).any(|w| w == 14_694_000u32.to_le_bytes()), "{a:?}");
         assert!(slot_tune(0, 146_520_000, "USB", "", "", 0).is_err());
+        // An airport's tune: NAM, the radio's airband default; AM given on the airband is NAM too, on HF it stays AM.
+        let mode_of = |p: Vec<u8>| p[6];
+        assert_eq!(mode_of(slot_tune(0, 118_700_000, "NAM", "", "", 0).unwrap()), NAM);
+        assert_eq!(mode_of(slot_tune(0, 118_700_000, "am", "", "", 0).unwrap()), NAM);
+        assert_eq!(mode_of(slot_tune(0, 27_185_000, "AM", "", "", 0).unwrap()), 2);
+        let (st, a) = rs.ask(ferrite_core::link::msg::SLOT, &slot_tune(0, 118_700_000, "NAM", "", "", 0).unwrap());
+        assert_eq!(st, 0, "{a:?}");
     }
 }

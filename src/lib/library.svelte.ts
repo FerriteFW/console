@@ -17,7 +17,7 @@ export type FixedSet = {
   description: string;
   defaultPower: string;
   defaultBandwidth: string;
-  /** "AM" for airband; else ("Analog") NFM or FM by the bandwidth. */
+  /** "AM" for airband (the core makes it NAM there); else ("Analog") NFM or FM by the bandwidth. */
   defaultMode?: string;
   rxOnly?: boolean;
   frequencies: FixedFreq[];

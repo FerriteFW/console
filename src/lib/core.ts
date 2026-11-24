@@ -372,7 +372,7 @@ export type LibraryItem = {
   name: string;
   rx: number;
   tx?: number | null;
-  mode: "FM" | "NFM" | "AM";
+  mode: "FM" | "NFM" | "AM" | "NAM";
   power?: string | null;
   rx_only?: boolean;
   zone: string;
@@ -602,7 +602,7 @@ export type SlotNow = {
   /** 0-based; -1 Local; null on a VFO. */
   zone: number | null;
   hz: number;
-  mode: "FM" | "NFM" | "AM" | "WFM" | "";
+  mode: "FM" | "NFM" | "AM" | "WFM" | "NAM" | "";
   power: "Low" | "Mid" | "High" | "";
   /** dBm while the squelch is open. */
   dbm: number | null;

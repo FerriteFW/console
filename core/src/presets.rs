@@ -16,7 +16,7 @@ use crate::radioside::RadioSide;
 use crate::records::{begin_payload, delete_payload, write_payloads};
 use ferrite_app::data::RangePreset;
 use ferrite_app::persist::{Persist, Sink, Source};
-use ferrite_app::slot::{MODES, STEPS, STEP_12K5};
+use ferrite_app::slot::{mode_narrow, MODES, PRESET_MODES, STEPS, STEP_12K5};
 use ferrite_core::freq::mhz;
 use ferrite_core::link::{msg, what, PRESET_SKIPS_MAX};
 use ferrite_ui::text::Buf;
@@ -151,7 +151,8 @@ fn step_words() -> Vec<String> {
 }
 
 fn mode_words() -> Vec<String> {
-    MODES[..3].iter().map(|s| s.to_string()).collect() // a range preset: FM, NFM or AM
+    // A range preset: FM, NFM, AM or NAM (decision 447).
+    PRESET_MODES.iter().map(|&m| MODES[m as usize].to_string()).collect()
 }
 
 impl PresetView {
@@ -208,7 +209,7 @@ impl PresetView {
             return Err(format!("can't span {e} MHz: one side only"));
         }
         let step = pick(&step_words(), &self.step, "step")? as u8;
-        let mode = pick(&mode_words(), &self.mode, "mode")? as u8;
+        let mode = PRESET_MODES[pick(&mode_words(), &self.mode, "mode")?];
         let resume = pick(&resume_words(), &self.resume, "resume")? as u8;
         Ok(RangePreset {
             name: Buf::from(name.as_bytes()),
@@ -216,7 +217,7 @@ impl PresetView {
             end,
             step,
             mode,
-            narrow: mode == 1,
+            narrow: mode_narrow(mode),
             skips: 0,
             resume,
         })
@@ -632,6 +633,15 @@ mod tests {
         let n =
             PresetView { mode: "am".into(), resume: "after 5 s".into(), ..v(1, "x", "118", "137.0") }.normal().unwrap();
         assert_eq!((n.mode.as_str(), n.resume.as_str(), n.high.as_str()), ("AM", "After 5 s", "137.00000"));
+        // NAM (narrow AM, ferrite decision 447): offered, stored as 7 with the narrow filter, read back by name.
+        assert_eq!(mode_words(), ["FM", "NFM", "AM", "NAM"]);
+        assert_eq!(choices()["modes"], serde_json::json!(["FM", "NFM", "AM", "NAM"]));
+        let p = PresetView { mode: "nam".into(), ..v(1, "Air", "118", "137") }.preset().unwrap();
+        assert_eq!((p.mode, p.narrow), (ferrite_app::slot::NAM, true));
+        assert_eq!(PresetView::of(0, &p).mode, "NAM");
+        let p = PresetView { mode: "AM".into(), ..v(1, "Air", "118", "137") }.preset().unwrap();
+        assert_eq!((p.mode, p.narrow), (2, false));
+        assert!(check(&PresetView { mode: "WFM".into(), ..v(1, "x", "88", "108") }).unwrap().starts_with("mode:"));
         assert_eq!(resume_words().first().map(String::as_str), Some("Global"));
         assert_eq!(resume_words().last().map(String::as_str), Some("Stop on hit"));
     }

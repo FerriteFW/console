@@ -12,7 +12,7 @@ use ferrite_app::chan::{
 };
 use ferrite_app::data::ZoneCfg;
 use ferrite_app::persist::{Persist, Sink, Source};
-use ferrite_app::slot::{SlotCfg, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SQ_GLOBAL, STEPS};
+use ferrite_app::slot::{mode_narrow, SlotCfg, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SQ_GLOBAL, STEPS};
 use serde::{Deserialize, Serialize};
 
 /// The most channels the radio holds (4,000 since layout 3, decision 333).
@@ -251,7 +251,7 @@ pub struct ChanView {
     pub duplex: String,
     /// MHz: the shift (+/-), or the split's TX frequency; empty for simplex.
     pub offset: String,
-    /// FM, NFM, AM (and USB, LSB, CW on an HF channel).
+    /// FM, NFM, AM, NAM, WFM (and USB, LSB, CW on an HF channel).
     pub mode: String,
     pub rx_tone: String,
     pub tx_tone: String,
@@ -525,7 +525,7 @@ impl ChanView {
         let rx = parse_mhz(&self.rx).ok_or("rx: a frequency in MHz, e.g. 146.52")?;
         let mut g = DEFAULT_CFG;
         g.mode = pick(&MODES, &self.mode, "mode")? as u8;
-        g.narrow = g.mode == 1;
+        g.narrow = mode_narrow(g.mode);
         g.rx_tone = parse_tone(&self.rx_tone).map_err(|e| format!("rx tone: {e}"))?;
         g.tx_tone = parse_tone(&self.tx_tone).map_err(|e| format!("tx tone: {e}"))?;
         let off = || parse_mhz(&self.offset).ok_or_else(|| "offset: MHz, e.g. 0.6".to_string());

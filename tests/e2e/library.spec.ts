@@ -1,5 +1,5 @@
 // Add channels (the channel library): a fixed set into a new zone, written to the radio and read back; airports
-// near a typed place as AM, RX-only rows; the Airband fixed set; licensed sites (Canada and the US) near it. The
+// near a typed place as NAM, RX-only rows; the Airband fixed set; licensed sites (Canada and the US) near it. The
 // write test runs on the simulator only: on a radio it would add 22 channels (FERRITE_E2E_LIBRARY_WRITE=1 lets it,
 // at your own risk). Airports and licensed sites never use the network: data.ferritefw.dev is served from
 // tests/e2e/fixtures/sitedata (a few tiny tiles) by ./sitedata.ts.
@@ -108,7 +108,7 @@ test.describe.serial("write", () => {
 test.describe.serial("near a place", () => {
   hooks();
 
-  test("airports near a typed place: AM, RX-only rows, named by their uses", async ({}, info) => {
+  test("airports near a typed place: NAM, RX-only rows, named by their uses", async ({}, info) => {
     const asked = await serveData(page);
     const before = await state(page, (f) => f.channels.table.channels.length);
     await openLibrary("Airports");
@@ -147,7 +147,7 @@ test.describe.serial("near a place", () => {
     const added = await state(page, (f) => f.channels.table.channels.filter((c: any) => c.name.startsWith("CYVR ")));
     expect(added.length).toBe(n);
     for (const c of added) {
-      expect(c.mode).toBe("AM");
+      expect(c.mode).toBe("NAM");
       expect(c.rx_only).toBe(true);
       expect(c.name.length).toBeLessThanOrEqual(16);
       expect(Number(c.rx)).toBeGreaterThanOrEqual(108);
@@ -170,11 +170,11 @@ test.describe.serial("near a place", () => {
     await shot(page, info, "35-library-airport-rows");
   });
 
-  test("fixed set: Airband (common), AM and RX only", async ({}, info) => {
+  test("fixed set: Airband (common), NAM and RX only", async ({}, info) => {
     const before = await state(page, (f) => f.channels.table.channels.length);
     await openLibrary("Fixed sets");
     await lib().getByRole("option", { name: /^Airband \(common\)/ }).click();
-    await expect(lib()).toContainText("12 of 12 channels · AM, Low power, RX only");
+    await expect(lib()).toContainText("12 of 12 channels · NAM, Low power, RX only");
     await expect(lib()).toContainText("Emergency 121.5");
     await expect(lib()).toContainText("TC AIM RAC 5.1");
     await shot(page, info, "34a-library-airband");
@@ -186,7 +186,7 @@ test.describe.serial("near a place", () => {
     const added = await state(page, (f) => f.channels.table.channels.filter((c: any) => c.zone === f.channels.table.zones.length - 1));
     expect(added.length).toBe(12);
     for (const c of added) {
-      expect(c.mode).toBe("AM");
+      expect(c.mode).toBe("NAM");
       expect(c.rx_only).toBe(true);
     }
     expect(added.find((c: any) => c.name === "Emergency 121.5").rx).toBe("121.50000");

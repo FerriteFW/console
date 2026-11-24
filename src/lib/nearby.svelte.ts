@@ -7,7 +7,7 @@
 // (`r|callsign|lat|lon|half kHz`). Organizations are the licensees' names grouped by the core (orgGroups) within each
 // category. Add turns every pick into channels, each layer shaped its own way: licensed sites NFM or FM from the data
 // (unknown as the "unknown mode" choice; digital only never shows: Ferrite has no digital modes), RX only by choice,
-// merged per zone and frequency; airports AM, RX only always, named "CYVR TWR" (airportName); repeaters named by
+// merged per zone and frequency; airports NAM, RX only always, named "CYVR TWR" (airportName); repeaters named by
 // callsign, TX on the repeater's input (its offset), its tones, NFM or FM (repeaterMode); all with their positions
 // (LINK-53) and the zone target (repeaters: one "Repeaters" zone).
 import { library, type FixedSet } from "./library.svelte";
@@ -313,7 +313,7 @@ class Nearby {
         pos: e.pos, // the site's licensed position (LINK-53: the channel's)
       });
     }
-    // Airports: AM, RX only (Ferrite never transmits on airband); a type twice at one airport gets its frequency.
+    // Airports: NAM (narrow AM, the radio's airband default), RX only (Ferrite never transmits on airband); a type twice at one airport gets its frequency.
     for (const { a, freqs } of this.pickedAirports) {
       const seen = new Map<string, number>();
       for (const q of a.freqs) seen.set(q.type, (seen.get(q.type) ?? 0) + 1);
@@ -321,7 +321,7 @@ class Nearby {
         items.push({
           name: airportName(a.c, q.type, Math.round(q.khz), (seen.get(q.type) ?? 0) > 1),
           rx: q.khz / 1000,
-          mode: "AM",
+          mode: "NAM",
           power: "Low",
           rx_only: true,
           zone: zoneName(t, a.c, zones),

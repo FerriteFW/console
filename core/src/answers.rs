@@ -230,7 +230,7 @@ pub struct Slot {
     pub channel: Option<u16>,
     /// 10 Hz units.
     pub freq: u32,
-    /// 0 FM, 1 NFM, 2 AM.
+    /// Index into ferrite's `slot::MODES`: 0 FM, 1 NFM, 2 AM, 6 WFM, 7 NAM.
     pub mode: u8,
     /// 0 low, 1 mid, 2 high.
     pub power: u8,
