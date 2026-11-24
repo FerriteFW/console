@@ -295,10 +295,10 @@ fn zone_records_survive_the_view() {
     zone_records(false);
 }
 
-/// The same with priority channels past 4000, which ferrite's link takes: Console's view refuses the zone ("priority
-/// channel: 1 to 4000"), and with it every channel write until the zone is fixed in the table.
+/// The same with priority channels past 4000: ferrite's link took them and Console's view then refused the zone
+/// ("priority channel: 1 to 4000"), blocking every channel write. Since ferrite#148 the link refuses them (LINK-41.3),
+/// so every zone the radio takes, Console's view gives back.
 #[test]
-#[ignore = "found: ferrite's link takes a zone's priority channel past 4000; Console's view refuses the zone"]
 fn zone_records_out_of_range_survive_the_view() {
     zone_records(true);
 }
@@ -313,7 +313,12 @@ fn zone_records(wide: bool) {
             guard("zone_records_survive_the_view", seed, &rec, || {
                 let Some((name, cfg)) = zone_from_record(&rec) else { return };
                 r.seed(&[], &[]);
-                if r.write_one(what::ZONE, 0, &rec).0 != 0 {
+                // ferrite LINK-41.3 (ferrite#148): a priority channel past the radio's 4000 (0xFFFF is none) is refused
+                let pri = |k: usize| u16::from_le_bytes([rec[k], rec[k + 1]]);
+                let past = [22, 24].iter().any(|&k| pri(k) != 0xFFFF && pri(k) >= 4000);
+                let took = r.write_one(what::ZONE, 0, &rec).0 == 0;
+                assert!(!(past && took), "a priority channel past 4000 was taken");
+                if !took {
                     return;
                 }
                 taken += 1;
@@ -324,7 +329,8 @@ fn zone_records(wide: bool) {
                 assert_eq!(zone_record(n2.as_bytes(), &c2), zone_record(held.0.as_bytes(), &held.1), "{v:?}");
             });
         }
-        assert!(taken > 100, "only {taken} zone records taken");
+        // random priority words are mostly past 4000 and refused now; in range, most are taken
+        assert!(taken > if wide { 5 } else { 100 }, "only {taken} zone records taken");
     });
 }
 
