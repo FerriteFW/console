@@ -25,6 +25,14 @@ minisign-verify = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Host builds keep line numbers for backtraces, the dependencies no debug info: full debug info grew target/debug
+# to 22 GB (Nov 23, 2026). Set `debug = true` locally to see variables in a debugger.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 opt-level = "s"
 lto = true

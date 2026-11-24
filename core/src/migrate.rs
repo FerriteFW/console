@@ -668,7 +668,7 @@ mod tests {
         }
         for i in 0..200 {
             let txt = Buf::from(format!("message {i}").as_bytes());
-            let mut r = logs::msg_rec(true, &Buf::from(b"VE7ABC".as_slice()), &txt, &Buf::new(), 1_800_000_000 + i, true);
+            let mut r = logs::msg_rec(true, &Buf::from(b"VE7ABC".as_slice()), &txt, &Buf::new(), &Buf::new(), 1_800_000_000 + i, true);
             block(msgs.append(&f, &mut r)).unwrap();
         }
         for i in 0..50u32 {
