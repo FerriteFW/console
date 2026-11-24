@@ -19,7 +19,11 @@
     {/if}
   </section>
 
-  {#if current}
+  {#if videos.state === "ready" && !videos.playable}
+    <p class="sub" data-k="videos-external">This computer can't play them here, so each opens on ferritefw.dev in your browser. (On Linux, Console plays videos once GStreamer's video support is installed: gst-plugins-good and an H.264 decoder such as gst-libav.)</p>
+  {/if}
+
+  {#if current && videos.playable}
     <section class="card player" aria-label="Playing">
       <h2>{current.title} <span class="len">{current.length}</span></h2>
       {#key current.file}
@@ -34,11 +38,19 @@
     <ul class="grid" aria-label="Videos">
       {#each videos.list as v (v.file)}
         <li>
-          <button class="tile" class:on={v.file === playing} onclick={() => (playing = v.file)} data-k="video-tile">
-            <img src={videos.poster(v.file)} alt="" loading="lazy" />
-            <span class="title">{v.title} <span class="len">{v.length}</span></span>
-            <span class="line">{v.line}</span>
-          </button>
+          {#if videos.playable}
+            <button class="tile" class:on={v.file === playing} onclick={() => (playing = v.file)} data-k="video-tile">
+              <img src={videos.poster(v.file)} alt="" loading="lazy" />
+              <span class="title">{v.title} <span class="len">{v.length}</span></span>
+              <span class="line">{v.line}</span>
+            </button>
+          {:else}
+            <a class="tile" href={videos.mp4(v.file)} target="_blank" rel="noopener" data-k="video-tile">
+              <img src={videos.poster(v.file)} alt="" loading="lazy" />
+              <span class="title">{v.title} <span class="len">{v.length}</span></span>
+              <span class="line">{v.line}</span>
+            </a>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -82,6 +94,8 @@
     color: inherit;
     font: inherit;
     cursor: pointer;
+    text-decoration: none;
+    box-sizing: border-box;
   }
   .tile.on {
     border-color: var(--accent, #3b82f6);
