@@ -42,6 +42,8 @@ pub mod channels;
 pub mod chirp;
 #[cfg(test)]
 mod chirp_fuzz;
+#[cfg(test)]
+mod fuzz;
 pub mod crossband;
 #[cfg(test)]
 mod codeplug_example;

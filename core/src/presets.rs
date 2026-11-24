@@ -160,14 +160,14 @@ impl PresetView {
         let mut p = *p;
         p.fold_bw(); // VFO-20: FM with narrow from before reads as NFM
         PresetView {
-            number: index + 1,
+            number: index.saturating_add(1),
             name: String::from_utf8_lossy(p.name.as_bytes()).into_owned(),
             low: mhz_text(p.start),
             high: mhz_text(p.end),
             step: STEPS.get(p.step as usize).map_or("12.5 kHz", |s| s.1).to_string(),
             mode: MODES.get(p.mode as usize).unwrap_or(&"FM").to_string(),
             resume: resume_word(p.resume.min(12)),
-            origin: Some(index + 1),
+            origin: Some(index.saturating_add(1)),
             skips: Vec::new(),
         }
     }
@@ -253,7 +253,7 @@ pub fn from_records(recs: &[Vec<u8>]) -> (Vec<PresetView>, Vec<String>) {
     let mut bad = Vec::new();
     for (i, r) in recs.iter().enumerate() {
         match preset_from_record(r) {
-            Some(p) => out.push(PresetView::of(out.len() as u8, &p)),
+            Some(p) => out.push(PresetView::of(out.len().min(u8::MAX as usize) as u8, &p)),
             None => bad.push(format!("range preset {}: a record of {} bytes didn't parse", i + 1, r.len())),
         }
     }
@@ -597,6 +597,16 @@ pub fn restore(text: &str) -> Result<(Vec<PresetView>, Backup), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// More records than the radio keeps (a damaged chip's count, found by fuzz::radio): read without an overflow
+    /// past 255, each one parsed or named.
+    #[test]
+    fn many_records_read() {
+        let rec = preset_record(&PresetView::new(1, "x").preset().unwrap());
+        let (ps, bad) = from_records(&vec![rec; 300]);
+        assert_eq!((ps.len(), bad.len()), (300, 0));
+        assert_eq!(ps[299].number, 255);
+    }
 
     fn v(n: u8, name: &str, low: &str, high: &str) -> PresetView {
         PresetView {

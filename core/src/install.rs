@@ -153,13 +153,14 @@ pub fn parse_flash(line: &str) -> Option<(String, String, u32)> {
     let (vendor, rest) = rest.split_once(", ")?;
     let kb: u32 = rest.split(' ').next()?.parse().ok()?;
     rest.split(' ').nth(1).filter(|u| u.starts_with("KB"))?;
-    (id.chars().all(|c| c.is_ascii_hexdigit()) && kb > 0).then(|| (id.to_string(), vendor.to_string(), kb * 1024))
+    let bytes = kb.checked_mul(1024)?;
+    (id.chars().all(|c| c.is_ascii_hexdigit()) && kb > 0).then(|| (id.to_string(), vendor.to_string(), bytes))
 }
 
 /// `sys`: "... uid 0123ABCD4567EF0189ABCDEF" -> the MCU's three ID words, lowest first.
 pub fn parse_uid(line: &str) -> Option<[u32; 3]> {
     let rest = &line[line.find(" uid ")? + 5..];
-    let h = rest.get(..24)?;
+    let h = rest.get(..24).filter(|h| h.is_ascii())?;
     let w = |i: usize| u32::from_str_radix(&h[8 * i..8 * i + 8], 16).ok();
     Some([w(0)?, w(1)?, w(2)?])
 }
@@ -217,7 +218,7 @@ pub fn marker_word(m: &[u8]) -> Option<String> {
 /// holds no such line or its sum is wrong (an older reader answers `?  (help)`).
 pub fn parse_mdump(text: &str) -> Option<Vec<u8>> {
     let rest = &text[text.find("80F0000:")? + 8..];
-    let hexs = rest.get(..2 * MARKER_LEN)?;
+    let hexs = rest.get(..2 * MARKER_LEN).filter(|h| h.is_ascii())?;
     let b: Vec<u8> =
         (0..MARKER_LEN).map(|i| u8::from_str_radix(&hexs[2 * i..2 * i + 2], 16).ok()).collect::<Option<_>>()?;
     let sum = u8::from_str_radix(rest.get(2 * MARKER_LEN..)?.strip_prefix('*')?.get(..2)?, 16).ok()?;
@@ -278,7 +279,7 @@ pub fn parse_mdump_range(text: &str, addr: u32, len: usize) -> Option<Vec<u8>> {
         let Some((a, rest)) = line.trim().split_once(':') else { continue };
         let Ok(at) = u32::from_str_radix(a, 16) else { continue };
         let Some((hexs, sum)) = rest.split_once('*') else { continue };
-        if at != addr + out.len() as u32 || hexs.len() % 2 != 0 {
+        if at != addr + out.len() as u32 || hexs.len() % 2 != 0 || !hexs.is_ascii() {
             return None;
         }
         let b: Vec<u8> = (0..hexs.len() / 2).map(|i| u8::from_str_radix(&hexs[2 * i..2 * i + 2], 16).ok()).collect::<Option<_>>()?;
@@ -319,7 +320,7 @@ pub fn parse_flashcrc(line: &str) -> Option<(u32, u32)> {
     let rest = &line[line.find("flash crc32 ")? + 12..];
     let crc = u32::from_str_radix(rest.get(..8)?, 16).ok()?;
     let kb: u32 = rest.get(8..)?.strip_prefix(" over ")?.split(' ').next()?.parse().ok()?;
-    Some((crc, kb * 1024))
+    Some((crc, kb.checked_mul(1024)?))
 }
 
 // ---- fdump: hwtest's binary dump (src/core/fdump.h; fdump_proto.py), and fdumpz (BACKUP-9.6) ----
@@ -545,7 +546,7 @@ impl Fdump {
                     continue;
                 }
                 let want = FD_ZCHUNK.min(self.len as usize - self.data.len());
-                let chunk = match (payload.first(), payload.len() - 1) {
+                let chunk = match (payload.first(), payload.len().saturating_sub(1)) {
                     (Some(&Z_ERASED), 0) => Some(vec![0xFF; want]),
                     (Some(&Z_RAW), k) if k == want => Some(payload[1..].to_vec()),
                     (Some(&Z_DEFLATE), k) if k > 0 => {
@@ -1015,6 +1016,11 @@ mod tests {
         assert_eq!(uid_text([0x3F2A_91C0, 0x7D44_0123, 0x89AB_CDEF]).len(), 23);
         assert_eq!(parse_flashcrc("flash crc32 1A2B3C4D over 4096 KB, 52 s"), Some((0x1A2B_3C4D, 4 << 20)));
         assert_eq!(parse_flashcrc("flash crc32 nope"), None);
+        // Cable noise in a line, sizes past u32 (found by fuzz::outside::reader_lines: a slice inside a character
+        // panicked, a release build too; KB * 1024 overflowed): not a line, never a panic.
+        assert_eq!(parse_uid("sys uid 00123ABCD457EF\u{fffd}0189ABADEF"), None);
+        assert_eq!(parse_flash("flash id 5E4016 (Zbit, 4194304 KB)"), None);
+        assert_eq!(parse_flashcrc("flash crc32 1A2B3C4D over 4194304 KB, 52 s"), None);
     }
 
     /// fdump_proto.py's vectors: the header and a block's CRC (tests/host/test_fdump.c checks the same on the C side).
@@ -1177,6 +1183,10 @@ mod tests {
         let mut fd2 = Fdump::new_z(0, 100);
         fd2.feed(b"FDOK");
         assert!(fd2.feed(&fd_frame(b'Z', 0, &[Z_RAW, 1, 2])).error.unwrap().contains("doesn't decode"));
+        // An empty chunk (found by fuzz::outside::fdump_stream: `payload.len() - 1` underflowed): doesn't decode.
+        let mut fd3 = Fdump::new_z(0, 100);
+        fd3.feed(b"FDOK");
+        assert!(fd3.feed(&fd_frame(b'Z', 0, &[])).error.unwrap().contains("doesn't decode"));
         assert!(fd2.feed(&fd_frame(b'B', 0, &[1; 100])).nak, "fdump's frames aren't fdumpz's");
         // The run again to the end: the inflated chunk ACKed, then the end frame's CRC over the decoded data.
         let mut fd = Fdump::new_z(0x1000, len as u32);
@@ -1443,6 +1453,10 @@ mod tests {
         assert_eq!(parse_mdump(line).as_deref(), Some(&uv[..]));
         assert_eq!(parse_mdump(&line.replace("*0C", "*0D")), None, "a wrong sum");
         assert_eq!(parse_mdump("?  (help)\r\n"), None, "an older reader");
+        // Noise on the cable read as text (found by fuzz::outside::reader_lines: a slice inside a character
+        // panicked, in a release build too): no marker, no panic.
+        assert_eq!(parse_mdump("80F0000:5\u{fffd}563835FFFFFFFFFFFFFFFFFFFFFF*0C"), None);
+        assert_eq!(parse_mdump_range("80F0000:5\u{fffd}55*0C", 0x080F_0000, 2), None);
         let blank = parse_mdump("80F0000:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF*F0").unwrap();
         assert_eq!(blank, vec![0xFF; 16]);
         assert_eq!(marker_word(&blank), None);

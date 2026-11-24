@@ -137,7 +137,8 @@ pub fn parse_iso(s: &str) -> Option<(i64, u16)> {
     let (date, time) = s.split_once(['T', ' ']).unwrap_or((s, "00:00:00"));
     let mut d = date.split('-');
     let (y, mo, da): (i64, u32, u32) = (d.next()?.parse().ok()?, d.next()?.parse().ok()?, d.next()?.parse().ok()?);
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&da) {
+    // a year in reach of the arithmetic below (a damaged file may say anything)
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&da) || !(-1_000_000..=1_000_000).contains(&y) {
         return None;
     }
     let mut t = time.split(':');
@@ -148,7 +149,8 @@ pub fn parse_iso(s: &str) -> Option<(i64, u16)> {
     let whole: i64 = whole.parse().ok()?;
     let ms = format!("{:0<3}", &frac[..frac.len().min(3)]);
     let ms: u16 = if frac.is_empty() { 0 } else { ms.parse().ok()? };
-    Some((days_from_civil(y, mo, da) * 86_400 + h * 3_600 + mi * 60 + whole, ms))
+    let secs = (days_from_civil(y, mo, da) * 86_400).checked_add(h.checked_mul(3_600)?)?;
+    Some((secs.checked_add(mi.checked_mul(60)?)?.checked_add(whole)?, ms))
 }
 
 /// A value times `scale` to the nearest integer, half away from zero.
@@ -190,7 +192,7 @@ fn tone(t: &Option<String>) -> Option<u16> {
 
 /// Hz as the record's 10 Hz.
 fn f10(hz: u64) -> u32 {
-    ((hz + 5) / 10).min(u32::MAX as u64) as u32
+    (hz.saturating_add(5) / 10).min(u32::MAX as u64) as u32
 }
 
 /// A transmitter the radio can work (SAT-13), as its transponder; None for one it can't.
@@ -536,5 +538,15 @@ mod tests {
         assert_eq!(parse_iso("2026-11-01"), Some((1_793_491_200, 0)));
         assert_eq!(parse_iso("2024-02-29T12:00:01.5"), Some((1_709_208_001, 500)));
         assert_eq!(parse_iso("nope"), None);
+        // Past the arithmetic's reach (found by fuzz::outside::satellites): none, never an overflow.
+        assert_eq!(parse_iso("9223372036854775807-01-01"), None);
+        assert_eq!(parse_iso("2026-11-01T9223372036854775807:00:00"), None);
+        assert_eq!(parse_iso("2026-11-01T00:00:9223372036854775807"), None);
+    }
+
+    /// A frequency of u64's end in a file (found by fuzz::outside::satellites: `hz + 5` overflowed): no panic.
+    #[test]
+    fn huge_frequency() {
+        assert_eq!(f10(u64::MAX), u32::MAX);
     }
 }

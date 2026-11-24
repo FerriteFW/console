@@ -82,7 +82,7 @@ pub fn target_problem(name: &str, addr: u32, size: u64, max: u64) -> Option<Stri
     if size > max {
         return Some(format!("{name}: {size} bytes, more than its {max}"));
     }
-    let end = addr as u64 + size.max(max);
+    let end = (addr as u64).saturating_add(size.max(max));
     for (what, r) in &FORBIDDEN {
         if (addr as u64) < r.end as u64 && end > r.start as u64 {
             return Some(format!("{name}: aimed at {what} (0x{addr:06X}-0x{:06X}): refused whatever the manifest says", end - 1));
@@ -396,6 +396,9 @@ mod tests {
             assert!(write_plan(&[Part { file: "x".into(), addr: a, data: vec![0; 100] }]).is_err(), "0x{a:06X}");
         }
         assert_eq!(target_problem("x", 0x09_0000, 100, 0x1_0000), None);
+        // A manifest's max of u64::MAX (found by fuzz::backups::ffw_files): refused, never an overflow (it wrapped
+        // to an end below the start in a release build, inside every region).
+        assert!(target_problem("x", 0x09_0000, 100, u64::MAX).is_some());
         assert_eq!(target_problem("x", 0x24_8000, 3000, 0x8000), None);
     }
 }
