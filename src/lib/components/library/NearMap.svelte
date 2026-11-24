@@ -54,7 +54,7 @@
           name: a.c,
           pos: a.l,
           km: a.km,
-          rows: freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false, tune: { name: `${a.c} ${q.type}`, hz: Math.round(q.khz * 1000), mode: "AM", kind: "air", pos: a.l } })),
+          rows: freqs.map((q) => ({ key: q.key, mhz: (q.khz / 1000).toFixed(3), label: q.type, mobile: false, tune: { name: `${a.c} ${q.type}`, hz: Math.round(q.khz * 1000), mode: "NAM", kind: "air", pos: a.l } })),
         });
       }
     }
@@ -412,7 +412,7 @@
         </li>
       {/each}
       {#if nearby.nCommon}
-        <li><span class="n">Airband (common)</span><span class="mono">{nearby.nCommon}</span><span class="tag">AM</span><button class="rm" onclick={() => (nearby.common = false)} aria-label="Remove the common airband frequencies">✕</button></li>
+        <li><span class="n">Airband (common)</span><span class="mono">{nearby.nCommon}</span><span class="tag">NAM</span><button class="rm" onclick={() => (nearby.common = false)} aria-label="Remove the common airband frequencies">✕</button></li>
       {/if}
       {#if !picks.length && !nearby.nCommon}
         <li class="empty">Click a marker, then tick its frequencies.</li>

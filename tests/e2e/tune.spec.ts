@@ -1,6 +1,6 @@
 // Live View's Tune from map: refused with no radio; connected, it opens Near me's map alone (no Fixed sets, no Picked
 // column); a repeater's frequency clicked tunes the active slot as a VFO with its shift and tones (the terminal's
-// `slot` line over the link, TERM-35) and the dialog closes with a confirmation; an airport's tunes AM, simplex, no
+// `slot` line over the link, TERM-35) and the dialog closes with a confirmation; an airport's tunes NAM, simplex, no
 // tones. The slot is put back after. Data from tests/e2e/fixtures/sitedata.
 import { connect, disconnect, expect, openConsole, state, test } from "./helpers";
 import { kind, openSite, serveData } from "./sitedata";
@@ -15,7 +15,7 @@ test("tune from map: refused without a radio", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Tune from map" })).toBeDisabled();
 });
 
-test("tune from map: a repeater with its shift and tones, then an airport in AM", async ({ page }) => {
+test("tune from map: a repeater with its shift and tones, then an airport in NAM", async ({ page }) => {
   await serveData(page);
   await openConsole(page, "live");
   await connect(page);
@@ -47,9 +47,9 @@ test("tune from map: a repeater with its shift and tones, then an airport in AM"
     pop = await openSite(page, d, "CYVR");
     await pop.getByRole("button", { name: "Tune CYVR 118.700 TOWER" }).click();
     await expect(d).toBeHidden();
-    await expect(page.getByText(`Tuned Slot ${letter}: 118.7 AM`)).toBeVisible();
+    await expect(page.getByText(`Tuned Slot ${letter}: 118.7 NAM`)).toBeVisible();
     const air = await line();
-    expect(air).toMatch(new RegExp(`^${letter}\\* vfo 118\\.70000 mode=AM`));
+    expect(air).toMatch(new RegExp(`^${letter}\\* vfo 118\\.70000 mode=NAM`));
     expect(air).not.toMatch(/offset=/);
   } finally {
     // Back as it was (the simulator is the worker's, shared with the next tests).

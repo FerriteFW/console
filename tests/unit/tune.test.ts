@@ -21,6 +21,10 @@ test("tune: simplex and airband clear what the slot had", () => {
   assert.equal(slotLine("C", air), "slot C vfo 118.70000 am txtone off rxtone off offset off");
   assert.equal(tuneSummary("C", air), "Slot C: 118.7 AM");
   assert.equal(slotLine("A", { name: "x", hz: 153_012_500, mode: "NFM" }), "slot A vfo 153.01250 nfm txtone off rxtone off offset off");
+  // NAM, the airband's narrow AM (ferrite decision 447): the terminal's word is nam.
+  const nam = { name: "CYVR TWR", hz: 118_700_000, mode: "NAM" as const };
+  assert.equal(slotLine("C", nam), "slot C vfo 118.70000 nam txtone off rxtone off offset off");
+  assert.equal(tuneSummary("C", nam), "Slot C: 118.7 NAM");
 });
 
 test("recent tunes: newest first, once each, ten at most; storage junk dropped", async () => {
@@ -34,6 +38,7 @@ test("recent tunes: newest first, once each, ten at most; storage junk dropped",
   assert.equal(list[0].name, "again");
   assert.equal(list.filter((x) => x.hz === 146_050_000).length, 1);
   assert.deepEqual(readRecent('[{"name":"A","hz":146520000,"mode":"FM"},{"hz":-1},"x"]'), [{ name: "A", hz: 146_520_000, mode: "FM" }]);
+  assert.deepEqual(readRecent('[{"name":"T","hz":118700000,"mode":"NAM"}]'), [{ name: "T", hz: 118_700_000, mode: "NAM" }]);
   assert.deepEqual(readRecent("not json"), []);
   assert.deepEqual(readRecent(null), []);
 });
@@ -48,6 +53,10 @@ test("recent tunes: the detail line, and Add as channel's entry (repeater, airpo
   assert.equal(air.rx_only, true);
   assert.equal(air.zone, "Airband");
   assert.equal(air.tx, null);
+  const nam = tuneItem({ name: "CYVR TOWER", hz: 118_700_000, mode: "NAM", kind: "air" });
+  assert.equal(nam.mode, "NAM");
+  assert.equal(nam.rx_only, true);
+  assert.equal(tuneItem({ name: "x", hz: 118_700_000, mode: "NAM" }).zone, "Airband");
   const lic = tuneItem({ name: "City Works", hz: 153_950_000, mode: "NFM", kind: "lic" });
   assert.equal(lic.zone, "Near me");
   assert.equal(lic.rx_tone, null);

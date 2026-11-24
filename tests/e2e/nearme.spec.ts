@@ -152,13 +152,13 @@ test("map: the default, big; the sidebar's kinds; chips; picks shared with the l
   await expect(d.getByLabel("Repeaters near the place")).toBeVisible();
   await d.getByRole("button", { name: "Map", exact: true }).click();
 
-  // One Add: the airport's AM, RX-only channel named by its use, the licensed NFM one and the repeater's (its input
+  // One Add: the airport's NAM, RX-only channel named by its use, the licensed NFM one and the repeater's (its input
   // as TX, its tone both ways), all with positions.
   await picked.getByRole("button", { name: "Add 3 channels" }).click();
   await expect(d).toHaveCount(0);
   const added = await state(p, (f) => f.channels.table.channels.filter((c: any) => ["CYVR TWR", "bc ferries", "VE7RHS"].includes(c.name)));
   const by = (n: string) => added.find((c: any) => c.name === n);
-  expect([by("CYVR TWR").rx, by("CYVR TWR").mode, by("CYVR TWR").rx_only]).toEqual(["118.70000", "AM", true]);
+  expect([by("CYVR TWR").rx, by("CYVR TWR").mode, by("CYVR TWR").rx_only]).toEqual(["118.70000", "NAM", true]);
   expect([by("bc ferries").rx, by("bc ferries").mode, by("bc ferries").rx_only]).toEqual(["156.80000", "NFM", true]);
   expect(by("bc ferries").pos).toEqual([49.195, -123.18]);
   expect(by("CYVR TWR").pos).toHaveLength(2);

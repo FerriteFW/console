@@ -10,7 +10,8 @@
 //!   both ways; `TSQL-R` and `DTCS-R` (reverse squelch) have no Ferrite equivalent and import without tones.
 //! - Skip `S` is skip, `P` priority. Power is High, Mid or Low (a watt figure: 4 W and up High, 1.5 W up Mid).
 //! - Comment carries the zone's name: exported, and on import a Comment that names a zone puts the channel in it.
-//! - Modes FM, NFM, AM, WFM (BCR-33), USB, LSB, CW; others (DV, DMR ...) are skipped with a note.
+//! - Modes FM, NFM, AM, NAM (narrow AM, CHIRP's name too; ferrite decision 447), WFM (BCR-33), USB, LSB, CW; others
+//!   (DV, DMR ...) are skipped with a note. The stock list's AM with Bandwidth Narrow is NAM, as FM's is NFM.
 //! - Latitude and Longitude (or Lat, Long, Lon, Lng), as some RepeaterBook exports have, are the channel's position
 //!   (LINK-53); CHIRP has no such column, so an export leaves positions out.
 //! - The stock radio's channel list as other tools save it (`Index,Name,RX MHz,TX MHz,Duplex,Offset,RX Tone,TX Tone,
@@ -307,7 +308,11 @@ pub fn from_stock_list(rows: &[Vec<String>]) -> Option<Vec<Vec<String>>> {
         };
         let mode = get(r, "Mode");
         let narrow = get(r, "Bandwidth").to_ascii_lowercase().starts_with('n');
-        let mode = if mode.eq_ignore_ascii_case("FM") && narrow { "NFM".to_string() } else { mode };
+        let mode = match () {
+            _ if mode.eq_ignore_ascii_case("FM") && narrow => "NFM".to_string(),
+            _ if mode.eq_ignore_ascii_case("AM") && narrow => "NAM".to_string(),
+            _ => mode,
+        };
         let skip = if get(r, "Scan").eq_ignore_ascii_case("false") { "S" } else { "" };
         let [r_tone, c_tone, dtcs, rx_dtcs] = f;
         out.push(vec![
@@ -381,7 +386,7 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
         let mode = get(r, "Mode");
         let mode = if mode.is_empty() { "FM".to_string() } else { mode };
         let Some(m) = MODES.iter().find(|m| m.eq_ignore_ascii_case(&mode)) else {
-            note(format!("mode {mode}: Ferrite has FM, NFM, AM, WFM, USB, LSB and CW: skipped"));
+            note(format!("mode {mode}: Ferrite has FM, NFM, AM, NAM, WFM, USB, LSB and CW: skipped"));
             out.skipped += 1;
             continue;
         };
@@ -708,6 +713,33 @@ mod tests {
         let again = import(&csv, &z).unwrap();
         assert!(again.notes.is_empty(), "{:?}", again.notes);
         assert_eq!(again.channels, first);
+    }
+
+    /// NAM (narrow AM, ferrite decision 447) is CHIRP's NAM both ways, stored as 7 with the narrow filter; the stock
+    /// list's AM with Bandwidth Narrow is NAM too.
+    #[test]
+    fn nam_round_trip() {
+        let z = zones();
+        let csv = "Location,Name,Frequency,Duplex,Offset,Tone,rToneFreq,cToneFreq,DtcsCode,DtcsPolarity,Mode,TStep,Skip\r\n\
+                   1,CYVR TWR,118.700000,,0.000000,,88.5,88.5,023,NN,NAM,8.33,\r\n\
+                   2,Guard,121.500000,,0.000000,,88.5,88.5,023,NN,AM,25.00,\r\n";
+        let i = import(csv, &z).unwrap();
+        assert!(i.notes.is_empty(), "{:?}", i.notes);
+        assert_eq!(i.channels.iter().map(|c| c.mode.as_str()).collect::<Vec<_>>(), ["NAM", "AM"]);
+        let c = i.channels[0].channel().unwrap();
+        assert_eq!((c.cfg.mode, c.cfg.narrow), (ferrite_app::slot::NAM, true));
+        let out = export(&i.channels, &z);
+        assert!(out.contains(",NAM,8.33,"), "{out}");
+        assert!(out.contains(",AM,25.00,"), "{out}");
+        assert_eq!(import(&out, &z).unwrap().channels, i.channels);
+        let rows = vec![
+            ["Index", "Name", "RX MHz", "TX MHz", "Bandwidth", "Mode"].map(String::from).to_vec(),
+            ["1", "Tower", "118.700", "118.700", "Narrow", "AM"].map(String::from).to_vec(),
+            ["2", "Guard", "121.500", "121.500", "Wide", "AM"].map(String::from).to_vec(),
+        ];
+        let r = from_stock_list(&rows).unwrap();
+        let mode = COLUMNS.iter().position(|c| *c == "Mode").unwrap();
+        assert_eq!((r[1][mode].as_str(), r[2][mode].as_str()), ("NAM", "AM"));
     }
 
     /// Every pair of tone words survives CHIRP's columns.

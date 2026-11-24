@@ -7,7 +7,7 @@ export type Tune = {
   name: string;
   /** RX frequency in Hz. */
   hz: number;
-  mode: "NFM" | "FM" | "AM";
+  mode: "NFM" | "FM" | "AM" | "NAM";
   /** A repeater's shift in Hz (TX minus RX); 0 or absent: simplex. */
   shiftHz?: number;
   /** Tone sent and tone squelch ("100.0", "D023N"); absent: off. */
@@ -50,7 +50,7 @@ export function readRecent(text: string | null): Tune[] {
   try {
     const v = JSON.parse(text ?? "[]");
     if (!Array.isArray(v)) return [];
-    return v.filter((t) => t && typeof t.name === "string" && Number.isFinite(t.hz) && t.hz > 0 && ["NFM", "FM", "AM"].includes(t.mode)).slice(0, 10);
+    return v.filter((t) => t && typeof t.name === "string" && Number.isFinite(t.hz) && t.hz > 0 && ["NFM", "FM", "AM", "NAM"].includes(t.mode)).slice(0, 10);
   } catch {
     return [];
   }
@@ -68,13 +68,13 @@ export const tuneMhz = (t: Tune) => mhz5(t.hz).replace(/0+$/, "").replace(/\.$/,
 
 /**
  * A tune as Add channels' entry (the core's `library_add` makes the channel): a repeater with its input and tones in
- * "Repeaters", an airport's AM receive-only in "Airband" (Ferrite never transmits there), anything else in "Near me";
+ * "Repeaters", an airport's NAM (narrow AM) receive-only in "Airband" (Ferrite never transmits there), anything else in "Near me";
  * low power, as Add channels does.
  */
 export function tuneItem(t: Tune) {
   const s = t.shiftHz ? Math.round(t.shiftHz) : 0;
   const rpt = t.kind === "rpt" || s !== 0;
-  const air = t.kind === "air" || t.mode === "AM";
+  const air = t.kind === "air" || t.mode === "AM" || t.mode === "NAM";
   return {
     name: t.name,
     rx: t.hz / 1e6,

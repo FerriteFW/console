@@ -1,6 +1,6 @@
 <script lang="ts">
   // Airports near a place, as a list (OurAirports, tiled by 2-character field from data.ferritefw.dev:
-  // sites.svelte.ts): their VHF airband frequencies with their uses, added as AM channels, RX only (Ferrite never
+  // sites.svelte.ts): their VHF airband frequencies with their uses, added as NAM channels, RX only (Ferrite never
   // transmits on airband), named "ICAO TYPE" in 16 characters ("CYVR TWR 119.55" when an airport has two of a
   // type). An airport's box picks all its frequencies (the map picks them one by one; partly picked shows as such).
   // The rows and picks are nearby.svelte.ts's, shared with the map and the Licensed sites list; Add and the data

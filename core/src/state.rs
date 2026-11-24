@@ -42,7 +42,7 @@ pub struct SlotState {
     pub zone: Option<i32>,
     /// Hz.
     pub hz: u64,
-    /// "FM", "NFM", "AM", "WFM".
+    /// "FM", "NFM", "AM", "WFM", "NAM".
     pub mode: &'static str,
     /// "Low", "Mid", "High".
     pub power: &'static str,
@@ -95,6 +95,7 @@ pub fn parse(rec: &[u8]) -> Option<RadioState> {
                     1 => "NFM",
                     2 => "AM",
                     6 => "WFM",
+                    7 => "NAM",
                     _ => "",
                 },
                 power: ["Low", "Mid", "High"].get(b[10] as usize).copied().unwrap_or(""),
@@ -199,6 +200,17 @@ mod tests {
         assert_eq!(merge(None, &all).as_deref(), Some(&rec[..]));
         assert_eq!(merge(Some(&rec), &body[..10]), None);
         assert!(parse(&rec[1..]).is_none());
+    }
+
+    /// Every mode the record carries has its name: 6 WFM and 7 NAM (narrow AM, ferrite decision 447) too.
+    #[test]
+    fn mode_names() {
+        let mut rs = RadioSide::new();
+        let (_, mut rec) = rs.ask(msg::STATE, &[]);
+        for (m, name) in [(0, "FM"), (1, "NFM"), (2, "AM"), (6, "WFM"), (7, "NAM"), (3, "")] {
+            rec[m::RADIO_LEN + 9] = m;
+            assert_eq!(parse(&rec).unwrap().slots[0].mode, name);
+        }
     }
 
     /// LINK-68: the payloads the radio takes, and the ones refused before they go.

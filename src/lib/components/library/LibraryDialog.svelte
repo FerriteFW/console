@@ -111,7 +111,7 @@
             {/each}
           </div>
           {#if tuneMode}
-            <p class="note">A repeater tunes with its shift and tones; an airport in AM. To keep a frequency, add it as a channel on Channels &amp; Zones.</p>
+            <p class="note">A repeater tunes with its shift and tones; an airport in NAM (narrow AM). To keep a frequency, add it as a channel on Channels &amp; Zones.</p>
           {:else}
             <p class="note">Added channels land in the table as new rows (green). Nothing goes to the radio until Write, which backs up and shows the diff first.</p>
           {/if}

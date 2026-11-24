@@ -59,7 +59,7 @@
     {#if set}
       <div class="chans">
         <div class="head">
-          <span>{picked.size} of {set.frequencies.length} channels · {set.defaultMode === "AM" ? "AM" : set.defaultBandwidth.startsWith("12.5") ? "NFM" : "FM"}, {set.defaultPower} power{set.rxOnly ? ", RX only" : ""}</span>
+          <span>{picked.size} of {set.frequencies.length} channels · {set.defaultMode === "AM" ? "NAM" : set.defaultBandwidth.startsWith("12.5") ? "NFM" : "FM"}, {set.defaultPower} power{set.rxOnly ? ", RX only" : ""}</span>
           <span class="spacer"></span>
           <button class="btn quiet sm" onclick={() => (picked = new Set(set.frequencies.map((_, i) => i)))}>All</button>
           <button class="btn quiet sm" onclick={() => (picked = new Set())}>None</button>
