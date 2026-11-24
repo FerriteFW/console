@@ -50,6 +50,12 @@ class Pictures {
           continue;
         }
         const rows = rowsOf(header);
+        // a picture whose signal was lost before its first line (SSTV-4.4: kept with 0 lines) has no pixels to read:
+        // a raw read of 0 bytes is refused (LINK-59), which failed the whole page (Discord, Nov 23, 2026)
+        if (rows === 0) {
+          slots.push({ k, header, px: null, rows: 0 });
+          continue;
+        }
         const key = hex(raw);
         const kept = this.kept.get(k);
         let px: Uint8Array;
