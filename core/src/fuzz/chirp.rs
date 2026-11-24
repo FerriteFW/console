@@ -209,11 +209,10 @@ fn chirp_held_channels_round_trip() {
     });
 }
 
-/// console#50: a channel the radio stores in USB, LSB or CW (saved on the radio in HF mode) exports, but the import
-/// refuses it ("mode or step out of range"): ferrite's link WRITE takes FM, NFM, AM and WFM only
-/// (`slot::slot_mode_ok`), so Console can't write it back either. Ferrite's link decides; Console then follows.
+/// console#50: a channel the radio stores in USB, LSB or CW (saved on the radio in HF mode) exports and imports
+/// again: ferrite's link takes the HF modes on HF channels since ferrite#202 (LINK-41, CHAN-26); it refused them
+/// ("mode or step out of range") before.
 #[test]
-#[ignore = "found: console#50: ferrite's link refuses USB/LSB/CW channels the radio stores; their CHIRP export won't import"]
 fn chirp_ssb_channels_round_trip() {
     let zs = zones();
     for seed in seeds(50) {
@@ -222,6 +221,9 @@ fn chirp_ssb_channels_round_trip() {
         v.mode = ["USB", "LSB", "CW"][rng.below(3)].into();
         v.rx = "8.17600".into();
         v.step = "1 kHz".into();
+        // an HF channel is simplex (CHAN-26): the radio refuses a shift or split there
+        v.duplex = String::new();
+        v.offset = String::new();
         let v = ChanView { pos: None, ..v.normal().unwrap() };
         let text = export(std::slice::from_ref(&v), &zs);
         guard("chirp_ssb_channels_round_trip", seed, &text, || {
