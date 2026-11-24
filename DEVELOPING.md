@@ -51,7 +51,10 @@ The release builds, all three systems (maintainers):
 ```sh
 FIRMWARE="RELEASE.ffw READER.btf RESTORER.btf" tools/desktop-build.sh mac                      # the .app and .dmg, on a Mac: one universal app (Apple silicon and Intel; once: rustup target add x86_64-apple-darwin)
 FIRMWARE="RELEASE.ffw READER.btf RESTORER.btf" tools/desktop-build.sh all --host USER@HOST     # Linux and Windows, in Docker on a Linux build box
+FIRMWARE="RELEASE.ffw READER.btf RESTORER.btf" tools/desktop-build.sh release --host USER@HOST # all three at once: the Mac app here, the other two there
 ```
+
+- `all` builds the web front end once, then Linux and Windows side by side. `release` runs that on the build box while the Mac builds here; the build box's log goes to `target/desktop-remote.log`.
 
 - `FIRMWARE` names the Ferrite release to build in (its signed `.ffw` and the signed reader, `.minisig` beside it). Without it, `../ferrite/target`'s local build goes in.
 - The build box is reached over ssh and needs Docker: `--host`, or `FERRITE_XEON`, or else an ssh host named `xeon`.

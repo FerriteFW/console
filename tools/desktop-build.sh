@@ -5,8 +5,8 @@
 # (scripts/bundle-firmware.mjs, from ../ferrite/target), builds, and brings the
 # bundles back to target/desktop/. `mac` builds the macOS app (.app and .dmg) here instead (macOS only; unsigned:
 # fine on the Mac that built it); universal: Apple silicon and Intel in one app (MAC_TARGET=aarch64-apple-darwin for
-# this Mac's alone). Usage: tools/desktop-build.sh [linux|windows|mac|all] [--host USER@HOST]
-# (all = linux and windows; mac separately)
+# this Mac's alone). Usage: tools/desktop-build.sh [linux|windows|mac|all|release] [--host USER@HOST]
+# (all = linux and windows, side by side on the build box; release = all there and mac here, at the same time)
 # Windows: cargo-xwin downloads Microsoft's CRT and Windows SDK on its first run (kept in a cache volume there);
 # using them means accepting Microsoft's licence for them. Besides the NSIS setup.exe it brings back the bare app
 # ("Ferrite Console portable.exe"), which runs without installing.
@@ -17,9 +17,9 @@ host=${FERRITE_XEON:-xeon}
 what=all
 while [ $# -gt 0 ]; do
   case $1 in
-    linux|windows|mac|all) what=$1; shift ;;
+    linux|windows|mac|all|release) what=$1; shift ;;
     --host) host=$2; shift 2 ;;
-    *) echo "usage: $0 [linux|windows|mac|all] [--host USER@HOST]" >&2; exit 2 ;;
+    *) echo "usage: $0 [linux|windows|mac|all|release] [--host USER@HOST]" >&2; exit 2 ;;
   esac
 done
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -36,10 +36,25 @@ if [ -z "${UNSIGNED:-}" ] && [ -f "$updkey" ]; then
 fi
 # The third-party notices About shows must match what this build links (tools/thirdparty.py).
 python3 "$here/tools/thirdparty.py" --check
+# release: the Mac app here while the build box makes Linux and Windows; the firmware is bundled once, first, so the
+# two don't rewrite public/firmware under each other. The build box's output goes to target/desktop-remote.log.
+if [ "$what" = release ]; then
+  node "$here/scripts/bundle-firmware.mjs" ${FIRMWARE:-} >/dev/null
+  mkdir -p "$here/target"
+  BUNDLED=1 "$0" all --host "$host" >"$here/target/desktop-remote.log" 2>&1 &
+  remote=$!
+  mac=0; BUNDLED=1 "$0" mac || mac=$?
+  rem=0; wait "$remote" || rem=$?
+  echo "== Linux and Windows (target/desktop-remote.log):"; tail -n 20 "$here/target/desktop-remote.log"
+  [ "$mac" = 0 ] || echo "mac failed ($mac)" >&2
+  [ "$rem" = 0 ] || echo "linux/windows failed ($rem): target/desktop-remote.log" >&2
+  [ "$mac" = 0 ] && [ "$rem" = 0 ]
+  exit
+fi
 if [ "$what" = mac ]; then
   [ "$(uname)" = Darwin ] || { echo "mac: build on a Mac" >&2; exit 1; }
   cd "$here"
-  node scripts/bundle-firmware.mjs ${FIRMWARE:-} >/dev/null # as the Docker builds below
+  [ -n "${BUNDLED:-}" ] || node scripts/bundle-firmware.mjs ${FIRMWARE:-} >/dev/null # as the Docker builds below
   [ -n "${UNSIGNED:-}" ] || node "$here/tools/check-bundle.mjs" "$here/public/firmware/manifest.json" || exit 1 # UPD-27
   # Signed with the team's Developer ID and notarized, so macOS opens it without a warning. The certificate is in
   # this Mac's keychain; the notarization login is the keychain profile FerriteConsole (made once with
@@ -92,7 +107,7 @@ git -C "$here" archive HEAD | $ssh "$host" "tar -x -C $dir/ferrite-console"
 # The bundled firmware (the tx release and the reader: scripts/bundle-firmware.mjs) is generated, never committed,
 # so it goes along from here.
 # FIRMWARE="RELEASE.ffw READER.btf RESTORER.btf" bundles a signed release (its .minisig files beside); else ../ferrite/target's.
-node "$here/scripts/bundle-firmware.mjs" ${FIRMWARE:-} >/dev/null
+[ -n "${BUNDLED:-}" ] || node "$here/scripts/bundle-firmware.mjs" ${FIRMWARE:-} >/dev/null
 [ -n "${UNSIGNED:-}" ] || node "$here/tools/check-bundle.mjs" "$here/public/firmware/manifest.json" || exit 1 # UPD-27
 COPYFILE_DISABLE=1 tar -C "$here" -c public/firmware | $ssh "$host" "rm -rf $dir/ferrite-console/public/firmware && tar -x -C $dir/ferrite-console"
 # The updater key goes over as an env file only the build reads (mode 600), deleted when the build ends.
@@ -106,8 +121,8 @@ $ssh "$host" bash -s -- "$dir" "$what" <<'REMOTE'
 set -euo pipefail
 dir=$HOME/$1 what=$2
 cd "$dir"
-envf=() upd=""
-if [ -f updater.env ]; then envf=(--env-file "$dir/updater.env"); upd=" --config '{\"bundle\":{\"createUpdaterArtifacts\":true}}'"; fi
+envf=() cfg='{"build":{"beforeBuildCommand":""}}'
+if [ -f updater.env ]; then envf=(--env-file "$dir/updater.env"); cfg='{"build":{"beforeBuildCommand":""},"bundle":{"createUpdaterArtifacts":true}}'; fi
 trap 'rm -f "$dir/updater.env"' EXIT
 # Two build boxes: Linux on Ubuntu 22.04 (tools/desktop/linux: the oldest glibc to support), Windows on Debian 13
 # (tools/desktop: NSIS 3.11 for the installer). Each its own cargo target folder: build scripts compiled against one
@@ -117,24 +132,45 @@ trap 'rm -f "$dir/updater.env"' EXIT
 docker volume create ferrite-console-xwin >/dev/null
 run() { # IMAGE TARGET-DIR COMMAND
   docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/home -e XWIN_CACHE_DIR=/xwin -e CARGO_TARGET_DIR="/src/ferrite-console/$2" ${envf[@]+"${envf[@]}"} \
-    -v "$dir:/src" -v ferrite-console-xwin:/xwin -w /src/ferrite-console "$1" bash -c "npm ci --no-audit --no-fund --silent && $3"
+    -v "$dir:/src" -v ferrite-console-xwin:/xwin -w /src/ferrite-console "$1" bash -c "set -o pipefail; $3"
 }
 docker run --rm -v ferrite-console-xwin:/xwin alpine chmod 777 /xwin
 out=$dir/out; rm -rf "$out"; mkdir -p "$out"
+# The web front end once (the wasm core, fonts, Vite), in the Linux box: both apps bundle the same dist/, and the
+# npm packages (the Tauri CLI's binary included) run in either box, both x86-64 Linux. The Tauri builds then skip
+# their beforeBuildCommand. (They each ran npm ci and the whole front end before, one after the other.)
+fe=$(date +%s)
+run ferrite-console-desktop-linux target-linux "npm ci --no-audit --no-fund --silent && npm run build:app >/dev/null 2>&1" ||
+  { echo "the front end failed: npm run build:app on its own shows why" >&2; exit 1; }
+echo "front end: $(( $(date +%s) - fe )) s"
+# Then Linux and Windows at once: their cargo targets are apart, and a release build spends long stretches on one
+# core (LTO with one codegen unit), so two side by side finish in little more than the slower one's time.
+pids=() names=()
 if [ "$what" != windows ]; then
-  rm -rf ferrite-console/target-linux/release/bundle # only this build's installers, not every older version's
-  run ferrite-console-desktop-linux target-linux "npx tauri build$upd 2>&1 | tail -n 15"
-  cp ferrite-console/target-linux/release/bundle/deb/*.deb ferrite-console/target-linux/release/bundle/rpm/*.rpm \
-     ferrite-console/target-linux/release/bundle/appimage/*.AppImage ferrite-console/target-linux/release/bundle/appimage/*.AppImage.sig \
-     "$out/" 2>/dev/null || true
+  ( t=$(date +%s)
+    rm -rf ferrite-console/target-linux/release/bundle # only this build's installers, not every older version's
+    run ferrite-console-desktop-linux target-linux "npx tauri build --config '$cfg'" >"$dir/linux.log" 2>&1
+    cp ferrite-console/target-linux/release/bundle/deb/*.deb ferrite-console/target-linux/release/bundle/rpm/*.rpm \
+       ferrite-console/target-linux/release/bundle/appimage/*.AppImage "$out/"
+    [ -z "${envf[*]}" ] || cp ferrite-console/target-linux/release/bundle/appimage/*.AppImage.sig "$out/"
+    echo "linux: $(( $(date +%s) - t )) s" ) &
+  pids+=($!) names+=(linux)
 fi
 if [ "$what" != linux ]; then
-  rm -rf ferrite-console/target/x86_64-pc-windows-msvc/release/bundle
-  run ferrite-console-desktop target 'npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc 2>&1 | tail -n 15'
-  cp ferrite-console/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe "$out/" 2>/dev/null || true
-  # The bare app too: runs without installing (Windows 10 and 11 have the WebView2 runtime it needs).
-  cp ferrite-console/target/x86_64-pc-windows-msvc/release/ferrite-console-app.exe "$out/Ferrite Console portable.exe" 2>/dev/null || true
+  ( t=$(date +%s)
+    rm -rf ferrite-console/target/x86_64-pc-windows-msvc/release/bundle
+    run ferrite-console-desktop target "npx tauri build --config '$cfg' --runner cargo-xwin --target x86_64-pc-windows-msvc" >"$dir/windows.log" 2>&1
+    cp ferrite-console/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe "$out/"
+    # The bare app too: runs without installing (Windows 10 and 11 have the WebView2 runtime it needs).
+    cp ferrite-console/target/x86_64-pc-windows-msvc/release/ferrite-console-app.exe "$out/Ferrite Console portable.exe"
+    echo "windows: $(( $(date +%s) - t )) s" ) &
+  pids+=($!) names+=(windows)
 fi
+failed=""
+for i in "${!pids[@]}"; do
+  wait "${pids[$i]}" || { failed="$failed ${names[$i]}"; echo "== ${names[$i]} failed; the end of $dir/${names[$i]}.log:" >&2; tail -n 25 "$dir/${names[$i]}.log" >&2; }
+done
+[ -z "$failed" ] || exit 1
 ls -la "$out"
 REMOTE
 mkdir -p "$here/target/desktop"
