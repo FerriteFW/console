@@ -220,13 +220,10 @@ fn channel_records_survive_the_view() {
     channel_records(false, 10_000);
 }
 
-/// The same with fields out of their ranges, which ferrite's link takes too: power 3, busy lockout 2, squelch 11,
-/// tone words 0xFFFF, 0x7FFF or 1 (0.1 Hz), a name ending in a space. Console's view shows them as other values
-/// (Low, on, Global ...) or refuses the row (a tone word it can't read), and a refused row stops every channel write
-/// ("the radio's own set: ...") until it is fixed in the table. Which side should give: ferrite's link check, or
-/// Console's view. Repeats with `cargo test -- --ignored channel_records_out_of_range`.
+/// The same with fields out of their ranges: power 3, busy lockout 2, squelch 11, tone words 0xFFFF, 0x7FFF or 1,
+/// a name ending in a space. Ferrite's link took them and Console's view then changed or refused them; since
+/// ferrite#147 the link refuses them (LINK-41.4), so every record the radio takes round-trips through the view.
 #[test]
-#[ignore = "found: ferrite's link takes channel fields out of range (power 3, busy 2, squelch 11, tone 0xFFFF/1, trailing space); Console's view changes or refuses them"]
 fn channel_records_out_of_range_survive_the_view() {
     channel_records(true, 3000);
 }
@@ -258,7 +255,8 @@ fn channel_records(wide: bool, n: u64) {
             });
         }
     });
-    assert!(taken > 100, "only {taken} records taken: the generator needs work");
+    // out-of-range fields are refused now (ferrite LINK-41.4): fewer are taken
+    assert!(taken > if wide { 20 } else { 100 }, "only {taken} records taken: the generator needs work");
 }
 
 /// A zone record: a name, flags, resume and dwell near their ranges; priority channels in range (or anything,
