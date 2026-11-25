@@ -193,12 +193,14 @@ fn chirp_held_channels_round_trip() {
                 (0..n).map(|k| held_channel(&mut rng, 1 + k as u16 * 3, zs.len() as u16)).collect();
             chans.retain(|c| check_channel(c, zs.len() as u16).is_none());
             let text = export(&chans, &zs);
-            // CHIRP's Duplex `off` (TX disabled) has no shift beside it: an RX-only channel's stored shift isn't in
-            // the file (a format limit; the radio doesn't transmit on it).
+            // An RX-only channel is Duplex `off` with its TX frequency in Offset (issue #85: its shift kept); a
+            // split whose TX is within MAX_SHIFT of RX comes back as the same TX written as a shift (the one form
+            // the file can't tell apart). CHIRP's one Skip column: skip and priority both export as S.
             let want: Vec<ChanView> = chans
                 .iter()
                 .map(|c| ChanView { pos: None, ..c.clone() })
-                .map(|c| if c.rx_only { ChanView { duplex: String::new(), offset: String::new(), ..c } } else { c })
+                .map(|c| if c.rx_only && c.duplex == "split" { c.with_tx(&c.tx_text()).unwrap() } else { c })
+                .map(|c| if c.skip { ChanView { priority: false, ..c } } else { c })
                 .collect();
             guard("chirp_held_channels_round_trip", seed, &text, || {
                 let got = import(&text, &zs).expect("own export");
