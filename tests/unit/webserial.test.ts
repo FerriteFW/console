@@ -135,3 +135,32 @@ test("webserial: after a rate switch the port is read at the new rate (High spee
   assert.deepEqual(got, [1, 2, 3, 4]);
   assert.equal(closed, "");
 });
+
+// openFailed: Chrome's bare "Failed to open serial port." says what to do; on Linux, the dialout group too.
+import { openFailed } from "../../src/lib/transport/webserial.ts";
+
+function chromeOpenError(): Error {
+  const e = new Error("Failed to open serial port.");
+  e.name = "NetworkError";
+  return e;
+}
+
+test("open failed on Linux: another program, or the dialout group with the command", () => {
+  const m = openFailed(chromeOpenError(), true).message;
+  assert.match(m, /another program may have it open/);
+  assert.match(m, /sudo usermod -aG dialout \$USER/);
+  assert.match(m, /log out and back in/);
+  assert.match(m, /\(Failed to open serial port\.\)$/);
+});
+
+test("open failed elsewhere: another program, no Linux groups", () => {
+  const m = openFailed(chromeOpenError(), false).message;
+  assert.match(m, /another program may have it open/);
+  assert.doesNotMatch(m, /dialout/);
+});
+
+test("open failed: other errors pass through as they are", () => {
+  const e = new Error("The port is already open.");
+  e.name = "InvalidStateError";
+  assert.equal(openFailed(e, true), e);
+});

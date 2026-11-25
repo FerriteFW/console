@@ -4,6 +4,7 @@
 // file first, then the diff, then the write on confirm: the records' write session, then a read back), backup
 // files out and back in. Every value, choice, check and diff is the Rust core's (ferrite's own App and link session);
 // this file moves records and lines.
+import { backupFailed } from "./backupError";
 import {
   extrasFromRadio,
   P,
@@ -209,7 +210,7 @@ class RadioSettings {
       this.write = { step: "review", plan, fresh, backupName: name, drifted };
     } catch (e) {
       this.write = null;
-      this.error = `Nothing written: the backup read failed (${(e as Error).message}).`;
+      this.error = backupFailed(e);
     }
   }
 

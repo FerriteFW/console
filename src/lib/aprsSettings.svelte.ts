@@ -6,6 +6,7 @@
 // write on confirm (the record's session, then the `set` lines), then a read back. Every value, choice and check is
 // the core's (ferrite's own App and link session).
 import { aprsBackup, aprsPlan, aprsRecordLen, aprsRestore, aprsSet, aprsView, P, type AprsView, type Extras } from "./core";
+import { backupFailed } from "./backupError";
 import { download, stamp } from "./channels.svelte";
 import { RadioError, WriteError } from "./link";
 import { radio } from "./radio.svelte";
@@ -159,7 +160,7 @@ class AprsSettings {
       this.write = { step: "review", plan, fresh, backupName: name, drifted };
     } catch (e) {
       this.write = null;
-      this.error = `Nothing written: the backup read failed (${(e as Error).message}).`;
+      this.error = backupFailed(e);
     }
   }
 
