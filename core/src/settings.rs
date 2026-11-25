@@ -1294,6 +1294,66 @@ pub fn plan(base: &[u8], base_ex: &Extras, want: &[u8], want_ex: &Extras) -> Pla
     Plan { changes, begin: begin_payload(ops.len() as u16), ops, cmds: Vec::new(), problems }
 }
 
+/// The settings record's fields, as `Settings`' `save` puts them (LINK-21.1); the flag byte merges flag by flag.
+fn fields() -> Vec<crate::merge::Field> {
+    use crate::merge::Field;
+    struct Spans(Vec<Field>, usize);
+    impl Sink for Spans {
+        fn put(&mut self, b: &[u8]) {
+            self.0.push(Field { at: self.1, len: b.len(), bits: false });
+            self.1 += b.len();
+        }
+    }
+    let mut sp = Spans(Vec::new(), 0);
+    Settings::DEFAULT.save(&mut sp);
+    let d = Settings::DEFAULT;
+    let flags = Settings { show_hidden: !d.show_hidden, ..d };
+    if let Some(at) = first_diff(&record_of(&d), &record_of(&flags)) {
+        sp.0.iter_mut().filter(|f| f.at == at && f.len == 1).for_each(|f| f.bits = true);
+    }
+    sp.0
+}
+
+fn first_diff(a: &[u8], b: &[u8]) -> Option<usize> {
+    a.iter().zip(b).position(|(x, y)| x != y)
+}
+
+/// The fields no menu item shows that the write dialog names (the home channel, CHAN-17; the FM radio's frequency).
+fn named() -> Vec<crate::merge::Named> {
+    use crate::merge::Named;
+    let d = Settings::DEFAULT;
+    let at = |s: Settings| first_diff(&record_of(&d), &record_of(&s));
+    let mut out = Vec::new();
+    if let Some(at) = at(Settings { home_ch: Some(d.home_ch.map_or(1, |n| n ^ 1)), ..d }) {
+        out.push(Named {
+            at,
+            name: "Home channel",
+            value: |r| home_channel(r).map_or_else(|| "none".into(), |n| n.to_string()),
+        });
+    }
+    let fm = Settings { fm_freq: d.fm_freq ^ 1, ..d };
+    if let Some(at) = at(fm) {
+        out.push(Named { at, name: "FM radio frequency", value: |r| format!("{:.2} MHz", settings_of(r).fm_freq as f64 / 100.0) });
+    }
+    out
+}
+
+/// LINK-21.1: the write's record and values: the edits (`base` as the editor read it, `edited`) put on the radio's
+/// record as it is now (`fresh`), with what the radio changed since the read and which of those the edits replace;
+/// `whole` (a loaded file) writes the edited record as it is.
+#[allow(clippy::too_many_arguments)]
+pub fn merge(
+    base: &[u8],
+    base_ex: &Extras,
+    edited: &[u8],
+    edited_ex: &Extras,
+    fresh: &[u8],
+    fresh_ex: &Extras,
+    whole: bool,
+) -> crate::merge::Merged {
+    crate::merge::merge(&fields(), &named(), (base, base_ex), (edited, edited_ex), (fresh, fresh_ex), "Other settings", whole, diff)
+}
+
 /// The backup file: Console's own JSON, the record as the link carries it (hex), the terminal-backed settings'
 /// values, and the settings as the menu shows them beside them for reading.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1417,6 +1477,70 @@ mod tests {
     fn diff(old: &[u8], new: &[u8]) -> Vec<Change> {
         super::diff(old, &ex0(), new, &ex0())
     }
+    fn merge(base: &Settings, edited: &Settings, fresh: &Settings) -> crate::merge::Merged {
+        let e = ex0();
+        super::merge(&record_of(base), &e, &record_of(edited), &e, &record_of(fresh), &e, false)
+    }
+
+    /// LINK-21.1 (console#80): the home channel and the FM radio's frequency (no menu item) changed on the radio
+    /// since the read survive a write of other edits, and the dialog lists them as the radio's changes.
+    #[test]
+    fn merge_keeps_what_the_radio_changed() {
+        let d = Settings::DEFAULT;
+        let edited = Settings { theme: d.theme ^ 1, ..d };
+        let fresh = Settings { home_ch: Some(41), fm_freq: d.fm_freq + 20, ..d };
+        let m = merge(&d, &edited, &fresh);
+        let got = settings_of(&m.record);
+        assert_eq!((got.home_ch, got.fm_freq, got.theme), (Some(41), d.fm_freq + 20, edited.theme));
+        assert!(m.overridden.is_empty(), "{:?}", m.overridden);
+        let home = m.radio.iter().find(|c| c.name == "Home channel").expect("the home channel listed");
+        assert_eq!((home.from.as_str(), home.to.as_str()), ("none", "42"));
+        let fm = m.radio.iter().find(|c| c.name == "FM radio frequency").expect("the FM frequency listed");
+        assert_eq!((fm.from.as_str(), fm.to.as_str()), ("101.10 MHz", "101.30 MHz"));
+        assert_eq!(m.radio.len(), 2, "{:?}", m.radio);
+        // The write is the radio's record plus the one edit: the plan changes the theme only.
+        let p = plan(&record_of(&fresh), &m.record);
+        assert_eq!(p.changes.len(), 1, "{:?}", p.changes);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+    }
+
+    /// LINK-21.1: an edited field wins over the radio's unchanged one; flags in the packed byte merge one by one.
+    #[test]
+    fn merge_takes_the_edits() {
+        let d = Settings::DEFAULT;
+        let edited = Settings { theme: d.theme ^ 1, scan_tx: !d.scan_tx, ..d };
+        let fresh = Settings { show_hidden: !d.show_hidden, ..d };
+        let got = settings_of(&merge(&d, &edited, &fresh).record);
+        assert_eq!((got.theme, got.scan_tx, got.show_hidden), (edited.theme, edited.scan_tx, fresh.show_hidden));
+        // Nothing changed on the radio: the edited record itself, and no drift.
+        let m = merge(&d, &edited, &d);
+        assert_eq!(m.record, record_of(&edited));
+        assert!(m.radio.is_empty() && m.overridden.is_empty());
+        // A loaded file goes whole: the radio's change since the read is listed as replaced.
+        let e = ex0();
+        let m = super::merge(&record_of(&d), &e, &record_of(&edited), &e, &record_of(&fresh), &e, true);
+        assert_eq!(m.record, record_of(&edited));
+        assert_eq!((m.radio.len(), m.overridden.len()), (1, 1), "{:?}", m.radio);
+    }
+
+    /// LINK-21.1: a setting changed both on the radio and in the editor: the edit wins, and the dialog says so
+    /// (`overridden`: the radio's value now -> the edit's).
+    #[test]
+    fn merge_edit_wins_a_conflict_and_says_so() {
+        let d = Settings::DEFAULT;
+        let edited = Settings { mic_gain: 3, ..d };
+        let fresh = Settings { mic_gain: 9, key_beep: !d.key_beep, ..d };
+        let m = merge(&d, &edited, &fresh);
+        let got = settings_of(&m.record);
+        assert_eq!((got.mic_gain, got.key_beep), (3, fresh.key_beep));
+        assert_eq!(m.radio.len(), 2, "{:?}", m.radio);
+        assert_eq!(m.overridden.len(), 1, "{:?}", m.overridden);
+        let o = &m.overridden[0];
+        let r = m.radio.iter().find(|c| c.id == o.id).expect("the overridden one is among the radio's changes");
+        assert_eq!(o.from, r.to, "from the radio's value now");
+        assert_ne!(o.to, o.from);
+    }
+
     /// CHAN-17: the home channel read from the record, numbered as people see it.
     #[test]
     fn home_channel_from_the_record() {

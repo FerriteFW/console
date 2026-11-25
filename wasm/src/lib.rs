@@ -637,6 +637,14 @@ pub fn settings_plan(base: &[u8], base_ex: &str, want: &[u8], want_ex: &str) -> 
     Ok(json(&settings::plan(base, &extras(base_ex)?, want, &extras(want_ex)?)))
 }
 
+/// LINK-21.1: the edits (the editor's read `base` -> `edited`) put on the radio's record as it is now (`fresh`):
+/// `merge::Merged` as JSON (the record and values to write, the radio's changes since the read, the ones the edits
+/// replace).
+#[wasm_bindgen]
+pub fn settings_merge(base: &[u8], base_ex: &str, edited: &[u8], edited_ex: &str, fresh: &[u8], fresh_ex: &str, whole: bool) -> Result<String, JsError> {
+    Ok(json(&settings::merge(base, &extras(base_ex)?, edited, &extras(edited_ex)?, fresh, &extras(fresh_ex)?, whole)))
+}
+
 /// This Console's record length (the radio's INFO says its own).
 #[wasm_bindgen]
 pub fn settings_len() -> u32 {
@@ -1296,6 +1304,13 @@ pub fn aprs_set(settings: &[u8], record: &[u8], ex: &str, id: &str, value: &str)
 #[wasm_bindgen]
 pub fn aprs_plan(settings: &[u8], base: &[u8], base_ex: &str, want: &[u8], want_ex: &str) -> Result<String, JsError> {
     Ok(json(&aprs_settings::plan(settings, base, &extras(base_ex)?, want, &extras(want_ex)?)))
+}
+
+/// LINK-21.1: as `settings_merge`, for the APRS record.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn aprs_merge(settings: &[u8], base: &[u8], base_ex: &str, edited: &[u8], edited_ex: &str, fresh: &[u8], fresh_ex: &str, whole: bool) -> Result<String, JsError> {
+    Ok(json(&aprs_settings::merge(settings, base, &extras(base_ex)?, edited, &extras(edited_ex)?, fresh, &extras(fresh_ex)?, whole)))
 }
 
 #[wasm_bindgen]

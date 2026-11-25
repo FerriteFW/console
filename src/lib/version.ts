@@ -19,3 +19,8 @@ export function olderThan(radio: string, latest: string): boolean {
 export function atLeast(v: string, min: string): boolean {
   return parse(v) !== null && parse(min) !== null && !olderThan(v, min);
 }
+
+/** True when `a` and `b` name the same version ("v0.9.7" and "0.9.7"); a missing or odd one never matches. */
+export function sameVersion(a: string, b: string): boolean {
+  return parse(a) !== null && parse(b) !== null && !olderThan(a, b) && !olderThan(b, a);
+}

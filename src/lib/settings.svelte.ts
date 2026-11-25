@@ -10,12 +10,15 @@ import {
   P,
   settingsBackup,
   settingsLen,
+  settingsMerge,
   settingsPlan,
   settingsRestore,
   settingsKeepPin,
   settingsSet,
   settingsView,
   type Extras,
+  type Merged,
+  type SettingChange,
   type SettingsPlan,
   type SettingsView,
 } from "./core";
@@ -25,9 +28,27 @@ import { radio } from "./radio.svelte";
 
 export type SettingsWriteStep =
   | { step: "backup" }
-  | { step: "review"; plan: SettingsPlan; fresh: Uint8Array; backupName: string; drifted: boolean }
+  | {
+      step: "review";
+      plan: SettingsPlan;
+      fresh: Uint8Array;
+      backupName: string;
+      /** LINK-21.1: what is written: the edits on the radio's record as it is now (a loaded file whole). */
+      want: Uint8Array;
+      wantEx: Extras;
+      /** What changed on the radio since the editor's read, and which of those the write replaces. */
+      radio: SettingChange[];
+      overridden: SettingChange[];
+      /** A loaded file (a backup, a codeplug), written whole. */
+      whole: boolean;
+    }
   | { step: "writing"; plan: SettingsPlan }
   | { step: "done"; plan: SettingsPlan; verified: boolean; error: string };
+
+/** LINK-21.1: the review step of a write from the merge (shared with APRS settings). */
+export function reviewStep(plan: SettingsPlan, fresh: Uint8Array, backupName: string, m: Merged, whole: boolean): SettingsWriteStep {
+  return { step: "review", plan, fresh, backupName, want: m.record, wantEx: m.extras, radio: m.radio, overridden: m.overridden, whole };
+}
 
 export const same = (a: Uint8Array | null, b: Uint8Array | null) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -76,6 +97,11 @@ class RadioSettings {
   /** The record came from a codeplug, which never carries the PIN lock: the radio's own is kept (taken from the
    *  record read before the write). */
   keepPin = false;
+  /** `base` is a read from the radio (not a file loaded before any read): the write merges the edits onto the radio's
+   *  record as it is then (LINK-21.1). */
+  baseFromRadio = false;
+  /** The editor holds a loaded file (a backup, a codeplug): it is written whole. */
+  whole = false;
 
   /** Settings whose value differs from what was read. */
   get dirty(): Set<string> {
@@ -127,8 +153,10 @@ class RadioSettings {
     }
   }
 
-  private took(r: Uint8Array, extras: Extras, source: string) {
+  private took(r: Uint8Array, extras: Extras, source: string, fromRadio = true) {
     this.base = r;
+    this.baseFromRadio = fromRadio;
+    this.whole = false;
     this.baseExtras = extras;
     this.show(r, extras);
     this.baseValues = this.values(this.view!);
@@ -165,6 +193,7 @@ class RadioSettings {
   revert() {
     if (!this.base) return;
     this.show(this.base, this.baseExtras);
+    this.whole = false;
     this.refused = {};
     this.source = "Edits undone: as read";
   }
@@ -186,8 +215,9 @@ class RadioSettings {
       // A codeplug has no PIN lock: the radio's own (as read) stays, and the write takes it from its fresh read.
       if (codeplug && this.base) rec = settingsKeepPin(rec, this.base);
       const extras = { ...this.extras, ...r.extras };
-      if (!this.base) this.took(rec, extras, "");
+      if (!this.base) this.took(rec, extras, "", false);
       else this.show(rec, extras);
+      this.whole = true;
       this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})`;
       this.keepPin = codeplug;
       return true;
@@ -197,7 +227,8 @@ class RadioSettings {
     }
   }
 
-  /** Step 1: a fresh read saved as a backup file, then the diff (and ferrite's dry run) against it. */
+  /** Step 1: a fresh read saved as a backup file; the edits put on it (LINK-21.1: only the fields edited since the
+   * read; what the radio changed meanwhile stays, and the dialog lists it); then the diff (and ferrite's dry run). */
   async startWrite() {
     if (!this.record) return;
     this.error = "";
@@ -205,9 +236,12 @@ class RadioSettings {
     try {
       const { record: fresh, extras, name } = await this.backupRadio();
       if (this.keepPin) this.show(settingsKeepPin(this.record, fresh), this.extras);
-      const plan = settingsPlan(fresh, extras, this.record!, this.extras);
-      const drifted = !!this.base && (!same(this.base, fresh) || JSON.stringify(this.baseExtras) !== JSON.stringify(extras));
-      this.write = { step: "review", plan, fresh, backupName: name, drifted };
+      const m: Merged =
+        this.base && this.baseFromRadio
+          ? settingsMerge(this.base, this.baseExtras, this.record!, this.extras, fresh, extras, this.whole)
+          : { record: this.record!, extras: this.extras, radio: [], overridden: [] };
+      const plan = settingsPlan(fresh, extras, m.record, m.extras);
+      this.write = reviewStep(plan, fresh, name, m, this.whole);
     } catch (e) {
       this.write = null;
       this.error = backupFailed(e);
@@ -220,8 +254,8 @@ class RadioSettings {
     const link = radio.connectedLink;
     if (!w || w.step !== "review" || !link || w.plan.problems.length || !(w.plan.ops.length || w.plan.cmds.length)) return;
     const plan = w.plan;
-    const want = this.record!;
-    const wantEx = this.extras;
+    const want = w.want;
+    const wantEx = w.wantEx;
     this.write = { step: "writing", plan };
     let error = "";
     radio.busy = this.busy = "Writing settings";
@@ -237,11 +271,8 @@ class RadioSettings {
     try {
       const back = await this.readRadio();
       verified = !error && same(back.record, want) && !settingsPlan(back.record, back.extras, want, wantEx).changes.length;
+      // A failed write leaves `base` the editor's read: the next write merges the same edits onto the radio again.
       if (!error) this.took(back.record, back.extras, `Written to ${radio.label} and read back at ${new Date().toLocaleTimeString()}`);
-      else {
-        this.base = back.record;
-        this.baseExtras = back.extras;
-      }
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
     }

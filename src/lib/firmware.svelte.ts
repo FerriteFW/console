@@ -28,6 +28,7 @@ import { newerFirmware } from "./updates.svelte";
 import { LAYOUT_MOVING, markFrom, migrate } from "./migrate.svelte";
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
+import { downgrade, releaseProblem } from "./feed";
 
 const CMD_PROBE = 0x42;
 const ACK = 0x06;
@@ -89,6 +90,14 @@ class Firmware {
   }
   /** The picked files came from the update feed: signed, whatever the option (UPD-27). */
   private fromRelease = false;
+  /** The file was chosen by hand (Advanced), not the release Update offers: an older one is a deliberate downgrade
+   *  (UPD-25.1). */
+  byHand = $state(false);
+  /** UPD-25.1: the release Update offers names this version (the feed's, or Console's manifest's): the signed file
+   *  must be it. */
+  private expect: { version: string; fromFeed: boolean } | null = null;
+  /** The release bundled with this Console (its manifest's version), "" for none. */
+  private shipped = "";
   /** The parts written so far (the "parts" stage). */
   partsDone = $state(0);
   partsTotal = $state(0);
@@ -130,6 +139,7 @@ class Firmware {
       try {
         const r = await appFetch("firmware/manifest.json", { cache: "no-cache" });
         if (r.ok) this.bundled = (await r.json()).ferrite ?? null;
+        this.shipped = this.bundled?.version ?? "";
       } catch {
         // no bundled release in this copy of Console: a file only
       }
@@ -156,7 +166,8 @@ class Firmware {
       const files = [new File([b as BlobPart], r.file)];
       // A .ffw carries its signature inside; a bare .btf's comes from the manifest.
       if (r.minisig) files.push(new File([r.minisig], `${r.file}.minisig`));
-      await this.pick(files, !!r.url); // UPD-27: one from the update feed is signed, developer option or not
+      // UPD-27: one from the update feed is signed, developer option or not; UPD-25.1: and is the version it names
+      await this.pick(files, !!r.url, { version: r.version, fromFeed: !!r.url });
     } catch (e) {
       this.error = `The release didn't load (${(e as Error).message}). Choose a file instead.`;
     }
@@ -165,16 +176,19 @@ class Firmware {
   /** The developer option changed: the last picked file is checked again under it. */
   async setDevUnsigned(on: boolean) {
     devOpts.allowUnsigned = on;
-    if (this.picked.length && !this.running) await this.pick(this.picked, this.fromRelease);
+    if (this.picked.length && !this.running) await this.pick(this.picked, this.fromRelease, this.expect);
   }
 
-  /** The picked files (a .ffw; or a .btf, and its .minisig when there is one), checked by the core. */
-  async pick(picked: FileList | File[], release = false) {
+  /** The picked files (a .ffw; or a .btf, and its .minisig when there is one), checked by the core. `expect`: the
+   *  release Update offers (UPD-25.1), null for a file chosen by hand. */
+  async pick(picked: FileList | File[], release = false, expect: { version: string; fromFeed: boolean } | null = null) {
     if (this.running) return;
     const files = Array.from(picked);
     if (!files.length) return;
     this.picked = files;
     this.fromRelease = release;
+    this.expect = expect;
+    this.byHand = !expect;
     await loadCore();
     this.ffw?.free();
     this.ffw = null;
@@ -201,6 +215,7 @@ class Firmware {
     // UPD-27: a signature that doesn't verify refuses the image like a failed check; none, unless allowed
     const why = signatureProblem(signature, this.devUnsigned, release);
     if (why) c.problems.push(why);
+    else this.checkRelease(c.version ?? "", c.problems);
     this.check = c;
     this.bytes = c.problems.length ? null : bytes;
     this.blocks = c.blocks;
@@ -228,6 +243,7 @@ class Firmware {
     const summary = JSON.parse(f.summary()) as FfwSummary;
     const btf = f.btf();
     const c = firmwareCheck(btf);
+    this.checkRelease(summary.version, c.problems); // the signature verified (FfwFile): now its version
     this.signature = summary.signed !== null ? { kind: "signed", comment: summary.signed } : { kind: "unsigned" };
     this.ffw = f;
     this.ffwSummary = summary;
@@ -235,6 +251,21 @@ class Firmware {
     this.bytes = c.problems.length ? null : btf;
     this.blocks = c.blocks;
     if (this.stage !== "failed") this.stage = c.problems.length ? "pick" : "ready";
+  }
+
+  /** UPD-25.1: the release Update offers is the version its feed (or manifest) names, and one from the feed is newer
+   *  than the bundled release; a file chosen by hand isn't checked here. */
+  private checkRelease(signed: string, problems: string[]) {
+    if (!this.expect) return;
+    const why = releaseProblem(signed, this.expect.version, this.expect.fromFeed, this.shipped);
+    if (why) problems.push(why);
+  }
+
+  /** UPD-25.1: the chosen file against the radio's running Ferrite: an older release refused, an older file chosen
+   *  by hand allowed with a note. */
+  get downgrade() {
+    const file = this.ffwSummary?.version ?? this.check?.version ?? "";
+    return downgrade(file, radio.info?.firmware ?? radio.hello?.firmware ?? "", this.byHand);
   }
 
   clearFile() {
@@ -254,6 +285,11 @@ class Firmware {
    *  which knows only HELLO and REBOOT from here). */
   async start() {
     if (this.running || !this.bytes) return;
+    const d = this.downgrade;
+    if (d && "refuse" in d) {
+      this.error = d.refuse;
+      return;
+    }
     const info = radio.info;
     const hello = radio.hello;
     const got = radio.takeForUpdate();

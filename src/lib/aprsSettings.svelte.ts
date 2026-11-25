@@ -5,12 +5,12 @@
 // them. As Radio Settings: a fresh read saved as a backup file first, then the diff (with ferrite's dry run), the
 // write on confirm (the record's session, then the `set` lines), then a read back. Every value, choice and check is
 // the core's (ferrite's own App and link session).
-import { aprsBackup, aprsPlan, aprsRecordLen, aprsRestore, aprsSet, aprsView, P, type AprsView, type Extras } from "./core";
+import { aprsBackup, aprsMerge, aprsPlan, aprsRecordLen, aprsRestore, aprsSet, aprsView, P, type AprsView, type Extras, type Merged } from "./core";
 import { backupFailed } from "./backupError";
 import { download, stamp } from "./channels.svelte";
 import { RadioError, WriteError } from "./link";
 import { radio } from "./radio.svelte";
-import { readExtras, same, sendCmds, type SettingsWriteStep } from "./settings.svelte";
+import { readExtras, reviewStep, same, sendCmds, type SettingsWriteStep } from "./settings.svelte";
 
 class AprsSettings {
   /** The radio's settings record (for its region), read with the APRS record. */
@@ -26,6 +26,10 @@ class AprsSettings {
   error = $state("");
   refused = $state<Record<string, string>>({});
   write = $state<SettingsWriteStep | null>(null);
+  /** `base` is a read from the radio: the write merges the edits onto the radio's record then (LINK-21.1). */
+  baseFromRadio = false;
+  /** The editor holds a loaded file: it is written whole. */
+  whole = false;
 
   get dirty(): Set<string> {
     const out = new Set<string>();
@@ -84,8 +88,10 @@ class AprsSettings {
     }
   }
 
-  private took(r: Uint8Array, extras: Extras, source: string) {
+  private took(r: Uint8Array, extras: Extras, source: string, fromRadio = true) {
     this.base = r;
+    this.baseFromRadio = fromRadio;
+    this.whole = false;
     this.baseExtras = extras;
     this.show(r, extras);
     this.baseValues = Object.fromEntries(this.view!.items.map((i) => [i.id, i.value]));
@@ -120,6 +126,7 @@ class AprsSettings {
   revert() {
     if (!this.base) return;
     this.show(this.base, this.baseExtras);
+    this.whole = false;
     this.refused = {};
     this.source = "Edits undone: as read";
   }
@@ -139,8 +146,9 @@ class AprsSettings {
       const r = aprsRestore(text);
       const rec = new Uint8Array(r.record);
       const extras = { ...this.extras, ...r.extras };
-      if (!this.base) this.took(rec, extras, "");
+      if (!this.base) this.took(rec, extras, "", false);
       else this.show(rec, extras);
+      this.whole = true;
       this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})`;
       return true;
     } catch (e) {
@@ -155,9 +163,13 @@ class AprsSettings {
     this.write = { step: "backup" };
     try {
       const { record: fresh, extras, name } = await this.backupRadio();
-      const plan = aprsPlan(this.settingsRec, fresh, extras, this.record, this.extras);
-      const drifted = !!this.base && (!same(this.base, fresh) || JSON.stringify(this.baseExtras) !== JSON.stringify(extras));
-      this.write = { step: "review", plan, fresh, backupName: name, drifted };
+      // LINK-21.1: the edits on the radio's record as it is now; what the radio changed since the read stays.
+      const m: Merged =
+        this.base && this.baseFromRadio
+          ? aprsMerge(this.settingsRec, this.base, this.baseExtras, this.record, this.extras, fresh, extras, this.whole)
+          : { record: this.record, extras: this.extras, radio: [], overridden: [] };
+      const plan = aprsPlan(this.settingsRec, fresh, extras, m.record, m.extras);
+      this.write = reviewStep(plan, fresh, name, m, this.whole);
     } catch (e) {
       this.write = null;
       this.error = backupFailed(e);
@@ -169,8 +181,8 @@ class AprsSettings {
     const link = radio.connectedLink;
     if (!w || w.step !== "review" || !link || w.plan.problems.length || !(w.plan.ops.length || w.plan.cmds.length)) return;
     const plan = w.plan;
-    const want = this.record!;
-    const wantEx = this.extras;
+    const want = w.want;
+    const wantEx = w.wantEx;
     this.write = { step: "writing", plan };
     let error = "";
     radio.busy = this.busy = "Writing APRS settings";
@@ -186,11 +198,8 @@ class AprsSettings {
     try {
       const back = await this.readRadio();
       verified = !error && same(back.record, want) && !aprsPlan(this.settingsRec, back.record, back.extras, want, wantEx).changes.length;
+      // A failed write leaves `base` the editor's read: the next write merges the same edits onto the radio again.
       if (!error) this.took(back.record, back.extras, `Written to ${radio.label} and read back at ${new Date().toLocaleTimeString()}`);
-      else {
-        this.base = back.record;
-        this.baseExtras = back.extras;
-      }
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
     }
