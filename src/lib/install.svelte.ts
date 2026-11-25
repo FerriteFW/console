@@ -60,6 +60,7 @@ import { cablePrefs } from "./cablePrefs.svelte";
 import { radio } from "./radio.svelte";
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
+import { fdumpReadyRe, FDUMP_RESULT_RE, MDUMP_MARKER_RE, NAK_QUIET_MS, PROMPT_RE, quiet, resultReason, SYNC_WINDOW_MS } from "./readerLines";
 
 /** The reader's fdump rates, fastest first (fdump_proto.py's RATES: the radio's 8 MHz UART makes these exact). */
 const READER_RATES = [500_000, 250_000, 115_200];
@@ -831,7 +832,7 @@ class Install {
       await w.write(MDUMP_MARKER);
       // To its `dump: end`: on some hosts that comes in a later read, and it then ended the icon read below at once
       // (two Windows logs and a Linux one, Nov 17, 2026).
-      const md = await w.waitFor(/80F0000:[0-9A-F]{32}\*[0-9A-F]{2}(?=[\s\S]*?dump: end)|\?  \(help\)|mdump: [^\r\n]*/, 3000, this.held);
+      const md = await w.waitFor(MDUMP_MARKER_RE, 3000, this.held);
       this.marker = md ? parseMdump(md[0]) : null;
       if (!md) debugLog(`backup: no answer to the marker's mdump; heard ${radioSaid(w.text)}`);
       this.markerRead = !!this.marker;
@@ -951,8 +952,7 @@ class Install {
           last = e as Error;
           if (e instanceof NoFdumpz) break;
           if (/no answer to fdump|outside/.test(last.message)) throw this.readFailed(last);
-          await this.wire!.write("\r");
-          await sleep(500);
+          await this.backAtPrompt();
         }
       }
       if (!(last instanceof NoFdumpz)) throw this.readFailed(last);
@@ -964,11 +964,19 @@ class Install {
         if (e instanceof Abort) throw e;
         last = e as Error;
         if (/no answer to fdump|outside/.test(last.message)) break;
-        await this.wire!.write("\r");
-        await sleep(500);
+        await this.backAtPrompt();
       }
     }
     throw this.readFailed(last);
+  }
+
+  /** Before a retry: an empty line, then the reader's `> ` (BACKUP-9.8), not a fixed wait: a reader still busy
+   * with the last try would take the next command's bytes as part of it (FerriteFW/console#88). */
+  private async backAtPrompt() {
+    const w = this.wire!;
+    w.clear();
+    await w.write("\r");
+    if (!(await w.waitFor(PROMPT_RE, 3000, this.held))) debugLog(`backup: no prompt before the retry; heard ${radioSaid(w.text)}`);
   }
 
   private readFailed(last: Error | null) {
@@ -983,17 +991,15 @@ class Install {
     const fd = z ? Fdump.z(0, len) : new Fdump(0, len);
     const queue: FdStep[] = [];
     let started = false;
+    let failed: unknown = null;
     this.done = 0;
     this.total = len;
     this.message = `Reading the flash at ${rate / 1000} kbaud…`;
     try {
       w.clear();
-      await w.write(fd.command(rate));
-      const ready = await w.waitFor(
-        /fdump(?:: [^\r\n]*|[ ][0-9A-F]{6} [0-9A-F]+ \d+ ready[^\r\n]*)|\?  \(help\)|fdumpz: \?/,
-        5000,
-        this.held,
-      );
+      const command = fd.command(rate);
+      await w.write(command);
+      const ready = await w.waitFor(fdumpReadyRe(command), 5000, this.held);
       if (!ready) {
         debugLog(`backup: ${z ? "fdumpz" : "fdump"} at ${rate}: no answer; heard ${radioSaid(w.text)}`);
         throw new Error("no answer to fdump");
@@ -1001,6 +1007,8 @@ class Install {
       if (ready[0].startsWith("fdump: ")) throw new Error(ready[0]);
       if (!ready[0].startsWith("fdump ")) throw new NoFdumpz("the reader has no fdumpz");
       started = true;
+      // BACKUP-9.8: the sync window runs from the "ready" line, as the reader's does, and ends first.
+      const syncEnd = performance.now() + SYNC_WINDOW_MS;
       if (t.setBaud) await t.setBaud(rate);
       await sleep(50);
       let heard = performance.now();
@@ -1009,7 +1017,6 @@ class Install {
         const st = JSON.parse(fd.feed(b)) as FdStep;
         if (st.send.length || st.nak || st.inflate || st.done || st.error) queue.push(st);
       };
-      const syncEnd = performance.now() + 3000;
       while (!fd.synced()) {
         this.held();
         if (performance.now() > syncEnd) throw new Error(`no sync at ${rate} baud`);
@@ -1039,7 +1046,9 @@ class Install {
         if (st.error) throw new Error(st.error);
         if (st.send.length) await t.write(new Uint8Array(st.send));
         if (st.nak) {
-          await sleep(20);
+          // BACKUP-9.9: the rest of a frame cut short, then the NAK; a stray "FD" in that rest would otherwise
+          // be read as a frame and NAKed again (FerriteFW/console#90).
+          await quiet(() => heard, NAK_QUIET_MS, 2000);
           fd.resume();
           queue.length = 0;
           await t.write(new Uint8Array([NAK]));
@@ -1049,8 +1058,8 @@ class Install {
       }
       return fd.take_data();
     } catch (e) {
+      failed = e;
       if (started) await t.write(new Uint8Array([CAN, CAN, CAN, CAN])).catch(() => {});
-      throw e;
     } finally {
       w.sink = null;
       fd.free();
@@ -1058,9 +1067,15 @@ class Install {
         await sleep(50);
         if (t.setBaud) await t.setBaud(P.timing.cable_baud).catch(() => {});
         await sleep(50);
-        await w.waitFor(/fdump (end|stopped)[^\r\n]*/, 3000, () => {});
+        // BACKUP-9.7: the reader's own word on the read, logged, and part of a failure's reason.
+        const end = await w.waitFor(FDUMP_RESULT_RE, 3000, () => {});
+        const name = z ? "fdumpz" : "fdump";
+        debugLog(`backup: ${name} at ${rate}: ${end ? `the radio said ${radioSaid(end[0])}` : `no result line in 3 s; heard ${radioSaid(w.text)}`}`);
+        if (failed && !(failed instanceof Abort))
+          failed = new Error(`${(failed as Error)?.message ?? failed} (the radio: ${end ? resultReason(end[0]) : "no result line"})`);
       }
     }
+    throw failed;
   }
 
   /** BACKUP-2: the desktop app's save dialog (the file read back), Chrome's save dialog (read back too), or the
