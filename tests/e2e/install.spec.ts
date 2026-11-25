@@ -256,13 +256,13 @@ test("install: a copy that passes every chunk but not the radio's CRC is read ag
   writeFileSync(flashPath, chip());
   setMode({ flash: flashPath, wrong_first_dump: true });
   await serveRelease(page);
-  // High speed on (decision 408): the first read at 230400, the second at 115200.
+  // BACKUP-9.6 (Nov 25, 2026): both reads at the cable's 115200, High speed or not: no rate switch.
   await page.addInitScript(() => localStorage.setItem("ferrite-console-cable-high-speed", "on"));
   await open(page);
   await backUp(page);
   const d = dumpResult() as { z: boolean; rates: number[] };
   expect(d.z).toBe(true);
-  expect(d.rates).toEqual([230400, 115200]);
+  expect(d.rates).toEqual([115200, 115200]);
   await expect(wizard(page).getByText(/read twice/)).toHaveCount(0);
 });
 
