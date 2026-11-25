@@ -8,6 +8,11 @@ import { backupFailed } from "./backupError";
 import { debugLog } from "./debuglog";
 import {
   P,
+  arrangeApply,
+  arrangeInsert,
+  arrangeMoveBlock,
+  arrangeRenumber,
+  type Arranged,
   backupFile,
   checkPreset,
   chirpExport,
@@ -863,18 +868,74 @@ class Channels {
   }
 
   /** Channels renumbered by `map` (old -> new; a renumbering, so no two end on one number), one undo. What names a
-   *  channel by number goes with it: the zones' priority channels and the home channel (CHAN-18). */
+   *  channel by number goes with it: the zones' priority channels and the home channel (CHAN-18; the core's
+   *  `arrange::apply`). */
   private renumberAll(map: Map<number, number>) {
     if (!map.size) return;
+    this.take(arrangeApply(this.snap(), this.home ?? null, map));
+  }
+
+  /** The table as plain JSON for the core. */
+  private snap(): ChannelSet {
+    return $state.snapshot(this.table) as ChannelSet;
+  }
+
+  /** An arrangement into the table, one undo (nothing when nothing moved and nothing was added). The home channel
+   *  follows only when it is known (undefined stays undefined: not read). */
+  private take(a: Arranged) {
+    if (!a.moved.length && a.added === null) return;
     this.remember();
-    const to = (n: number | null) => (n === null ? null : (map.get(n) ?? n));
-    for (const c of this.table.channels) c.number = to(c.number) as number;
-    for (const z of this.table.zones) {
-      z.pri1 = to(z.pri1);
-      z.pri2 = to(z.pri2);
+    this.table = a.set;
+    if (this.home !== undefined) this.home = a.home;
+  }
+
+  /** The renumber's preview (console#104): every channel top to bottom from 1, gaps closed; nothing changed yet. */
+  renumberPreview(): Arranged {
+    return arrangeRenumber(this.snap(), this.home ?? null, 1);
+  }
+
+  /** Every channel renumbered top to bottom from 1, closing the gaps (one undo): the renumbered channels (old -> new). */
+  renumber(): Map<number, number> {
+    const a = this.renumberPreview();
+    this.take(a);
+    return new Map(a.moved.map((m) => [m.from, m.to]));
+  }
+
+  /** A new channel at number `at` (console#55, #104): the channels from there move one along as far as the first free
+   *  number. It joins zone `zone` (the row's) when that has room, else no zone. One undo; its number and the
+   *  renumbered channels, or the refusal's words. */
+  insertAt(at: number, zone: number | null = null): { added: number | null; moved: Map<number, number>; why: string } {
+    const z = zone !== null && (this.zoneCounts()[zone] ?? P.limits.zoneCap) < P.limits.zoneCap ? zone : null; // CHAN-35
+    try {
+      const a = arrangeInsert(this.snap(), this.home ?? null, at, { ...newChannel(at, "146.52"), zone: z });
+      this.take(a);
+      return { added: a.added, moved: new Map(a.moved.map((m) => [m.from, m.to])), why: "" };
+    } catch (e) {
+      return { added: null, moved: new Map(), why: (e as Error).message };
     }
-    if (this.home != null) this.home = to(this.home);
-    this.table.channels.sort((x, y) => x.number - y.number);
+  }
+
+  /** What `moveBlock` would do, nothing changed: the channels that would change number, or why not. */
+  moveBlockPreview(picked: number[], start: number): { moved: { from: number; to: number }[]; why: string } {
+    if (!(Number.isInteger(start) && start >= 1 && start <= P.limits.channels)) return { moved: [], why: `Channels are 1 to ${P.limits.channels}.` };
+    try {
+      return { moved: arrangeMoveBlock(this.snap(), this.home ?? null, picked, start).moved, why: "" };
+    } catch (e) {
+      return { moved: [], why: (e as Error).message };
+    }
+  }
+
+  /** Channels `picked` moved together to continuous numbers from `start`, in their order (console#104): the ones in
+   *  the way move one along as far as the first free number. One undo; the renumbered channels, or the refusal. */
+  moveBlock(picked: Iterable<number>, start: number): { moved: Map<number, number>; why: string } {
+    if (!(Number.isInteger(start) && start >= 1 && start <= P.limits.channels)) return { moved: new Map(), why: `Channels are 1 to ${P.limits.channels}.` };
+    try {
+      const a = arrangeMoveBlock(this.snap(), this.home ?? null, [...picked], start);
+      this.take(a);
+      return { moved: new Map(a.moved.map((m) => [m.from, m.to])), why: "" };
+    } catch (e) {
+      return { moved: new Map(), why: (e as Error).message };
+    }
   }
 
   /** Zone `from` (its number) to place `to`: the zones it passes move one along, and every channel keeps its zone

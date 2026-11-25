@@ -125,6 +125,9 @@ pub struct Plan {
     /// LINK-53: the channels (as the radio numbers them, 1-1000) whose position changes, set or cleared after the
     /// ops; their diff is the `position` field in `changes`.
     pub positions: Vec<u16>,
+    /// The channels that only change number (a renumber, an insert, a move: console#55, #104), for the write dialog:
+    /// each is still a write at its new number (and a delete at its old one when nothing takes that).
+    pub moves: Vec<crate::arrange::Move>,
 }
 
 /// A refusal in ferrite's words: an `invalid` answer's reason, else the status's name.
@@ -161,11 +164,11 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
         (Ok(b), Ok(w)) => (b, w),
         (Err(p), _) => {
             problems.push(Problem { error: format!("the radio's own set: {}", p.error), ..p });
-            return Plan { changes, begin: begin_payload(0), ops, problems, positions: Vec::new() };
+            return Plan { changes, begin: begin_payload(0), ops, problems, positions: Vec::new(), moves: Vec::new() };
         }
         (_, Err(p)) => {
             problems.push(p);
-            return Plan { changes, begin: begin_payload(0), ops, problems, positions: Vec::new() };
+            return Plan { changes, begin: begin_payload(0), ops, problems, positions: Vec::new(), moves: Vec::new() };
         }
     };
     let (bz, bc) = &base_parts;
@@ -310,7 +313,8 @@ pub fn plan(base: &Set, want: &Set) -> Plan {
     }
 
     problems.extend(dry_run(&base_parts, &ops, &want_parts));
-    Plan { changes, begin: begin_payload(ops.len() as u16), ops, problems, positions }
+    let moves = crate::arrange::moved_channels(base, want);
+    Plan { changes, begin: begin_payload(ops.len() as u16), ops, problems, positions, moves }
 }
 
 /// The channel writes in an order that never takes a zone past its 256 on the way (CHAN-35: the radio refuses the
@@ -769,6 +773,34 @@ mod tests {
         let p = plan(&base, &want);
         assert!(p.problems.is_empty(), "{:?}", p.problems);
         assert_eq!(p.ops.iter().map(|o| o.number).collect::<Vec<_>>(), [257, 1]);
+    }
+
+    /// console#55, #104: a renumber (gaps closed) of a full zone and a block move plan cleanly through ferrite's own
+    /// link session: each moved channel written at its new number, the numbers left empty deleted, the zone whose
+    /// priority channel followed written, and `moves` names every channel that only changed number.
+    #[test]
+    fn renumber_and_block_move_plan() {
+        // 256 in A at even numbers 2-512 (a full zone), 3 in no zone after them.
+        let mut base =
+            zoned(&["A"], (1..=256).map(|n| (n * 2, Some(0))).chain([(600, None), (601, None), (700, None)]));
+        base.zones[0].pri1 = Some(10);
+        let r = crate::arrange::renumber(&base, Some(600), 1).unwrap();
+        assert_eq!(r.home, Some(257));
+        assert_eq!(r.set.zones[0].pri1, Some(5));
+        let p = plan(&base, &r.set);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(p.moves.len(), 259);
+        let writes = p.ops.iter().filter(|o| o.kind == "write" && o.what == "channel").count();
+        let deletes = p.ops.iter().filter(|o| o.kind == "delete").count();
+        let zones = p.ops.iter().filter(|o| o.what == "zone").count();
+        // Every channel lands on a new number; 1-259 now used, so the old numbers past 259 are deleted.
+        assert_eq!((writes, zones), (259, 1));
+        assert_eq!(deletes, base.channels.iter().filter(|c| c.number > 259).count());
+        // A block of three moved up into the zone's numbers.
+        let r = crate::arrange::move_block(&base, None, &[600, 601, 700], 3).unwrap();
+        let p = plan(&base, &r.set);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(p.moves.len(), r.moved.len());
     }
 
     /// A zone deleted on the radio before a later one reads as an empty, unnamed record (CHAN-12; the update keeps it,

@@ -19,6 +19,7 @@
     onletgo,
     ondropon,
     onstep,
+    onmenu,
   }: {
     c: Channel;
     zones: Zone[];
@@ -36,6 +37,8 @@
     ondropon: () => void;
     /** ↑ ↓ on the handle: one place up or down the table as shown. */
     onstep: (dir: -1 | 1) => void;
+    /** The row's menu (insert above or below, move to…, delete) at a point: right-click, or the ⋯ button. */
+    onmenu: (x: number, y: number) => void;
   } = $props();
 
   /** Our own drag type, so a field in the row never takes the drop as text. */
@@ -108,6 +111,11 @@
   ondragover={dragOver}
   ondragleave={() => (over = false)}
   ondrop={drop}
+  oncontextmenu={(e) => {
+    if ((e.target as HTMLElement).closest("input:not([type=checkbox]), select")) return; // a field's own menu (paste)
+    e.preventDefault();
+    onmenu(e.clientX, e.clientY);
+  }}
 >
   <td class="pick sticky">
     <input
@@ -165,6 +173,16 @@
   <td class="ck"><input type="checkbox" checked={c.skip} onchange={(e) => set("skip", e.currentTarget.checked)} aria-label="Scan skip" /></td>
   <td class="act">
     {#if problem}<span class="warn" title={problem} aria-label={`Problem: ${problem}`}>!</span>{/if}
+    <button
+      class="more"
+      aria-haspopup="menu"
+      aria-label={`More for channel ${c.number}: insert above or below, move to…`}
+      title="Insert a channel above or below, move to a number… (or right-click the row)"
+      onclick={(e) => {
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        onmenu(r.left, r.bottom);
+      }}>⋯</button
+    >
   </td>
 </tr>
 {#if problem}
