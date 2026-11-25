@@ -169,7 +169,7 @@ impl Session {
             if raw.is_empty() {
                 continue;
             }
-            if let Ok(mut f) = link::parse(&mut raw) {
+            if let Some(mut f) = parse_skipping_junk(&mut raw) {
                 // LINK-13.4: receive audio is pushed plain, outside compression's window and count (LINK-51)
                 if f.ty == link::msg::AUDIO_DATA {
                     out.push(Answer { ty: f.ty, seq: f.seq, status: 0, rest: f.payload.to_vec(), event: true });
@@ -178,15 +178,20 @@ impl Session {
                 let mut plain = [0u8; MAX_WIRE];
                 if let Some(z) = self.lz.as_mut().filter(|_| f.ty != link::msg::HELLO | ANSWER) {
                     if f.ty & 0x7F == Z {
+                        // Broken (a count that didn't match, a frame that didn't decode): this window is out of step
+                        // with the radio's, so nothing coded decodes until a `HELLO` starts both over (issue #95).
+                        if z.broken {
+                            continue;
+                        }
                         let (Some(&inner), Some(&cnt)) = (f.payload.first(), f.payload.get(1)) else { continue };
                         let k = (cnt == z.down_n).then(|| z.down.decode(&f.payload[2..], &mut plain)).flatten();
-                        z.down_n = z.down_n.wrapping_add(1);
                         let Some(k) = k else {
                             z.broken = true;
                             continue;
                         };
+                        z.down_n = z.down_n.wrapping_add(1);
                         f = link::Frame { ty: inner, seq: f.seq, payload: &plain[..k] };
-                    } else {
+                    } else if !z.broken {
                         z.down.seen(f.payload);
                         z.down_n = z.down_n.wrapping_add(1);
                     }
@@ -206,6 +211,24 @@ impl Session {
         }
         out
     }
+}
+
+/// One delimited segment as a frame. Bytes ahead of a frame (a stray XOFF, terminal text, an event cut short during
+/// a rate change) would fail its CRC and lose it whole (issue #93): on a failure the parse is tried again from each
+/// later byte, the CRC guarding against a false frame. A frame is never longer than [`MAX_WIRE`], so only the
+/// segment's last bytes are tried.
+fn parse_skipping_junk(raw: &mut Vec<u8>) -> Option<link::Frame<'_>> {
+    let mut tried = raw.clone();
+    if link::parse(&mut tried).is_err() {
+        let from = raw.len().saturating_sub(MAX_WIRE).max(1);
+        let start = (from..raw.len().saturating_sub(3)).find(|&i| {
+            tried.clear();
+            tried.extend_from_slice(&raw[i..]);
+            link::parse(&mut tried).is_ok()
+        })?;
+        raw.drain(..start);
+    }
+    link::parse(raw).ok()
 }
 
 #[cfg(test)]
@@ -361,5 +384,66 @@ mod tests {
         assert!(s.feed(&w[..n]).is_empty() && s.lz_broken());
         s.set_lz(true);
         assert!(!s.lz_broken());
+    }
+
+    /// An answer coded by the radio's encoder `e`, counted `cnt`.
+    fn coded_answer(e: &mut LzEnc<DOWN>, ty: u8, seq: u8, cnt: u8, rest: &[u8]) -> Vec<u8> {
+        let mut ans = vec![Status::Ok as u8];
+        ans.extend_from_slice(rest);
+        let mut c = [0u8; MAX_WIRE];
+        let k = e.encode(&ans, &mut c[2..]).expect("it shrinks");
+        (c[0], c[1]) = (ty | ANSWER, cnt);
+        let mut w = [0u8; MAX_WIRE];
+        let n = link::build(Z | ANSWER, seq, &c[..k + 2], &mut w).unwrap();
+        w[..n].to_vec()
+    }
+
+    /// Issue #95: after a count that doesn't match, the windows are apart: nothing coded decodes (against the wrong
+    /// window it would come out as wrong bytes), not even a frame whose count happens to line up, until a `HELLO`
+    /// starts both windows over; then the radio's next coded answer decodes again.
+    #[test]
+    fn a_count_mismatch_decodes_nothing_until_a_hello() {
+        let mut s = Session::new();
+        s.set_lz(true);
+        let mut e = LzEnc::<DOWN>::new();
+        let page = [b'a'; 100];
+        assert_eq!(s.feed(&coded_answer(&mut e, msg::UI, 1, 0, &page)).len(), 1);
+        let _lost = coded_answer(&mut e, msg::UI, 2, 1, &page); // never arrives: its bytes are only in the radio's window
+        assert!(s.feed(&coded_answer(&mut e, msg::UI, 3, 2, &[b'b'; 100])).is_empty());
+        assert!(s.lz_broken());
+        let z = s.lz.as_ref().unwrap();
+        assert_eq!(z.down_n, 1, "the count stays: a mismatch doesn't move it");
+        // a frame counted 1 (the one this end waits for) still doesn't decode while broken
+        let mut e2 = LzEnc::<DOWN>::new();
+        assert!(s.feed(&coded_answer(&mut e2, msg::UI, 4, 1, &page)).is_empty());
+        assert!(s.lz_broken());
+        // plain answers still come through
+        assert_eq!(s.feed(&radio_answer(msg::KEY, 5, Status::Ok, &[])).len(), 1);
+        // a HELLO starts both ends over: the radio's next coded answer decodes
+        s.set_lz(true);
+        let mut e = LzEnc::<DOWN>::new();
+        let a = s.feed(&coded_answer(&mut e, msg::UI, 6, 0, &page));
+        assert_eq!((a.len(), a[0].seq, a[0].rest.as_slice()), (1, 6, &page[..]));
+    }
+
+    /// Issue #93: a stray byte (the radio's XOFF) or some text just before a frame doesn't lose the frame.
+    #[test]
+    fn junk_before_a_frame_is_skipped() {
+        let mut s = Session::new();
+        for junk in [&[0x13u8][..], b"\x11\x13", b"stray terminal text ", &[0xFF; 3]] {
+            let mut stream = junk.to_vec();
+            stream.extend(radio_answer(msg::INFO, 7, Status::Ok, b"abc"));
+            let got = s.feed(&stream);
+            assert_eq!(got.len(), 1, "after {junk:?}");
+            assert!(got[0].answers(msg::INFO, 7));
+            assert_eq!(got[0].rest, b"abc");
+        }
+        // a damaged frame stays lost, and the next one still decodes
+        let mut damaged = radio_answer(msg::INFO, 8, Status::Ok, b"abc");
+        damaged[3] ^= 0x40;
+        damaged.extend(radio_answer(msg::INFO, 9, Status::Ok, b"d"));
+        let got = s.feed(&damaged);
+        assert_eq!(got.len(), 1);
+        assert!(got[0].answers(msg::INFO, 9));
     }
 }

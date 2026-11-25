@@ -25,11 +25,14 @@ pub const MORE_WAIT_MS: u32 = 50;
 pub const BLE_CHUNK: usize = 20;
 /// ...25 ms apart (800 B/s, under the module's 9600-baud UART).
 pub const BLE_PACE_MS: u32 = 25;
-/// After `BAUD`'s answer, switch the port's rate this much later, then `HELLO` at the new rate within 1 s
-/// (LINK-11) or the radio goes back to 115200.
+/// After `BAUD`'s answer, switch the port's rate this much later, then `HELLO` at the new rate within
+/// [`BAUD_FALLBACK_MS`] (LINK-11) or the radio goes back to 115200.
 pub const BAUD_SWITCH_MS: u32 = 50;
-/// The radio falls back to 115200 this long after a `BAUD` with no `HELLO` at the new rate (LINK-11).
-pub const BAUD_FALLBACK_MS: u32 = 1_000;
+/// The radio falls back to 115200 this long after a `BAUD` with no `HELLO` at the new rate (LINK-11; 3 s from
+/// Ferrite 0.9.8, 1 s before: Console's first `HELLO` there goes within 1 s, so an older radio still keeps the rate).
+pub const BAUD_FALLBACK_MS: u32 = 3_000;
+/// How long the first `HELLO` at a new rate waits for its answer before a second is sent (LINK-11, issue #94).
+pub const BAUD_HELLO_MS: u32 = 700;
 /// The cable's resting rate.
 pub const CABLE_BAUD: u32 = 115_200;
 /// The rates Console tries on the cable, best first (LINK-13.3, ferrite decision 266); 115200 if it doesn't answer.
@@ -55,6 +58,7 @@ pub struct Timing {
     pub ble_pace_ms: u32,
     pub baud_switch_ms: u32,
     pub baud_fallback_ms: u32,
+    pub baud_hello_ms: u32,
     pub cable_baud: u32,
     pub cable_fast_rates: [u32; 1],
     pub hold_for_long_ms: u32,
@@ -73,10 +77,16 @@ pub const TIMING: Timing = Timing {
     ble_pace_ms: BLE_PACE_MS,
     baud_switch_ms: BAUD_SWITCH_MS,
     baud_fallback_ms: BAUD_FALLBACK_MS,
+    baud_hello_ms: BAUD_HELLO_MS,
     cable_baud: CABLE_BAUD,
     cable_fast_rates: CABLE_FAST_RATES,
     hold_for_long_ms: HOLD_FOR_LONG_MS,
 };
+
+// LINK-11, issue #94: the second `HELLO` at a new rate goes while a radio from before 0.9.8 (1 s) still waits for
+// one, and leaves time for its answer before the radio's own fall-back.
+const _: () = assert!(BAUD_SWITCH_MS + BAUD_HELLO_MS + 100 < 1_000);
+const _: () = assert!(BAUD_SWITCH_MS + BAUD_HELLO_MS + 1_000 < BAUD_FALLBACK_MS);
 
 #[cfg(test)]
 mod tests {
@@ -92,4 +102,5 @@ mod tests {
         assert_eq!(RATES[0], CABLE_BAUD);
         assert_eq!(LONG_SETTLE_MS, 800, "ferrite_link.py: LONG_HOLD + 0.05 s");
     }
+
 }
