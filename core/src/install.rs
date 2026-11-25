@@ -794,6 +794,56 @@ pub fn ssb_describe(patch: &[u8]) -> SsbFound {
     }
 }
 
+// ---- the SSB patch from the radio itself (INST-10.1, console#41) ----
+
+/// INST-10.1: the part of stock's image in MCU flash the install's backup reads for the patch, with the reader's
+/// `mdump` (read only, about 20 s). Stock V0.21-V0.30 keep the patch between 0x0802B8A0 (V0.27) and 0x08032324
+/// (V0.30's end); the window leaves about 30 KB either side for a version that moves it. The reader itself (about
+/// 37 KB from 0x08003000) ends far below it: the bootloader erases only the pages it writes.
+pub const SSB_MCU_ADDR: u32 = 0x0802_4000;
+pub const SSB_MCU_LEN: usize = 0x1_8000;
+/// The patches taken from the radio: the known stock one's SHA-256 (stock V0.18-V0.30 all carry it).
+pub const SSB_KNOWN: [[u8; 32]; 1] = [ferrite_core::ssb::KNOWN_SHA256];
+/// The reader's command for that window.
+pub const MDUMP_SSB: &str = "mdump 0x08024000 98304\r";
+
+/// What the backup's look for the patch in MCU flash found (INST-10.1). Never the patch's bytes: only where, how
+/// long and its hash.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SsbOnRadio {
+    /// "known" (taken), "unknown" (a run of patch records whose hash isn't stock's: not taken) or "none".
+    pub found: &'static str,
+    /// The run's MCU address (0 when none).
+    pub addr: u32,
+    pub records: usize,
+    pub sha256: String,
+}
+
+/// The record run in the window read from `base`, as [`ssb_extract`] finds it in a `.BTF`, and its MCU address.
+fn ssb_in_window(window: &[u8], base: u32) -> Option<(u32, &[u8])> {
+    let (off, n) = ssb_find(window);
+    (n >= MIN_RECORDS).then(|| (base + off as u32, &window[off..off + n * REC]))
+}
+
+/// INST-10.1: what the window read from `base` holds; `known` the hashes taken (the known stock patch's).
+pub fn ssb_on_radio(window: &[u8], base: u32, known: &[[u8; 32]]) -> SsbOnRadio {
+    match ssb_in_window(window, base) {
+        None => SsbOnRadio { found: "none", addr: 0, records: 0, sha256: String::new() },
+        Some((addr, p)) => {
+            let sha = sha256(p);
+            let found = if known.contains(&sha) { "known" } else { "unknown" };
+            SsbOnRadio { found, addr, records: p.len() / REC, sha256: hex(&sha) }
+        }
+    }
+}
+
+/// INST-10.1: the patch from the window read from `base`, only when its SHA-256 is one of `known`; else None (no
+/// run, or one that isn't stock's patch: a cut read, or something else that looks like records).
+pub fn ssb_from_radio(window: &[u8], base: u32, known: &[[u8; 32]]) -> Option<Vec<u8>> {
+    let (_, p) = ssb_in_window(window, base)?;
+    known.contains(&sha256(p)).then(|| p.to_vec())
+}
+
 /// The image with the patch appended at the next 1 KB boundary after its last non-0xFF byte (INST-11), and where:
 /// ssbpatch.py's `bundle`.
 pub fn ssb_bundle(img: &[u8], patch: &[u8]) -> (Vec<u8>, usize) {
@@ -1337,6 +1387,83 @@ mod tests {
         assert_eq!(addr, Some(APP_BASE + at as u32));
         assert_eq!(unpack(u.data()).unwrap().0[..bundled.len()], bundled[..]);
         assert!(ssb_extract(&pack(&image(50_000, b"x")), true).is_none(), "no patch in it");
+    }
+
+    /// A fake stock code window (random bytes, which never hold a 500-record run) with a synthetic patch-record run
+    /// (no Radtel bytes) at `at`, or none; and the patch.
+    fn fake_mcu(at: Option<usize>, seed: u64) -> (Vec<u8>, Vec<u8>) {
+        let mut s = seed;
+        let mut w: Vec<u8> = (0..SSB_MCU_LEN).map(|_| rng(&mut s)).collect();
+        let mut patch = Vec::new();
+        for r in 0..1979 {
+            patch.push(if r % 64 == 0 { 0x15 } else { 0x16 });
+            for _ in 0..7 {
+                patch.push(rng(&mut s));
+            }
+        }
+        if let Some(at) = at {
+            w[at..at + patch.len()].copy_from_slice(&patch);
+            // Its neighbours in its phase aren't records (as in stock: the run is the patch, no more).
+            if at >= REC {
+                w[at - REC] = 0;
+            }
+            if let Some(b) = w.get_mut(at + patch.len()) {
+                *b = 0;
+            }
+        }
+        (w, patch)
+    }
+
+    /// The reader's `mdump` answer for bytes read from `addr`: 32 a line, `ADDR:` hex `*` sum, then `dump: end`.
+    fn mdump_text(addr: u32, b: &[u8]) -> String {
+        let mut t = format!("mdump 0x{addr:08X} {}\r\n", b.len());
+        for (i, c) in b.chunks(32).enumerate() {
+            let hx: String = c.iter().map(|x| format!("{x:02X}")).collect();
+            t += &format!("{:X}:{hx}*{:02X}\r\n", addr as usize + 32 * i, c.iter().fold(0u8, |a, &x| a.wrapping_add(x)));
+        }
+        t + "dump: end\r\n> "
+    }
+
+    /// INST-10.1: the patch found in the MCU window read with `mdump`, wherever it sits (any byte offset, both
+    /// ends), taken only with a known hash; none, or an unknown or cut run, isn't taken.
+    #[test]
+    fn ssb_found_on_the_radio_only_with_a_known_hash() {
+        assert_eq!(MDUMP_SSB, format!("mdump 0x{SSB_MCU_ADDR:08X} {SSB_MCU_LEN}\r"));
+        let plen = 1979 * REC;
+        for (i, at) in [0usize, 1, 0x7AC4, 0xA64C + 3, SSB_MCU_LEN - plen].into_iter().enumerate() {
+            let (w, patch) = fake_mcu(Some(at), 7 + i as u64);
+            let known = [sha256(&patch)];
+            let text = mdump_text(SSB_MCU_ADDR, &w);
+            let read = parse_mdump_range(&text, SSB_MCU_ADDR, SSB_MCU_LEN).expect("the window reads whole");
+            assert_eq!(ssb_from_radio(&read, SSB_MCU_ADDR, &known).as_deref(), Some(&patch[..]), "at {at:#x}");
+            let f = ssb_on_radio(&read, SSB_MCU_ADDR, &known);
+            assert_eq!((f.found, f.addr, f.records), ("known", SSB_MCU_ADDR + at as u32, 1979));
+            assert_eq!(f.sha256, hex(&known[0]));
+            // The same run with a hash Ferrite doesn't know (here the real one's list): seen, not taken.
+            assert_eq!(ssb_from_radio(&read, SSB_MCU_ADDR, &[ferrite_core::ssb::KNOWN_SHA256]), None);
+            assert_eq!(ssb_on_radio(&read, SSB_MCU_ADDR, &[ferrite_core::ssb::KNOWN_SHA256]).found, "unknown");
+        }
+        // None in the window (a nicFW image, another stock layout).
+        let (w, patch) = fake_mcu(None, 3);
+        let known = [sha256(&patch)];
+        assert_eq!(ssb_from_radio(&w, SSB_MCU_ADDR, &known), None);
+        assert_eq!(ssb_on_radio(&w, SSB_MCU_ADDR, &known), SsbOnRadio { found: "none", addr: 0, records: 0, sha256: String::new() });
+        // Cut by the window's end: a shorter run, whose hash isn't the patch's.
+        let (mut w, patch) = fake_mcu(None, 4);
+        let cut = SSB_MCU_LEN - plen / 2;
+        w[cut..].copy_from_slice(&patch[..SSB_MCU_LEN - cut]);
+        let known = [sha256(&patch)];
+        assert_eq!(ssb_from_radio(&w, SSB_MCU_ADDR, &known), None);
+        assert_eq!(ssb_on_radio(&w, SSB_MCU_ADDR, &known).found, "unknown");
+        // One record spoiled: not the patch.
+        let (mut w, patch) = fake_mcu(Some(0x100), 5);
+        w[0x100 + 8 * 900 + 3] ^= 1;
+        assert_eq!(ssb_from_radio(&w, SSB_MCU_ADDR, &[sha256(&patch)]), None);
+        // A read with a line lost or spoiled gives no window at all (the backup goes on without the patch).
+        let text = mdump_text(SSB_MCU_ADDR, &fake_mcu(Some(0x100), 6).0);
+        let gap: String = text.lines().filter(|l| !l.starts_with("8025000:")).collect::<Vec<_>>().join("\n");
+        assert_eq!(parse_mdump_range(&gap, SSB_MCU_ADDR, SSB_MCU_LEN), None);
+        assert_eq!(parse_mdump_range("?  (help)\r\n", SSB_MCU_ADDR, SSB_MCU_LEN), None, "a reader without mdump");
     }
 
     /// Writes tests/fixtures/ssb-synthetic.bin (`cargo test -- --ignored write_ssb_fixture`); ssbpatch.py then gives

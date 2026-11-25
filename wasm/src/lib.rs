@@ -875,6 +875,25 @@ pub fn ssb_describe(patch: &[u8]) -> String {
     json(&install::ssb_describe(patch))
 }
 
+/// INST-10.1: the stock image's window the backup reads for the patch, from the reader's `mdump`, checked line by
+/// line; None when it doesn't come whole (an older reader, a lost line).
+#[wasm_bindgen]
+pub fn parse_mdump_ssb(text: &str) -> Option<Vec<u8>> {
+    install::parse_mdump_range(text, install::SSB_MCU_ADDR, install::SSB_MCU_LEN)
+}
+
+/// INST-10.1: `{found, addr, records, sha256}` for that window ("known", "unknown" or "none"; never the bytes).
+#[wasm_bindgen]
+pub fn ssb_on_radio(window: &[u8]) -> String {
+    json(&install::ssb_on_radio(window, install::SSB_MCU_ADDR, &install::SSB_KNOWN))
+}
+
+/// INST-10.1: the known stock patch from that window, or nothing.
+#[wasm_bindgen]
+pub fn ssb_from_radio(window: &[u8]) -> Option<Vec<u8>> {
+    install::ssb_from_radio(window, install::SSB_MCU_ADDR, &install::SSB_KNOWN)
+}
+
 /// hwtest's binary dump, the host's side: see `install::Fdump`.
 #[wasm_bindgen]
 pub struct Fdump(install::Fdump);

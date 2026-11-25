@@ -379,6 +379,36 @@ test("menu icons: the backup reads stock's tiles and keeps them for back to stoc
 
 });
 
+test("SSB from the radio: a run of patch records that isn't the known patch isn't taken; the stock file is asked for", async ({ page }) => {
+  // INST-10.1 (console#41): the backup reads stock's image window (mdump 0x08024000 98304) for the patch. The fake's
+  // window holds synthetic records (never the real patch), so its hash isn't the known one: not taken, and said.
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, chip());
+  const win = Buffer.alloc(98_304);
+  let s = 41;
+  for (let i = 0; i < win.length; i++) win[i] = (s = (s * 1103515245 + 12345) >>> 0) >>> 24;
+  for (let r = 0; r < 1200; r++) win[0x7ac4 + 8 * r] = r % 64 ? 0x16 : 0x15;
+  win[0x7ac4 - 8] = 0;
+  win[0x7ac4 + 8 * 1200] = 0;
+  const winPath = join(dir(), "ssb-window.bin");
+  writeFileSync(winPath, win);
+  setMode({ flash: flashPath, ssb_window: winPath });
+  await serveRelease(page);
+  await open(page);
+  await backUp(page);
+  const b = wizard(page);
+  const [dl] = await Promise.all([page.waitForEvent("download"), b.getByRole("button", { name: "Save the backup…" }).click()]);
+  const z = await readZip(readFileSync(await dl.path()));
+  expect(JSON.parse(new TextDecoder().decode(z.get("manifest.json")!)).ssb).toBeNull(); // only a known patch is noted
+  await b.getByRole("button", { name: "I have saved it" }).click();
+  await expect(step(page)).toHaveText("SSB");
+  await expect(b.locator('[data-k="ssb-radio"]')).toContainText("not the one Ferrite knows");
+  await expect(b.locator('[data-k="ssb"]')).toHaveCount(0);
+  await page.getByLabel("Stock firmware file").setInputFiles({ name: "RT_950Pro_test.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
+  await expect(page.locator('[data-k="ssb"]')).toContainText("1200 records"); // the file's, as before
+  await expect(b.locator('[data-k="ssb-radio"]')).toHaveCount(0);
+});
+
 test("menu icons: the marker's `dump: end` in a later read doesn't end the icon read", async ({ page }) => {
   // Two Windows logs and a Linux one (Nov 17, 2026): icons "not read" in 0.2 s, then "no answer to fdump". The marker's
   // reply came in two reads; its late `dump: end` finished the icon read at once, while the radio was still sending
