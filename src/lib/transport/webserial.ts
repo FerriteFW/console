@@ -21,6 +21,21 @@ type SerialLike = {
 /** USB-serial chips programming cables use: CH340 (the RT-950 Pro's cable), CP210x, FTDI, Prolific. */
 const FILTERS = [0x1a86, 0x10c4, 0x0403, 0x067b].map((usbVendorId) => ({ usbVendorId }));
 
+/** Why the browser couldn't open the cable's port, in words the owner can act on. Chrome says only "Failed to open
+ *  serial port." (a NetworkError) whether another program holds it or, on Linux, the user isn't in the group that
+ *  may use serial ports (the desktop app tells them apart: src-tauri/src/serial.rs). */
+export function openFailed(e: unknown, linux: boolean): Error {
+  const err = e instanceof Error ? e : new Error(String(e));
+  if (err.name !== "NetworkError" && !/failed to open serial port/i.test(err.message)) return err;
+  const busy = "another program may have it open (another Console, CHIRP, a terminal): close it and try again";
+  const why = linux
+    ? `${busy}. Or your user isn't in the dialout group (uucp on Arch), which may use serial ports: run \`sudo usermod -aG dialout $USER\` in a terminal, then log out and back in`
+    : busy;
+  return new Error(`Couldn't open the cable's port: ${why}. (${err.message})`);
+}
+
+const onLinux = () => typeof navigator !== "undefined" && /linux/i.test(navigator.platform || navigator.userAgent) && !/android/i.test(navigator.userAgent);
+
 export const webSerial = (): SerialLike | undefined => (navigator as unknown as { serial?: SerialLike }).serial;
 
 export class WebSerialTransport implements Transport {
@@ -85,7 +100,9 @@ export class WebSerialTransport implements Transport {
 
   private async openAt(rate: number) {
     // 64 KB: a JavaScript stall (inflating, a background tab) at 230400 overran 8 KB in about 350 ms
-    await this.port.open({ baudRate: rate, dataBits: 8, stopBits: 1, parity: "none", bufferSize: 65536 });
+    await this.port.open({ baudRate: rate, dataBits: 8, stopBits: 1, parity: "none", bufferSize: 65536 }).catch((e) => {
+      throw openFailed(e, onLinux());
+    });
     this.baud = rate;
     const port = this.port;
     this.loop = (async () => {

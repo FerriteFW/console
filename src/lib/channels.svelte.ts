@@ -4,6 +4,7 @@
 // Unwritten edits are kept in IndexedDB (restored on the next visit); each table edit can be undone (`undo`).
 // Every record layout, check, diff and conversion is the Rust core's; this file only moves them and the files.
 import { saveAs, saveDownload } from "./download";
+import { backupFailed } from "./backupError";
 import { debugLog } from "./debuglog";
 import {
   P,
@@ -429,7 +430,7 @@ class Channels {
       };
     } catch (e) {
       this.write = null;
-      this.error = `Nothing written: the backup read failed (${(e as Error).message}).`;
+      this.error = backupFailed(e);
     }
   }
 

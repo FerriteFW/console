@@ -4,6 +4,7 @@
 // edits kept in IndexedDB for the next visit, and Write: a fresh read saved as a backup file, the diff with
 // ferrite's own checks, the records on confirm (`WRITE_MANY`), then a read back. Records, checks and the waypoints'
 // write order are the core's (core/src/lists.rs); only a radio whose HELLO says caps 128 has them.
+import { backupFailed } from "./backupError";
 import {
   dtmfCheck,
   dtmfFromRecord,
@@ -226,7 +227,7 @@ abstract class ListEditor<T> {
       this.write = { step: "review", plan: this.plan(fresh, this.items, true), backupName, drifted };
     } catch (e) {
       this.write = null;
-      this.error = `Nothing written: the backup read failed (${(e as Error).message}).`;
+      this.error = backupFailed(e);
     }
   }
 

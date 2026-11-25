@@ -259,16 +259,57 @@ fn json_bytes(v: &serde_json::Value) -> Option<Vec<u8>> {
 /// The Downloads folder: the system's (XDG on Linux), else `~/Downloads`.
 fn downloads(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     use tauri::Manager;
-    app.path().download_dir().or_else(|e| app.path().home_dir().map(|h| h.join("Downloads")).map_err(|_| format!("No Downloads folder: {e}")))
+    app.path().download_dir().or_else(|e| app.path().home_dir().map(|h| h.join("Downloads")).map_err(|_| format!("No Downloads folder: {e}.{}", root_note(as_root()))))
+}
+
+/// A file that didn't make it, in words the owner can act on: the path, the system's reason, and what to do when it's
+/// a permission or Console runs as root (a Linux user ran it with sudo for the cable, and a write stopped at "the
+/// backup read failed" with no reason, Nov 24, 2026).
+fn file_error(what: &str, path: &std::path::Path, e: &std::io::Error) -> String {
+    file_error_as(what, path, e, as_root())
+}
+
+fn file_error_as(what: &str, path: &std::path::Path, e: &std::io::Error, root: bool) -> String {
+    let (verb, back) = what.split_once(' ').map_or((what, ""), |(v, b)| (v, b));
+    let back = if back.is_empty() { String::new() } else { format!(" {back}") };
+    let mut out = format!("Couldn't {verb} {}{back}: {e}.", path.display());
+    if e.kind() == std::io::ErrorKind::PermissionDenied && !root {
+        out.push_str(" Your user may not write in that folder: check its permissions.");
+    }
+    out.push_str(&root_note(root));
+    out
+}
+
+/// What to say when Console runs as root (Linux, with sudo): its Downloads is root's, and the cable needs no root.
+fn root_note(root: bool) -> String {
+    if root {
+        " Ferrite Console is running as root: run it as your own user instead. For the cable, add yourself to the \
+         dialout group (sudo usermod -aG dialout $USER), then log out and back in."
+            .into()
+    } else {
+        String::new()
+    }
+}
+
+/// Whether Console runs as root (Linux: the effective user ID in /proc/self/status is 0).
+fn as_root() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+        let uids = status.lines().find_map(|l| l.strip_prefix("Uid:")).unwrap_or("");
+        return uids.split_whitespace().nth(1) == Some("0");
+    }
+    #[allow(unreachable_code)]
+    false
 }
 
 fn save_download_to(app: &tauri::AppHandle, body: &tauri::ipc::InvokeBody, name: &str) -> Result<String, String> {
     let bytes = body_bytes(body)?;
     let dir = downloads(app)?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir).map_err(|e| file_error("make", &dir, &e))?;
     let path = free_name(&dir, name);
-    std::fs::write(&path, &bytes).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
-    let back = std::fs::read(&path).map_err(|e| format!("Couldn't read {} back: {e}", path.display()))?;
+    std::fs::write(&path, &bytes).map_err(|e| file_error("save", &path, &e))?;
+    let back = std::fs::read(&path).map_err(|e| file_error("read back", &path, &e))?;
     if back != *bytes {
         return Err(format!("{} doesn't read back as written.", path.display()));
     }
@@ -315,9 +356,9 @@ async fn save_file_to(request: &tauri::ipc::Request<'_>) -> Result<Option<String
         return Ok(None);
     };
     let path = f.path().to_path_buf();
-    std::fs::write(&path, &bytes).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+    std::fs::write(&path, &bytes).map_err(|e| file_error("save", &path, &e))?;
     // Read back: the page only goes on when the file on disk is the backup.
-    let back = std::fs::read(&path).map_err(|e| format!("Couldn't read {} back: {e}", path.display()))?;
+    let back = std::fs::read(&path).map_err(|e| file_error("read back", &path, &e))?;
     if back != *bytes {
         return Err(format!("{} doesn't read back as written.", path.display()));
     }
@@ -392,7 +433,31 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::json_bytes;
+    use super::{file_error_as, json_bytes};
+    use std::io::{Error, ErrorKind};
+    use std::path::Path;
+
+    /// A save that fails names the path and the system's reason; a permission says what to check; as root, says to
+    /// run as one's own user with the dialout group for the cable.
+    #[test]
+    fn file_errors_say_why_and_what_next() {
+        let p = Path::new("/home/a/Downloads/radio-backup.json");
+        let e = Error::new(ErrorKind::PermissionDenied, "Permission denied (os error 13)");
+        let m = file_error_as("save", p, &e, false);
+        assert!(
+            m.starts_with("Couldn't save /home/a/Downloads/radio-backup.json: Permission denied (os error 13)."),
+            "{m}"
+        );
+        assert!(m.contains("check its permissions"), "{m}");
+        assert!(!m.contains("root"), "{m}");
+
+        let m = file_error_as("read back", p, &Error::new(ErrorKind::NotFound, "gone"), false);
+        assert_eq!(m, "Couldn't read /home/a/Downloads/radio-backup.json back: gone.");
+
+        let m = file_error_as("save", Path::new("/root/Downloads/x.json"), &Error::other("disk full"), true);
+        assert!(m.starts_with("Couldn't save /root/Downloads/x.json: disk full."), "{m}");
+        assert!(m.contains("running as root") && m.contains("usermod -aG dialout $USER"), "{m}");
+    }
 
     /// The postMessage fallback's byte arrays: a plain array or a typed array's object; anything else, or a number past
     /// a byte, is no file.

@@ -1,6 +1,7 @@
 // A file "downloaded": in a browser an <a download> link; in the desktop app the shell's save_download, which writes
 // it to the Downloads folder (the app's webview drops <a download> links: CHIRP export did nothing there, and the
 // backup a write saves first never landed; Nov 16, 2026).
+import { SaveError } from "./backupError";
 import { isTauri } from "./transport/native";
 
 /** Saves `blob` as `name` in the downloads: where it went (the desktop app's path, or the name in a browser). Throws
@@ -34,8 +35,9 @@ export async function saveAs(name: string, blob: Blob): Promise<string | null> {
   return saveDownload(name, blob);
 }
 
-/** The desktop shell's commands reject with their message as a plain string: as an Error, so callers' `e.message`
- *  says what failed (a backup before a write showed "the backup read failed (undefined)", Nov 24, 2026). */
+/** The desktop shell's commands reject with their message as a plain string: as a SaveError, so callers' `e.message`
+ *  says what failed (a backup before a write showed "the backup read failed (undefined)", Nov 24, 2026) and a write
+ *  can tell a save that failed from a read that did (backupError.ts). */
 function asError(e: unknown): never {
-  throw e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e));
+  throw new SaveError(e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e));
 }
