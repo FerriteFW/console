@@ -1,8 +1,8 @@
 //! The core for the browser. Structures cross as JSON strings (the UI parses them); bytes as `Uint8Array`.
 
 use ferrite_console_core::{
-    answers, aprs, aprs_settings, channels, chirp, demo, ffw, firmware, install, keys, library, lists, liveview, log, plan,
-    migrate, records, sats, session, settings, signature, timing, ui, uid, wmm, zonecap,
+    answers, aprs, aprs_settings, arrange, channels, chirp, demo, ffw, firmware, install, keys, library, lists,
+    liveview, log, migrate, plan, records, sats, session, settings, signature, timing, ui, uid, wmm, zonecap,
 };
 use wasm_bindgen::prelude::*;
 
@@ -546,6 +546,43 @@ pub fn zone_room(table: &str, numbers: &str, zone: i32) -> Result<String, JsErro
     let n: Vec<u16> = from_json(numbers, "numbers")?;
     let z = u16::try_from(zone).ok();
     Ok(zonecap::room(&t, &n, z).err().unwrap_or_default())
+}
+
+// Arranging the channel table (`arrange`, console#55 and #104): each takes the table (JSON `Set`) and its home channel
+// (1-4000, or none) and gives `{set, home, moved: [{from, to}], added}`, or throws why not.
+
+/// The table's channels renumbered by `map` (JSON `[[old, new], ...]`), the zones' priority channels and the home
+/// channel following them (CHAN-18): `{set, home, moved, added}`.
+#[wasm_bindgen]
+pub fn arrange_apply(table: &str, home: Option<u16>, map: &str) -> Result<String, JsError> {
+    let t: plan::Set = from_json(table, "table")?;
+    let m: Vec<(u16, u16)> = from_json(map, "map")?;
+    let map = m.into_iter().collect();
+    let (set, home) = arrange::apply(&t, home, &map).map_err(|e| JsError::new(&e))?;
+    Ok(json(&arrange::Arranged { set, home, moved: arrange::moves(&map), added: None }))
+}
+
+/// Every channel renumbered top to bottom from `start` (1 closes every gap).
+#[wasm_bindgen]
+pub fn arrange_renumber(table: &str, home: Option<u16>, start: u16) -> Result<String, JsError> {
+    let t: plan::Set = from_json(table, "table")?;
+    arrange::renumber(&t, home, start).map(|a| json(&a)).map_err(|e| JsError::new(&e))
+}
+
+/// `channel` (JSON `ChanView`) inserted at number `at`, the channels from there moving one along as far as a gap.
+#[wasm_bindgen]
+pub fn arrange_insert(table: &str, home: Option<u16>, at: u16, channel: &str) -> Result<String, JsError> {
+    let t: plan::Set = from_json(table, "table")?;
+    let c: channels::ChanView = from_json(channel, "channel")?;
+    arrange::insert(&t, home, at, &c).map(|a| json(&a)).map_err(|e| JsError::new(&e))
+}
+
+/// Channels `picked` (JSON numbers) moved together to continuous numbers from `start`.
+#[wasm_bindgen]
+pub fn arrange_move_block(table: &str, home: Option<u16>, picked: &str, start: u16) -> Result<String, JsError> {
+    let t: plan::Set = from_json(table, "table")?;
+    let p: Vec<u16> = from_json(picked, "picked")?;
+    arrange::move_block(&t, home, &p, start).map(|a| json(&a)).map_err(|e| JsError::new(&e))
 }
 
 /// A fixed set's picked channels (indices, JSON) as library entries (JSON), into the zone named `zone`.

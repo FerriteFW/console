@@ -24,7 +24,23 @@
   import { contacts } from "../contacts.svelte";
   import { radio } from "../radio.svelte";
   import { DEV_TOOLS } from "../devtools";
-  import { channelChoices, loadCore, type Choices } from "../core";
+  import { channelChoices, loadCore, type Channel, type Choices } from "../core";
+
+  /** A per-viewer preference (localStorage may be blocked: then it's just not kept). */
+  function readPref(k: string): string | null {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  }
+  function writePref(k: string, v: string) {
+    try {
+      localStorage.setItem(k, v);
+    } catch {
+      /* not kept */
+    }
+  }
 
   let choices = $state<Choices | null>(null);
   loadCore().then(() => (choices = channelChoices()));
@@ -50,8 +66,15 @@
   /** The notice at the bottom (a delete, with Undo). */
   let notice = $state<{ text: string; undo: boolean } | null>(null);
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-  /** An in-page question (dropping unwritten changes). */
-  let ask = $state<{ text: string; yes: string; run: () => void } | null>(null);
+  /** An in-page question (dropping unwritten changes, a renumber); `sub` the line under it. */
+  let ask = $state<{ text: string; yes: string; run: () => void; sub?: string } | null>(null);
+  /** console#55: empty numbers shown as rows (kept per viewer). */
+  let showEmpty = $state(readPref("ferrite.channels.showEmpty") === "1");
+  $effect(() => writePref("ferrite.channels.showEmpty", showEmpty ? "1" : "0"));
+  /** A row's menu (right-click, or its ⋯): the channel and where. */
+  let rowMenu = $state<{ n: number; x: number; y: number } | null>(null);
+  /** Move to…: the channels (in number order) and the first number typed. */
+  let moveAsk = $state<{ picked: number[]; value: string } | null>(null);
 
   const connected = $derived(radio.phase === "connected");
   const busy = $derived(!!channels.progress || (!!channels.write && channels.write.step !== "review" && channels.write.step !== "done"));
@@ -66,6 +89,28 @@
       if (zoneFilter !== "all" && zoneFilter !== "none" && c.zone !== Number(zoneFilter)) return false;
       return !q || c.name.toLowerCase().includes(q) || c.rx.startsWith(q) || String(c.number) === q;
     });
+  });
+  /** Empty numbers show only over the whole table (not a zone or a search: those rows aren't neighbours). */
+  const gapsOn = $derived(showEmpty && zoneFilter === "all" && !search.trim());
+  /** The table's rows: channels, and with `gapsOn` the empty numbers between them (a run of more than 5 as one row)
+   *  and the one after the last. */
+  type Row = { c: Channel; gap?: undefined } | { gap: [number, number]; c?: undefined };
+  const rows = $derived.by((): Row[] => {
+    if (!gapsOn) return shown.map((c) => ({ c }));
+    const max = choices?.maxChannels ?? 4000;
+    const out: Row[] = [];
+    const add = (a: number, b: number) => {
+      if (b - a < 5) for (let n = a; n <= b; n++) out.push({ gap: [n, n] });
+      else out.push({ gap: [a, b] });
+    };
+    let next = 1;
+    for (const c of shown) {
+      if (c.number > next) add(next, c.number - 1);
+      out.push({ c });
+      next = c.number + 1;
+    }
+    if (next <= max) out.push({ gap: [next, next] });
+    return out;
   });
   const active = $derived(activeN === null ? null : (t.channels.find((c) => c.number === activeN) ?? null));
   const toneWords = $derived(choices ? ["off", ...choices.ctcss, ...choices.dcs.flatMap((d) => [`D${d}N`, `D${d}I`])] : []);
@@ -185,16 +230,16 @@
 
   /** The channel being dragged by its handle (by number). */
   let dragFrom = $state<number | null>(null);
+  /** The empty-number row a drag is over (its first number). */
+  let gapOver = $state<number | null>(null);
+  /** ChannelRow's drag type. */
+  const DRAG = "application/x-ferrite-channel";
 
   /** A channel moved (dragged, ↑ ↓ on its handle, or a number typed in its panel): the ticks and the panel follow
    *  their channels to their new numbers, and the notice says what moved (undoable). */
   function moved(from: number, to: number, map: Map<number, number>) {
     if (!map.size) return;
-    const ticked = [...selected].map((n) => map.get(n) ?? n);
-    selected.clear();
-    for (const n of ticked) selected.add(n);
-    if (activeN !== null) activeN = map.get(activeN) ?? activeN;
-    if (lastPick !== null) lastPick = map.get(lastPick) ?? lastPick;
+    follow(map);
     const others = [...map.keys()].filter((n) => n !== from);
     const lo = Math.min(...others);
     const hi = Math.max(...others);
@@ -203,11 +248,94 @@
     say(`Channel ${from} is now ${to}${along}. After Write, a slot on the radio that was on a moved number tunes what's there now.${home}`, true);
   }
 
-  /** The dragged channel dropped on channel `to`: it takes that number. */
-  function dropOn(to: number) {
+  /** The ticks, the panel and the range-pick anchor follow their channels to their new numbers. */
+  function follow(map: Map<number, number>) {
+    const ticked = [...selected].map((n) => map.get(n) ?? n);
+    selected.clear();
+    for (const n of ticked) selected.add(n);
+    if (activeN !== null) activeN = map.get(activeN) ?? activeN;
+    if (lastPick !== null) lastPick = map.get(lastPick) ?? lastPick;
+  }
+
+  const SLOT_NOTE = "After Write, a slot on the radio that was on a moved number tunes what's there now.";
+  const homeNote = () => (channels.home === undefined ? " The home channel wasn't read: if it was one of these, set it again on the radio." : "");
+  /** "channels 4–9 moved along", for the notices: the channels in `map` other than `except`. */
+  function along(map: Map<number, number>, except: Set<number>): string {
+    const others = [...map.keys()].filter((n) => !except.has(n));
+    if (!others.length) return "";
+    if (others.length === 1) return `; channel ${others[0]} is now ${map.get(others[0])}`;
+    return `; ${plural(others.length, "other channel")} moved along to make room`;
+  }
+
+  /** console#104: channels moved together to numbers from `start` (the bulk bar's Move to…, a drag of ticked rows). */
+  function moveBlock(picked: number[], start: number) {
+    const r = channels.moveBlock(picked, start);
+    if (r.why) return say(r.why);
+    if (!r.moved.size) return say(`Already at ${start}: nothing moved.`);
+    follow(r.moved);
+    const k = picked.filter((n) => r.moved.has(n) || t.channels.some((c) => c.number === n)).length;
+    const pickedSet = new Set(picked);
+    say(`${plural(k, "channel")} now ${k === 1 ? start : `${start}–${start + k - 1}`}${along(r.moved, pickedSet)}. ${SLOT_NOTE}${homeNote()}`, true);
+  }
+
+  /** console#55, #104: a new channel at `at`, in zone `zone` when it has room; the ones from there move along as far
+   *  as a gap. The panel opens on it. */
+  function insertAt(at: number, zone: number | null) {
+    rowMenu = null;
+    const r = channels.insertAt(at, zone);
+    if (r.why) return say(r.why);
+    if (r.added === null) return;
+    follow(r.moved);
+    activeN = r.added;
+    say(`Channel ${r.added} added${along(r.moved, new Set())}.${r.moved.size ? ` ${SLOT_NOTE}${homeNote()}` : ""}`, true);
+    void settle().then(() => document.querySelector<HTMLInputElement>(`tr[data-n="${r.added}"] input.name`)?.focus());
+  }
+
+  /** console#104: Renumber…: what it changes, asked first. */
+  function renumberAsk() {
+    menuOpen = false;
+    const a = channels.renumberPreview();
+    const n = t.channels.length;
+    if (!a.moved.length) return say(`The channels are already numbered 1–${n}: nothing to renumber.`);
+    const lo = Math.min(...a.moved.map((m) => m.from));
+    ask = {
+      text: `Renumber ${plural(n, "channel")} as 1–${n}?`,
+      sub:
+        `${plural(a.moved.length, "channel")} from ${lo} on change number, keeping their order; the gaps close. ` +
+        `Zones, priority channels and the home channel follow their channels. Write then writes each moved channel at its new number. ${SLOT_NOTE}`,
+      yes: "Renumber",
+      run: () => {
+        const map = channels.renumber();
+        follow(map);
+        say(`Renumbered: ${plural(map.size, "channel")} changed number, now 1–${n}.${homeNote()}`, true);
+      },
+    };
+  }
+
+  /** The Move to… dialog's preview: where the channels go, and how many others move along; or why not. */
+  const movePreview = $derived.by(() => {
+    if (!moveAsk) return "";
+    const start = Number(moveAsk.value);
+    const k = moveAsk.picked.length;
+    if (!moveAsk.value.trim() || !Number.isInteger(start)) return `A number, 1 to ${choices?.maxChannels ?? 4000}.`;
+    const r = channels.moveBlockPreview(moveAsk.picked, start);
+    if (r.why) return r.why;
+    const others = r.moved.filter((m) => !moveAsk!.picked.includes(m.from)).length;
+    if (!r.moved.length) return "They're there already.";
+    return `They become ${k === 1 ? start : `${start}–${start + k - 1}`}, in their order${others ? `; ${plural(others, "other channel")} move${others === 1 ? "s" : ""} along to make room` : "; nothing else moves"}.`;
+  });
+
+  /** The dragged channel dropped on channel `to` (or on an empty number, `gap`): it takes that number. Dragging a
+   *  ticked row moves every ticked channel with it (console#104): from `to` up the table, ending at `to` down it. */
+  function dropOn(to: number, gap = false) {
     const from = dragFrom;
     dragFrom = null;
     if (from === null || from === to) return;
+    if (selected.has(from) && selected.size > 1) {
+      const picked = [...selected].sort((a, b) => a - b);
+      const start = gap || to < from ? to : Math.max(1, to - picked.length + 1);
+      return moveBlock(picked, start);
+    }
     const r = channels.move(from, to);
     if (r.why) say(r.why);
     else moved(from, to, r.moved);
@@ -260,19 +388,29 @@
   function keydown(e: KeyboardEvent) {
     const el = e.target as HTMLElement;
     const typing = el.closest("input:not([type=checkbox]), select, textarea, [contenteditable]");
-    const dialogUp = library.open || !!channels.write || !!channels.imported || !!ask;
+    const dialogUp = library.open || !!channels.write || !!channels.imported || !!ask || !!moveAsk;
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !typing && !dialogUp && channels.history.length) {
       e.preventDefault();
       undo();
     } else if (e.key === "Escape") {
       if (menuOpen) menuOpen = false;
+      else if (rowMenu) rowMenu = null;
+      else if (moveAsk) moveAsk = null;
       else if (ask) ask = null;
       else if (!dialogUp && activeN !== null) activeN = null;
     }
   }
 </script>
 
-<svelte:window onkeydown={keydown} onclick={(e) => menuOpen && !(e.target as HTMLElement).closest(".file") && (menuOpen = false)} />
+<svelte:window
+  onkeydown={keydown}
+  onclick={(e) => {
+    const el = e.target as HTMLElement;
+    if (menuOpen && !el.closest(".file")) menuOpen = false;
+    if (rowMenu && !el.closest(".rowmenu, button.more")) rowMenu = null;
+  }}
+  onscroll={() => (rowMenu = null)}
+/>
 
 <div class="page">
   <div class="toolbar" role="toolbar" aria-label="Channels">
@@ -327,6 +465,9 @@
           {#each t.zones as z (z.number)}<option value={String(z.number - 1)}>{z.number} {z.name}</option>{/each}
         </select>
         <input class="search" type="search" placeholder="Find: name, MHz or number" aria-label="Find a channel" bind:value={search} />
+        <label class="gaps" title={zoneFilter === "all" && !search.trim() ? "Show the free numbers between channels as empty rows: drop a channel there, or add one" : "Empty numbers show with All zones and no search"}>
+          <input type="checkbox" bind:checked={showEmpty} /> Show empty numbers
+        </label>
       </div>
     {/if}
   </div>
@@ -385,6 +526,9 @@
         <button class="btn" disabled={busy || t.channels.length >= (choices?.maxChannels ?? 4000)} onclick={() => library.show()} title="Fixed sets, and licensed sites (Canada, US), airports and repeaters near a place">
           Add from library…
         </button>
+        <button class="btn" disabled={busy || !t.channels.length} onclick={renumberAsk} title="Number every channel 1, 2, 3… top to bottom, closing the gaps; zones and the home channel follow">
+          Renumber…
+        </button>
       {/if}
     </div>
   </div>
@@ -439,6 +583,9 @@
               onclick={() => channels.setMany(selected, { pos: undefined })}
               title="Remove the position from the selected channels">Clear position</button
             >
+            <button class="btn quiet" onclick={() => (moveAsk = { picked: [...selected].sort((a, b) => a - b), value: "" })} title="Move them together to numbers from one you type (or drag a ticked row)"
+              >Move to…</button
+            >
             <span class="spacer"></span>
             <button class="btn quiet" onclick={() => selected.clear()}>Clear</button>
             <button class="btn danger" onclick={() => remove([...selected])}>Delete {selected.size}</button>
@@ -463,7 +610,36 @@
                 </tr>
               </thead>
               <tbody>
-                {#each shown as c (c.number)}
+                {#each rows as r (r.c ? r.c.number : `gap${r.gap[0]}`)}
+                  {#if r.gap}
+                    {@const [a, b] = r.gap}
+                    <tr
+                      class="gap"
+                      class:drop-on={gapOver === a}
+                      data-gap={a}
+                      ondragover={(e) => {
+                        if (dragFrom === null || !e.dataTransfer?.types.includes(DRAG)) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        gapOver = a;
+                      }}
+                      ondragleave={() => gapOver === a && (gapOver = null)}
+                      ondrop={(e) => {
+                        gapOver = null;
+                        if (dragFrom === null || !e.dataTransfer?.types.includes(DRAG)) return;
+                        e.preventDefault();
+                        dropOn(a, true);
+                      }}
+                    >
+                      <td class="pick sticky"></td>
+                      <td class="num sticky2"><span class="gapnum">{a === b ? a : `${a}–${b}`}</span></td>
+                      <td colspan="8" class="gaptext">
+                        <span>{a === b ? "Empty" : `${b - a + 1} empty numbers`}</span>
+                        <button class="btn quiet small" disabled={busy} onclick={() => insertAt(a, null)} aria-label={`Add a channel at ${a}`}>+ Add at {a}</button>
+                      </td>
+                    </tr>
+                  {:else}
+                  {@const c = r.c}
                   <ChannelRow
                     {c}
                     zones={t.zones}
@@ -478,7 +654,9 @@
                     onletgo={() => (dragFrom = null)}
                     ondropon={() => dropOn(c.number)}
                     onstep={(dir) => void step(c.number, dir)}
+                    onmenu={(x, y) => (rowMenu = { n: c.number, x, y })}
                   />
+                  {/if}
                 {:else}
                   <tr><td colspan="10" class="empty">No channel matches.</td></tr>
                 {/each}
@@ -516,11 +694,78 @@
   </div>
 {/if}
 
+{#if rowMenu}
+  {@const n = rowMenu.n}
+  {@const row = t.channels.find((c) => c.number === n)}
+  {@const group = selected.has(n) && selected.size > 1 ? [...selected].sort((a, b) => a - b) : [n]}
+  <div class="rowmenu" role="menu" aria-label={`Channel ${n}`} style:left={`${Math.min(rowMenu.x, window.innerWidth - 250)}px`} style:top={`${Math.min(rowMenu.y, window.innerHeight - 170)}px`}>
+    <button role="menuitem" disabled={busy || n <= 0} onclick={() => insertAt(n, row?.zone ?? null)}>
+      <b>Insert channel above</b><span>A new channel at {n}; this one and the ones after it move along as far as a gap</span>
+    </button>
+    <button role="menuitem" disabled={busy || n >= (choices?.maxChannels ?? 4000)} onclick={() => insertAt(n + 1, row?.zone ?? null)}>
+      <b>Insert channel below</b><span>A new channel at {n + 1}{t.channels.some((c) => c.number === n + 1) ? "; the ones after it move along as far as a gap" : ""}</span>
+    </button>
+    <button
+      role="menuitem"
+      disabled={busy}
+      onclick={() => {
+        moveAsk = { picked: group, value: "" };
+        rowMenu = null;
+      }}
+    >
+      <b>{group.length > 1 ? `Move ${group.length} selected to…` : "Move to…"}</b><span>To numbers from one you type; the ones in the way move along</span>
+    </button>
+    <hr />
+    <button
+      role="menuitem"
+      class="danger"
+      disabled={busy}
+      onclick={() => {
+        const nums = group; // read first: `group` follows rowMenu, gone once closed
+        rowMenu = null;
+        remove(nums);
+      }}><b>Delete{group.length > 1 ? ` ${group.length} selected` : ""}</b><span>Undo from the notice, or Ctrl+Z</span></button
+    >
+  </div>
+{/if}
+
+{#if moveAsk}
+  {@const m = moveAsk}
+  <div class="overlay" role="presentation">
+    <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="move-title">
+    <form
+      class="moveform"
+      onsubmit={(e) => {
+        e.preventDefault();
+        const { picked, value } = m; // read first: `m` follows moveAsk, null once closed
+        const start = Number(value);
+        if (!value.trim() || !Number.isInteger(start)) return;
+        moveAsk = null;
+        moveBlock(picked, start);
+      }}
+    >
+      <h2 id="move-title">Move {m.picked.length === 1 ? `channel ${m.picked[0]}` : `${m.picked.length} channels`} to…</h2>
+      {#if m.picked.length > 1}<p class="sub">{m.picked.length > 8 ? `${m.picked.slice(0, 8).join(", ")}…` : m.picked.join(", ")}, kept in this order.</p>{/if}
+      <label class="movenum">
+        First number
+        <!-- svelte-ignore a11y_autofocus -->
+        <input inputmode="numeric" bind:value={moveAsk.value} autofocus aria-describedby="move-preview" placeholder={`1–${choices?.maxChannels ?? 4000}`} />
+      </label>
+      <p class="sub" id="move-preview" aria-live="polite">{movePreview}</p>
+      <div class="actions">
+        <button type="button" class="btn" onclick={() => (moveAsk = null)}>Cancel</button>
+        <button type="submit" class="btn primary">Move</button>
+      </div>
+    </form>
+    </div>
+  </div>
+{/if}
+
 {#if ask}
   <div class="overlay" role="presentation">
     <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="ask-title">
       <h2 id="ask-title">{ask.text}</h2>
-      <p class="sub">They aren't on the radio yet. Write them first, or save the table to a file, to keep them.</p>
+      <p class="sub">{ask.sub ?? "They aren't on the radio yet. Write them first, or save the table to a file, to keep them."}</p>
       <div class="actions">
         <button class="btn" onclick={() => (ask = null)}>Cancel</button>
         <button
@@ -1025,6 +1270,120 @@
   .grid :global(.del:hover) {
     color: var(--red);
     background: var(--raised);
+  }
+  .grid :global(button.more) {
+    padding: 0 5px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: none;
+    color: var(--sub);
+    cursor: pointer;
+    opacity: 0.45;
+    font-size: 14px;
+    line-height: 1.2;
+  }
+  .grid :global(tr:hover button.more),
+  .grid :global(button.more:focus-visible) {
+    opacity: 1;
+    border-color: var(--line);
+  }
+  .grid tr.gap td {
+    color: var(--sub);
+    background: repeating-linear-gradient(-45deg, transparent 0 6px, color-mix(in srgb, var(--line) 35%, transparent) 6px 7px);
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+  .grid tr.gap.drop-on td {
+    box-shadow: inset 0 0 0 2px var(--blue);
+  }
+  .gapnum {
+    padding: 3px 6px 3px 22px;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+  }
+  .gaptext {
+    font-size: 12px;
+  }
+  .gaptext span {
+    position: sticky;
+    left: 120px;
+    margin-right: 10px;
+  }
+  .gaptext .btn.small {
+    padding: 1px 8px;
+    font-size: 12px;
+    opacity: 0;
+  }
+  tr.gap:hover .gaptext .btn.small,
+  .gaptext .btn.small:focus-visible {
+    opacity: 1;
+  }
+  .gaps {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    color: var(--sub);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .rowmenu {
+    position: fixed;
+    z-index: 26;
+    width: 240px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+  .rowmenu button {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+  }
+  .rowmenu button:hover:not(:disabled),
+  .rowmenu button:focus-visible {
+    background: var(--raised);
+  }
+  .rowmenu button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .rowmenu button span {
+    font-size: 12px;
+    color: var(--sub);
+  }
+  .rowmenu button.danger b {
+    color: var(--red);
+  }
+  .rowmenu hr {
+    width: 100%;
+    border: 0;
+    border-top: 1px solid var(--line);
+    margin: 3px 0;
+  }
+  .moveform {
+    display: contents;
+  }
+  .movenum {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .movenum input {
+    width: 100px;
   }
   .empty {
     color: var(--sub);

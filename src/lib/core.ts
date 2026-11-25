@@ -203,7 +203,10 @@ export type Change = { what: "zone" | "channel" | "preset"; number: number; kind
 export type Problem = { what: string; number: number; error: string };
 export type PlanOp = { kind: "write" | "delete"; what: "zone" | "channel" | "preset" | "settings" | "aprs"; number: number; msg: number; payloads: number[][] };
 /** `positions`: the channels whose position changes (LINK-53), sent after the ops to a radio that can store them. */
-export type Plan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[]; positions: number[] };
+/** A channel's number changing (console#55, #104). */
+export type Move = { from: number; to: number };
+/** `moves`: the channels that only change number (a renumber, insert or move), for the write dialog. */
+export type Plan = { changes: Change[]; begin: number[]; ops: PlanOp[]; problems: Problem[]; positions: number[]; moves: Move[] };
 export type ChirpImport = { channels: Channel[]; notes: string[]; skipped: number };
 
 const js = JSON.stringify;
@@ -448,6 +451,26 @@ const edited = (s: string): Edited => {
   return { record: new Uint8Array(r.record), extras: r.extras };
 };
 export type Restored = { record: number[]; extras: Extras; saved: string; radio: Record<string, string> };
+
+// Arranging the channel table (core/src/arrange.rs, console#55 and #104): each gives the table after it, its home
+// channel (followed, CHAN-18), the channels that changed number (by old number) and an insert's new channel; or
+// throws why not (the table is left as it was).
+export type Arranged = { set: ChannelSet; home: number | null; moved: Move[]; added: number | null };
+const arr = (s: string): Arranged => {
+  const r = JSON.parse(s);
+  return { ...r, home: r.home ?? null, added: r.added ?? null };
+};
+/** The table renumbered by `map` (old -> new); the priority channels and the home channel follow. */
+export const arrangeApply = (t: ChannelSet, home: number | null, map: Map<number, number>): Arranged =>
+  arr(wasm.arrange_apply(js(t), home ?? undefined, js([...map])));
+/** Every channel renumbered top to bottom from `start` (1 closes every gap). */
+export const arrangeRenumber = (t: ChannelSet, home: number | null, start = 1): Arranged => arr(wasm.arrange_renumber(js(t), home ?? undefined, start));
+/** `c` inserted at number `at`: the channels from there move one along as far as the first free number. */
+export const arrangeInsert = (t: ChannelSet, home: number | null, at: number, c: Channel): Arranged =>
+  arr(wasm.arrange_insert(js(t), home ?? undefined, at, js(c)));
+/** Channels `picked` moved together to continuous numbers from `start`, in their order. */
+export const arrangeMoveBlock = (t: ChannelSet, home: number | null, picked: number[], start: number): Arranged =>
+  arr(wasm.arrange_move_block(js(t), home ?? undefined, js(picked), start));
 
 /** CHAN-17: the home channel the settings record names (1-1000), or null. */
 export const settingsHome = (record: Uint8Array): number | null => wasm.settings_home(record) ?? null;

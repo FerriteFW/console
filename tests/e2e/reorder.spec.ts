@@ -138,6 +138,79 @@ test.describe.serial("reorder", () => {
     expect(await pending()).toBe(0);
   });
 
+  test("arrange (console#55, #104): insert above, a channel dropped in a gap, two moved together, renumber; written and read back", async ({}, info) => {
+    // A run of four at 950-953 and one at 960 (954-959 free), written first (the clean-up deletes them again).
+    const s = 950;
+    await page.evaluate((s) => {
+      const c = (window as any).ferrite.channels;
+      for (const [k, at] of [s, s + 1, s + 2, s + 3, s + 10].entries()) {
+        const n = c.addChannel();
+        c.move(n, at);
+        c.edit(at, "name", `E2E A${k}`);
+        c.edit(at, "rx", `145.${610 + k * 10}`);
+      }
+    }, s);
+    await writeAndCheck();
+    await page.getByLabel("Find a channel", { exact: true }).fill("");
+    let was = who(await table());
+
+    // Insert above 951 from the row's menu: a new channel there, 951-953 one along into the free 954, 960 stays.
+    await row(s + 1).getByRole("button", { name: new RegExp(`^More for channel ${s + 1}:`) }).click();
+    await page.getByRole("menuitem", { name: /Insert channel above/ }).click();
+    let now = who(await table());
+    expect(now.get(s + 1)).toBe("|146.52000");
+    expect([now.get(s + 2), now.get(s + 3), now.get(s + 4)]).toEqual([was.get(s + 1), was.get(s + 2), was.get(s + 3)]);
+    expect([now.get(s), now.get(s + 10)]).toEqual([was.get(s), was.get(s + 10)]);
+    await expect(page.getByText(`Channel ${s + 1} added; 3 other channels moved along to make room.`)).toBeVisible();
+    await page.getByRole("button", { name: "Close the channel panel" }).click();
+
+    // Empty numbers as rows: 960 dropped on the free 955 takes it, nothing else moves.
+    await page.getByLabel("Show empty numbers").check();
+    const gap = page.locator(`table.grid tr[data-gap="${s + 5}"]`);
+    await expect(gap).toBeVisible();
+    await shot(page, info, "reorder-40-empty-numbers");
+    was = who(await table());
+    await row(s + 10).locator("button.grip").dragTo(gap);
+    now = who(await table());
+    expect(now.get(s + 5)).toBe(was.get(s + 10));
+    expect(now.has(s + 10)).toBe(false);
+    for (let n = s; n <= s + 4; n++) expect(now.get(n)).toBe(was.get(n));
+
+    // Two ticked and moved together with Move to…: 950 and 952 to 970-971, in their order.
+    was = now;
+    await row(s).getByRole("checkbox", { name: `Select channel ${s}` }).check();
+    await row(s + 2).getByRole("checkbox", { name: `Select channel ${s + 2}` }).check();
+    await page.getByRole("region", { name: "Selected channels" }).getByRole("button", { name: "Move to…" }).click();
+    await dialog().getByLabel("First number").fill("970");
+    await expect(dialog()).toContainText("They become 970–971, in their order; nothing else moves.");
+    await dialog().getByRole("button", { name: "Move" }).click();
+    now = who(await table());
+    expect([now.get(970), now.get(971)]).toEqual([was.get(s), was.get(s + 2)]);
+    expect(now.has(s) || now.has(s + 2)).toBe(false);
+    await page.getByRole("region", { name: "Selected channels" }).getByRole("button", { name: "Clear", exact: true }).click();
+    await writeAndCheck();
+
+    // Renumber…: asked first; then every channel 1..n in the same order.
+    const order = (await table()).channels.map((c) => `${c.name}|${c.rx}`);
+    await page.getByRole("button", { name: "Renumber…" }).click();
+    await expect(dialog()).toContainText(`Renumber ${order.length} channels as 1–${order.length}?`);
+    await dialog().getByRole("button", { name: "Renumber" }).click();
+    const t = await table();
+    expect(t.channels.map((c) => c.number)).toEqual(order.map((_, i) => i + 1));
+    expect(t.channels.map((c) => `${c.name}|${c.rx}`)).toEqual(order);
+    // The write dialog says how many change number.
+    const dl = page.waitForEvent("download", { timeout: long() });
+    await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
+    await dl;
+    await expect(dialog()).toContainText("change number", { timeout: long() });
+    await shot(page, info, "reorder-50-renumber-write");
+    await dialog().getByRole("button", { name: "Cancel" }).click();
+    // Undone in one step.
+    await toolbar().getByRole("button", { name: /Undo/ }).click();
+    expect(await pending()).toBe(0);
+    await page.getByLabel("Show empty numbers").uncheck();
+  });
+
   test("zones: drag a zone up the list, ▼ moves it back; its channels go with it; written and read back", async ({}, info) => {
     let t = await table();
     await page.getByRole("tab", { name: /^Zones/ }).click();

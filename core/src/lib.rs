@@ -32,6 +32,7 @@
 //! - [`timing`]: the reference client's time-outs and pacing, in one place.
 //! - [`sats`]: satellite mode's satellites (LINK-63 – LINK-65): sats.json into records, the info record, SAT-21's rule.
 //! - [`wmm`]: the World Magnetic Model WMM2025, for the declination written with the satellites (SAT-18).
+//! - [`arrange`]: the channel table renumbered, a channel inserted, several moved together (console#55, #104).
 //! - [`zonecap`]: a zone holds 256 channels at most (CHAN-35): the counts, the refusal, and splitting a long list.
 
 pub mod answers;
@@ -39,6 +40,7 @@ pub mod aprs;
 pub mod audio;
 pub mod aprs_settings;
 pub mod channels;
+pub mod arrange;
 pub mod chirp;
 #[cfg(test)]
 mod chirp_fuzz;

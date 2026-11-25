@@ -10,8 +10,17 @@
   const pre = $derived(w && w.step !== "backup" ? w.presets : null);
   const problems = $derived([...(plan?.problems ?? []), ...(pre?.problems ?? [])]);
   const changes = $derived([...(plan?.changes ?? []), ...(pre?.changes ?? [])]);
+  /** console#55, #104: channels that only change number (a renumber, insert or move). Their record diffs (written at
+   *  the new number, deleted at the old) show as one "moved" line each instead. */
+  const moves = $derived(plan?.moves ?? []);
+  const movedName = $derived(new Map((channels.table.channels ?? []).map((c) => [c.number, c.name])));
+  const listed = $derived.by(() => {
+    const to = new Set(moves.map((m) => m.to));
+    const from = new Set(moves.map((m) => m.from));
+    return changes.filter((c) => c.what !== "channel" || !((c.kind !== "deleted" && to.has(c.number)) || (c.kind === "deleted" && from.has(c.number))));
+  });
   const groups = $derived.by(() => {
-    const c = changes;
+    const c = listed;
     const of = (k: Change["kind"]) => c.filter((x) => x.kind === k);
     return [
       { kind: "added", title: "Added", items: of("added") },
@@ -37,7 +46,11 @@
   };
   /** The change list's one-line summary (the list itself is folded: most writes don't need reading row by row). */
   const summary = $derived(
-    [...groups.map((g) => `${g.items.length} ${g.title.toLowerCase()}`), ...(w && w.step !== "backup" && w.home ? ["home channel"] : [])].join(" · "),
+    [
+      ...(moves.length ? [`${moves.length} moved`] : []),
+      ...groups.map((g) => `${g.items.length} ${g.title.toLowerCase()}`),
+      ...(w && w.step !== "backup" && w.home ? ["home channel"] : []),
+    ].join(" · "),
   );
   let listOpen = $state(false);
   // Every write starts folded.
@@ -73,11 +86,27 @@
             </ul>
           </div>
         {/if}
-        {#if !changes.length && !w.home}
+        {#if !changes.length && !moves.length && !w.home}
           <p>Nothing to write: the radio already holds the table.</p>
         {:else}
+          {#if moves.length}
+            <p class="note">
+              {moves.length === 1 ? "1 channel changes number" : `${moves.length} channels change number`}: each is written at its new number{plan?.ops.some((o) => o.kind === "delete" && o.what === "channel") ? ", and a number left empty is cleared" : ""}. A slot on the radio that was on a moved number tunes what's there now.
+            </p>
+          {/if}
           <details class="diff" bind:open={listOpen}>
             <summary><b>{summary}</b><span class="more">{listOpen ? "Hide the list" : "Show the list"}</span></summary>
+            {#if moves.length}
+              <h3 class="changed">Moved ({moves.length})</h3>
+              <ul>
+                {#each moves as m (m.from)}
+                  <li>
+                    <span class="what">Ch {m.from} → {m.to}</span>
+                    <span class="nm">{movedName.get(m.to) || "(no name)"}</span>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
             {#each groups as g (g.kind)}
               <h3 class={g.kind}>{g.title} ({g.items.length})</h3>
               <ul>
