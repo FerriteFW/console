@@ -7,6 +7,7 @@
   import { signatureText } from "../signature";
   import { bridgeEnabled } from "../transport/bridge";
   import UpdateWizard from "../components/UpdateWizard.svelte";
+  import ReleaseNotes from "../components/ReleaseNotes.svelte";
   import { CONSOLE_DOWNLOADS } from "../updates.svelte";
   import { olderThan } from "../version";
 
@@ -81,6 +82,8 @@
     {/if}
     <p class="sub hint">Channels and settings stay. Over the cable only. A radio still on its stock firmware: use the <a href="#/install">Install</a> tab.</p>
   </section>
+
+  <ReleaseNotes notes={firmware.notes} running={connected ? mine : ""} offered={latest} byHand={chosen} />
 
   <details class="card" aria-label="Advanced" open={chosen || undefined}>
     <summary>Advanced: install a file (.ffw or .btf)</summary>
