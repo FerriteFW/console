@@ -26,7 +26,8 @@
 //!   factory's same data on both), so its CRC is only a check against a blank or damaged file.
 
 use crate::firmware::{self, check_image, pack, unpack, Update, APP_BASE, APP_MAX, BOOT_MAX, FERRITE_MARK};
-use ferrite_core::layout::{CALIBRATION, UPDATE_AREA, WRITABLE};
+use ferrite_core::layout::{CALIBRATION, LAYOUT_HEADER, MIGRATE_MARK, UPDATE_AREA, V2_HEADER, WRITABLE};
+use ferrite_store::store::{HEADER_MAGIC, MARK_LEN, MARK_MAGIC};
 use ferrite_core::sha256::sha256;
 use serde::Serialize;
 
@@ -107,9 +108,40 @@ fn shape_problems(b: &[u8]) -> Vec<String> {
     problems
 }
 
-/// flash.py's `check_backup`, plus the regions' CRCs: 2, 4 or 8 MB, calibration not blank, no pending update.
+/// The layout version of a Ferrite header (ferrite-store's: magic "FRRT", version, 10 bytes the CRC takes as 0xFF,
+/// CRC-32 of the 16 bytes before) at `at`, or None.
+fn ferrite_header(b: &[u8], at: usize) -> Option<u16> {
+    let h = b.get(at..at + 20)?;
+    let mut body = [0u8; 16];
+    body.copy_from_slice(&h[..16]);
+    body[6..10].fill(0xFF); // the calibration's CRC (CAL-7), recorded after the header's own CRC
+    let le = |i: usize| u32::from_le_bytes([h[i], h[i + 1], h[i + 2], h[i + 3]]);
+    (le(0) == HEADER_MAGIC && le(16) == firmware::crc32(&body)).then(|| u16::from_le_bytes([h[4], h[5]]))
+}
+
+/// BACKUP-1.4: the chip holds Ferrite's storage: its layout header (layout 3's place or layout 2's, magic and CRC
+/// good) or a migration mark (decision 339). Stock never writes either; Back to stock writes over both. A backup
+/// of such a chip is a backup of Ferrite, not of stock firmware.
+pub fn ferrite_storage(b: &[u8]) -> bool {
+    if ferrite_header(b, LAYOUT_HEADER.start as usize).is_some() || ferrite_header(b, V2_HEADER.start as usize).is_some() {
+        return true;
+    }
+    let (s, e) = (MIGRATE_MARK.start as usize, (MIGRATE_MARK.end as usize).min(b.len()));
+    (s..e).step_by(MARK_LEN).filter_map(|a| b.get(a..a + MARK_LEN)).take_while(|m| m.iter().any(|&x| x != 0xFF)).any(|m| {
+        let le = |i: usize| u32::from_le_bytes([m[i], m[i + 1], m[i + 2], m[i + 3]]);
+        le(0) == MARK_MAGIC && le(12) == firmware::crc32(&m[..12])
+    })
+}
+
+/// flash.py's `check_backup`, plus the regions' CRCs: 2, 4 or 8 MB, calibration not blank, no pending update, and
+/// not a chip already set up by Ferrite (BACKUP-1.4).
 pub fn check_backup(b: &[u8]) -> BackupCheck {
     let mut problems = shape_problems(b);
+    if ferrite_storage(b) {
+        problems.push(
+            "this is a backup of a radio running Ferrite (Ferrite's storage is on its chip), not of stock firmware: it can't bring stock back. Keep the backup taken before Ferrite was first installed".into(),
+        );
+    }
     let pending = pending_update(b);
     if pending {
         problems.push(
@@ -186,11 +218,13 @@ fn uid_grouped(key: &str) -> String {
     (0..4).map(|i| &key[5 * i..5 * i + 5]).collect::<Vec<_>>().join(" ")
 }
 
-/// The backup's file name: `rt950pro-backup-<ID>-<YYYYMMDD>.bin`, the ID's 20 digits (decision 263).
-/// With a stock marker read at backup time, its word follows (`...-20261101-UV85.bin`: the 4 bytes as read).
-pub fn backup_name(uid: &str, date: &str, marker: Option<&[u8]>) -> String {
+/// The backup's file name: `rt950pro-backup-<ID>-<stamp>.bin`, the ID's 20 digits (decision 263); the stamp is
+/// the local date and time, `YYYYMMDD-HHMMSS` (BACKUP-1.5: a second backup the same day never takes the first one's
+/// name, so it can't replace it). With a stock marker read at backup time, its word follows
+/// (`...-20261101-143005-UV85.bin`: the 4 bytes as read).
+pub fn backup_name(uid: &str, stamp: &str, marker: Option<&[u8]>) -> String {
     let word = marker.and_then(marker_word).map(|w| format!("-{w}")).unwrap_or_default();
-    format!("rt950pro-backup-{}-{date}{word}.bin", uid_key(uid).unwrap_or_else(|| "unknown-id".into()))
+    format!("rt950pro-backup-{}-{stamp}{word}.bin", uid_key(uid).unwrap_or_else(|| "unknown-id".into()))
 }
 
 // ---- stock's marker sector (BACKUP-12, ferrite decision 338) ----
@@ -1004,6 +1038,42 @@ mod tests {
         assert!(check_backup(&b[..3 << 20]).problems[0].contains("2, 4 or 8 MB"));
     }
 
+    /// BACKUP-1.4: a chip Ferrite has set up (its layout header at layout 3's or layout 2's place, as ferrite-store
+    /// writes it, the calibration's CRC recorded or not; or a migration mark) isn't a stock backup. A stock chip, or
+    /// one Back to stock wrote over, is; magic without a good CRC is stock's data.
+    #[test]
+    fn a_backup_of_ferrite_is_refused() {
+        use ferrite_store::store::{header_bytes, mark_bytes};
+        let stock = backup();
+        assert!(!ferrite_storage(&stock));
+        let ferrite_said = |b: &[u8]| check_backup(b).problems.iter().any(|p| p.contains("backup of a radio running Ferrite"));
+        assert!(!ferrite_said(&stock));
+
+        let mut f = stock.clone();
+        f[..20].copy_from_slice(&header_bytes());
+        assert!(ferrite_storage(&f) && ferrite_said(&f));
+        f[6..10].copy_from_slice(&0x1234_5678u32.to_le_bytes()); // CAL-7: the calibration's CRC recorded later
+        assert!(ferrite_storage(&f), "the recorded calibration CRC keeps the header valid");
+
+        let mut v2 = stock.clone();
+        v2[V2_HEADER.start as usize..V2_HEADER.start as usize + 20].copy_from_slice(&header_bytes());
+        assert!(ferrite_storage(&v2), "layout 2's header");
+
+        let mut moving = stock.clone();
+        let m = MIGRATE_MARK.start as usize;
+        moving[m..m + MARK_LEN].fill(0); // a stamped mark first
+        moving[m + MARK_LEN..m + 2 * MARK_LEN].copy_from_slice(&mark_bytes(2));
+        moving[m + 2 * MARK_LEN..m + 4 * MARK_LEN].fill(0xFF);
+        assert!(ferrite_storage(&moving), "a move not stamped yet");
+
+        let mut junk = stock.clone();
+        junk[..20].copy_from_slice(&header_bytes());
+        junk[16] ^= 1;
+        junk[MIGRATE_MARK.start as usize..MIGRATE_MARK.start as usize + 4].copy_from_slice(&MARK_MAGIC.to_le_bytes());
+        assert!(!ferrite_storage(&junk), "the magic alone, CRC wrong: stock's data");
+        assert!(!ferrite_storage(&[]) && !ferrite_storage(&f[..10]), "short files don't panic");
+    }
+
     #[test]
     fn console_lines() {
         assert_eq!(
@@ -1441,6 +1511,21 @@ mod tests {
         assert_eq!(name_uid("flash.bin"), None);
         assert_eq!(name_uid("rt950pro-backup-N0EQ80R081H4T84MXM3U-1.bin"), None, "U isn't a digit");
         assert_eq!(uid_key(&uid_text([0x3F2A_91C0, 0x7D44_0123, 0x89AB_CDEF])).map(|k| k.len()), Some(20));
+    }
+
+    /// BACKUP-1.5: two backups the same day get two names (the time is in them), and the ID and the marker still
+    /// read back from a stamped name.
+    #[test]
+    fn same_day_backups_get_their_own_names() {
+        let mut uv = vec![0xFF; 16];
+        uv[..4].copy_from_slice(b"UV85");
+        let a = backup_name(HERE, "20261124-091502", Some(&uv));
+        let b = backup_name(HERE, "20261124-143011", Some(&uv));
+        assert_eq!(a, "rt950pro-backup-N0EQ80R081H4T84MXM3G-20261124-091502-UV85.bin");
+        assert_ne!(a, b);
+        assert_eq!(name_uid(&b).as_deref(), Some(HERE));
+        assert_eq!(name_marker(&b), Some(uv));
+        assert_eq!(name_marker(&backup_name(HERE, "20261124-143011", None)), None, "the time isn't a marker word");
     }
 
     /// BACKUP-12, BACKUP-12.1: the reader's `mdump` line read (its sum checked), the stock word in the backup's name

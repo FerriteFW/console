@@ -56,6 +56,7 @@ import { signatureOf, signatureProblem, splitPicked, type Signed } from "./signa
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
 import { Link, TimeoutError } from "./link";
+import { installIdProblem, otherRadio, restoreProgress, stockOnlyAllowed, uidKey } from "./installGuard";
 import { cablePrefs } from "./cablePrefs.svelte";
 import { radio } from "./radio.svelte";
 import { sleep, type Transport } from "./transport/types";
@@ -69,6 +70,10 @@ const NAK = 0x15;
 const CAN = 0x18;
 /** How long probes go out for the bootloader (flash.py's --wait is 30 s; a power cycle by hand takes longer). */
 const BOOT_WAIT_MS = 60_000;
+/** BACKUP-8.1: after the restore's FINISH the radio resets into its bootloader by itself (about 300 ms, then its
+ *  ~200 ms window): probes go out this long. Past it Ferrite has started (and may set up its storage over the
+ *  restored data), so no one is asked to power-cycle into the bootloader here. */
+const FINISH_BOOT_MS = 5_000;
 /** A Ferrite first boot formats its store before it answers. */
 const FIRST_BOOT_MS = 60_000;
 export const STOCK_RESTORE = 0x60;
@@ -106,9 +111,11 @@ const latin1 = (b: Uint8Array) => {
   for (const x of b) s += String.fromCharCode(x);
   return s;
 };
-const today = () => {
+/** BACKUP-1.5: the backup's local date and time for its name (`YYYYMMDD-HHMMSS`): two backups a day never share one. */
+const stamp = () => {
   const d = new Date();
-  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
 };
 
 /** The cable's bytes as console text, unless a protocol has the port (`sink`). */
@@ -426,8 +433,11 @@ class Install {
   restoreTyped = $state("");
   restoreStep = $state<Step>("idle");
   restoreSummary = $state<RestoreSummary | null>(null);
-  /** A failure after the restore wrote: the radio must not start Ferrite again before stock is flashed. */
+  /** A failure after the restore wrote: Back to stock must run again (or, BACKUP-8.1, stock alone may finish it). */
   restoreWrote = $state(false);
+  /** BACKUP-8.1: every range was written and read back, and stock started going in: the stock firmware alone may
+   *  finish the way back. */
+  restoreStockOnly = $state(false);
 
   private t: Transport | null = null;
   private wire: Wire | null = null;
@@ -696,6 +706,10 @@ class Install {
 
   async disconnect() {
     if (this.running) return;
+    // BACKUP-2.1: the next radio connected may be another one: its own backup first. A cut Back to stock is
+    // started again (its ranges are checked again) rather than finished with stock alone.
+    this.forgetBackup();
+    this.restoreStockOnly = false;
     this.linked = false;
     this.t = null;
     this.wire = null;
@@ -712,7 +726,7 @@ class Install {
   // ---- the bootloader ----
 
   /** flash.py's enter_bootloader: Ferrite's REBOOT, the reader's `reboot`, the stock nudge; probes until it answers. */
-  private async enterBootloader(ask = true): Promise<BootPort> {
+  private async enterBootloader(ask = true, waitMs = BOOT_WAIT_MS): Promise<BootPort> {
     const t = this.t!;
     await bootRate(t);
     if (ask) await this.askRestart(t);
@@ -722,7 +736,7 @@ class Install {
     let nudged = false;
     let asked = 1;
     port.clear();
-    while (performance.now() - t0 < BOOT_WAIT_MS) {
+    while (performance.now() - t0 < waitMs) {
       this.held();
       const left = performance.now() - t0;
       if (left > 5000)
@@ -762,15 +776,28 @@ class Install {
     await askRestart(t);
   }
 
-  /** `ask`: restart the radio first (false: it is restarting by itself, as after the restore's FINISH). */
-  private async flash(update: InstanceType<typeof FirmwareUpdate>, what: string, ask = true) {
+  /** `ask`: restart the radio first (false: it is restarting by itself, as after the restore's FINISH). `waitMs`: how
+   *  long the bootloader may take to answer; `sent`: the blocks it has accepted so far. */
+  private async flash(
+    update: InstanceType<typeof FirmwareUpdate>,
+    what: string,
+    ask = true,
+    o: { waitMs?: number; sent?: (blocks: number) => void } = {},
+  ) {
     this.message = `Restarting the radio into its bootloader for ${what}…`;
-    const port = await this.enterBootloader(ask);
+    let port: BootPort;
+    try {
+      port = await this.enterBootloader(ask, o.waitMs);
+    } catch (e) {
+      update.free();
+      throw e;
+    }
     try {
       await sendAll(
         port,
         update,
         (done, total, msg) => {
+          o.sent?.(done);
           this.done = done;
           this.total = total;
           this.message = `${what}: ${msg.toLowerCase()}`;
@@ -866,7 +893,7 @@ class Install {
         );
       this.backup = data;
       this.check = c;
-      this.backupName = backupName(this.uid, today(), this.marker).replace(/\.bin$/, ".fbin");
+      this.backupName = backupName(this.uid, stamp(), this.marker).replace(/\.bin$/, ".fbin");
       this.backupFile = await fbin(data, c.crc32, c.sha256, this.uid, this.chip, this.marker, this.iconsStock ? this.icons : null);
       ids.put(c.sha256, this.uid);
       if (this.marker) markers.put(c.sha256, this.marker);
@@ -1150,6 +1177,7 @@ class Install {
   /** Why Install can't run yet, or "". */
   get installBlock(): string {
     if (!this.unlocked) return "Take the backup and save it first.";
+    if (!uidKey(this.uid)) return installIdProblem(this.uid, null); // BACKUP-2.1
     if (this.check?.pending_update)
       return "A stock phone or Bluetooth update is waiting in this radio (0xA55A at 0x300000): the bootloader would flash it over Ferrite. Let stock finish or clear that update, then take a new backup.";
     if (!this.ferrite || !this.ferriteCheck) return "No Ferrite image: pick one under Advanced.";
@@ -1158,12 +1186,70 @@ class Install {
     return "";
   }
 
+  /** BACKUP-2.1: the backup as if never taken (another radio, or the cable let go): the next install needs its own. */
+  private forgetBackup() {
+    this.backupStep = "idle";
+    this.saved = false;
+    this.savedWhere = "";
+    this.downloaded = false;
+    this.saveError = "";
+    this.check = null;
+    this.backup = null;
+    this.backupFile = null;
+    this.backupName = "";
+    this.uid = "";
+    this.chip = "";
+    this.marker = null;
+    this.markerRead = false;
+    this.icons = null;
+    this.iconsStock = false;
+    if (this.errorAt === "backup") {
+      this.error = "";
+      this.errorAt = "";
+    }
+  }
+
+  /** BACKUP-2.1: the connected radio's ID as the reader (still running from the backup step) answers `sys`, or null
+   *  when nothing answers as the reader (stock, nicFW, Ferrite, a radio that is off). */
+  private async radioUid(): Promise<string | null> {
+    const w = this.wire;
+    if (!w) return null;
+    for (let tries = 0; tries < 2; tries++) {
+      w.clear();
+      await w.write("\r");
+      await w.idle(300);
+      w.clear();
+      await w.write("sys\r");
+      const sys = await w.waitFor(/[^\r\n]* uid [0-9A-F]{24}[^\r\n]*/, 3000, this.held);
+      const uid = sys && readerLine<{ uid: string }>("sys", sys[0])?.uid;
+      if (uid) return uid;
+    }
+    debugLog(`install: no reader sys line; heard ${radioSaid(w.text)}`);
+    return null;
+  }
+
   async install() {
     if (this.running || this.installBlock) return;
     this.installStep = "running";
     this.error = "";
     this.errorAt = "";
     try {
+      // BACKUP-2.1 (decision 263's check, as Back to stock makes it): Ferrite goes only into the radio the backup is
+      // from, by its MCU ID, read again now (radios swapped on the cable since the backup: the second one would get
+      // Ferrite with no backup).
+      this.message = "Checking that this is the radio you backed up…";
+      const here = await this.radioUid();
+      const why = installIdProblem(this.uid, here);
+      debugLog(`install: backup's radio ${this.uid || "unknown"}, this radio ${here ?? "didn't say"}`);
+      if (why) {
+        if (otherRadio(this.uid, here)) {
+          this.forgetBackup();
+          this.installStep = "idle";
+          this.fail("backup", new Error(why));
+          return;
+        }
+        throw new Error(why);
+      }
       const update = FirmwareUpdate.ferrite(this.ferrite!.bytes, this.patch ?? undefined);
       await this.flash(update, "Ferrite");
       this.message = "Sent. Ferrite starts, sets up its storage and opens its first-run setup…";
@@ -1230,6 +1316,7 @@ class Install {
     this.restoreStep = "idle";
     this.restoreSummary = null;
     this.restoreWrote = false;
+    this.restoreStockOnly = false;
     this.restoreConfirmUid = null;
     this.restoreTyped = "";
   }
@@ -1237,6 +1324,7 @@ class Install {
   /** The radio runs stock again: the install card starts over (the backup stays: it is still this radio's). */
   private backOnStock() {
     this.restoreWrote = false;
+    this.restoreStockOnly = false;
     this.restoreStep = "done";
     this.restoreConfirmUid = null;
     this.restoreTyped = "";
@@ -1287,6 +1375,8 @@ class Install {
     }
     this.restoreStep = "running";
     this.restoreWrote = false;
+    this.restoreStockOnly = false;
+    const prog = restoreProgress();
     this.error = "";
     this.errorAt = "";
     const t = this.t!;
@@ -1342,6 +1432,7 @@ class Install {
         throw new Error(`${sum.problems.join(" ")} Nothing was written; the radio restarts.`);
       }
       this.total = plan.len();
+      for (let i = 0; i < plan.len(); i++) if (plan.expect(i) >= 0) prog.ranges++;
       for (let i = 0; i < plan.len(); i++) {
         this.held();
         this.done = i;
@@ -1362,6 +1453,7 @@ class Install {
         if (want >= 0) {
           const got = new DataView(answer.rest.buffer, answer.rest.byteOffset).getUint32(0, true);
           if (got !== want) throw new Error("A range read back differently from the backup. Start Back to stock again.");
+          prog.verified++;
         }
       }
       this.done = plan.len();
@@ -1372,22 +1464,40 @@ class Install {
       this.message = "Restored and read back. Restarting into the bootloader…";
       const fin = await link.ask(STOCK_RESTORE, new Uint8Array([OP_FINISH]), 3000);
       if (fin.status !== 0) throw new Error(`The radio refused to finish: ${statusText(fin.status)}.`);
+      prog.finished = true;
       link.close();
       this.wire!.attach();
-      await this.flash(FirmwareUpdate.stock(this.stock!.bytes, this.restoreMarker ?? undefined, this.restoreIcons ?? undefined), "stock firmware", false);
+      // BACKUP-8.1: only the bootloader's own window right after FINISH. Missed, the radio starts Ferrite (or the
+      // restorer) again, and Ferrite may set up its storage over the restored data: never stock over that.
+      try {
+        await this.flash(
+          FirmwareUpdate.stock(this.stock!.bytes, this.restoreMarker ?? undefined, this.restoreIcons ?? undefined),
+          "stock firmware",
+          false,
+          { waitMs: FINISH_BOOT_MS, sent: (n) => (prog.stockBlocks = Math.max(prog.stockBlocks, n)) },
+        );
+      } catch (e) {
+        if (prog.stockBlocks > 0) throw e;
+        debugLog(`restore: stock didn't start going in after FINISH (${(e as Error)?.message ?? e})`);
+        throw new Error(
+          "The radio didn't restart into its bootloader in time, so it may have started Ferrite again, which sets up its storage over the restored data. Your backup is safe: start Back to stock again (it writes and checks everything again).",
+        );
+      }
       this.backOnStock();
     } catch (e) {
       link.close();
       this.wire?.attach();
+      this.restoreStockOnly = stockOnlyAllowed(prog);
       this.fail("restore", e);
     } finally {
       plan?.free();
     }
   }
 
-  /** After a cut restore: the radio waits in the bootloader (side keys held at power-on); only the stock file goes. */
+  /** After a cut restore: the radio waits in the bootloader (side keys held at power-on); only the stock file goes.
+   *  BACKUP-8.1: only when every range was written and read back and stock had started going in. */
   async flashStockOnly() {
-    if (this.running || !this.stock || this.stockCheck?.problems.length || !this.connected) return;
+    if (this.running || !this.restoreStockOnly || !this.stock || this.stockCheck?.problems.length || !this.connected) return;
     this.restoreStep = "running";
     this.error = "";
     this.errorAt = "";

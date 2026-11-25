@@ -194,7 +194,7 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   await shot(page, info, "71-install-backup");
 
   const [dl] = await Promise.all([page.waitForEvent("download"), b.getByRole("button", { name: "Save the backup…" }).click()]);
-  expect(dl.suggestedFilename()).toMatch(/^rt950pro-backup-[0-9A-Z]{20}-\d{8}-UV85\.fbin$/); // the marker travels in the name
+  expect(dl.suggestedFilename()).toMatch(/^rt950pro-backup-[0-9A-Z]{20}-\d{8}-\d{6}-UV85\.fbin$/); // the marker travels in the name
   // Decision 407: one zip, the SPI flash as spi.bin and a manifest (no icons.bin: the fake radio's area is erased).
   const z = await readZip(readFileSync(await dl.path()));
   const saved = Buffer.from(z.get("spi.bin")!);
@@ -244,7 +244,7 @@ test("install: Chrome's save dialog saves the backup once and reads it back", as
   let downloads = 0;
   page.on("download", () => downloads++);
   await b.getByRole("button", { name: "Save the backup…" }).click();
-  await expect(b.locator('[data-k="saved"]')).toContainText(/saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}\.fbin/);
+  await expect(b.locator('[data-k="saved"]')).toContainText(/saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}-\d{6}\.fbin/);
   expect(await page.evaluate(() => (window as unknown as { __writes: number }).__writes)).toBe(1);
   expect(downloads).toBe(0);
   await expect(step(page)).toHaveText("SSB");

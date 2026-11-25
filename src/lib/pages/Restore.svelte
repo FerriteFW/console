@@ -129,13 +129,18 @@
         <span class="sub">Not running Ferrite: turn the radio off and on when Console asks.{#if !I.restorerFile} (This copy of Console has no restorer image.){/if}</span>
       </div>
     {/if}
-    {#if I.restoreStep === "failed" && I.restoreWrote}
-      <div class="banner warn">
-        <p>Part of the backup is written. Don't let Ferrite start again (it would set up its storage over it). Turn the radio off, hold the two lower side keys and turn it on, then:</p>
+    <!-- BACKUP-8.1: stock alone only over ranges all written and read back, with stock already going in. -->
+    {#if I.restoreStep === "failed" && I.restoreStockOnly}
+      <div class="banner warn" data-k="stock-only">
+        <p>Your stock data is written back and checked, and the stock firmware had started going in. Turn the radio off, hold the two lower side keys and turn it on, then:</p>
         <div class="row">
           <button class="btn" disabled={!I.connected || I.running} onclick={() => I.flashStockOnly()}>Send the stock firmware only</button>
         </div>
-        <p class="sub">Or start Back to stock again from Ferrite: it writes everything again.</p>
+        <p class="sub">Or start Back to stock again: it writes and checks everything again.</p>
+      </div>
+    {:else if I.restoreStep === "failed" && I.restoreWrote}
+      <div class="banner warn" data-k="restore-again">
+        <p>Part of your stock data is written, but not all of it was written and checked. Start Back to stock again: it writes and checks everything again from your backup. If the radio doesn't start Ferrite, use “Start from the bootloader”.</p>
       </div>
     {/if}
     {#if I.restoreStep === "done"}
