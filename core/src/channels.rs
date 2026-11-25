@@ -228,7 +228,12 @@ pub fn parse_tone(w: &str) -> Result<u16, String> {
         return Ok(DCS_FLAG | if inv { DCS_INV } else { 0 } | c);
     }
     let w = w.strip_prefix(['T', 't']).unwrap_or(w).trim();
+    let w = w.strip_suffix("Hz").or_else(|| w.strip_suffix("hz")).unwrap_or(w).trim();
+    // One decimal, as the radio writes it; more are taken when they are zeros ("88.50", CHIRP's "88.500000"), and
+    // none ("100", "100.") is .0. A tone finer than 0.1 Hz isn't one the radio holds.
     let (i, f) = w.split_once('.').unwrap_or((w, "0"));
+    let f = if f.len() > 1 { f.trim_end_matches('0') } else { f };
+    let f = if f.is_empty() { "0" } else { f };
     let ok = !i.is_empty() && i.bytes().all(|b| b.is_ascii_digit()) && f.len() == 1 && f.as_bytes()[0].is_ascii_digit();
     if !ok {
         return Err(bad());

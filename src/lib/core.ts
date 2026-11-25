@@ -234,7 +234,9 @@ export const writePlan = (base: ChannelSet, want: ChannelSet): Plan => JSON.pars
 export const backupFile = (set: ChannelSet, saved: string, radio: Record<string, string>) => wasm.backup_file(js(set), saved, js(radio));
 export const restoreFile = (text: string): { set: ChannelSet; saved: string; radio: Record<string, string> } =>
   JSON.parse(wasm.restore_file(text));
-export const chirpExport = (set: ChannelSet) => wasm.chirp_export(js(set));
+/** A CHIRP CSV file, the channels written, and what didn't go in (issue #85): left out by number, priority lost. */
+export type ChirpExport = { text: string; channels: number; left_out: number[]; lost_priority: number[]; notes: string[] };
+export const chirpExport = (set: ChannelSet): ChirpExport => JSON.parse(wasm.chirp_export(js(set)));
 export const chirpImport = (text: string, zones: Zone[]): ChirpImport => JSON.parse(wasm.chirp_import(text, js(zones)));
 /** Imported channels into a new zone at free numbers: `room` says why it can't (numbers, zones), `name_error` the name. */
 /** `zones`: one new zone, or (more than 256 channels, CHAN-35) one per 256: "Repeaters 1", "Repeaters 2", ... */

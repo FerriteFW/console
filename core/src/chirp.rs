@@ -5,11 +5,16 @@
 //!
 //! - Location is the channel number as the radio shows it (1-1000). A file whose lowest Location is 0 (CHIRP's
 //!   generic CSV radio counts from 0) is moved up by one.
-//! - Duplex `off` (TX disabled) is RX only; `split` puts the TX frequency in Offset.
+//! - Duplex `off` (TX disabled) is RX only, with the TX frequency in Offset (0 for simplex) so its shift or split
+//!   comes back; `split` puts the TX frequency in Offset. A signed Offset (-0.6) is the direction when Duplex is
+//!   blank. Nothing is dropped silently (issue #85): a field not taken is a note on the import, and a channel left
+//!   out of an export or one whose priority CHIRP's one Skip column can't carry is a note on the export.
 //! - Tone, rToneFreq, cToneFreq, DtcsCode, DtcsPolarity, RxDtcsCode and CrossMode map to the RX and TX tone words
 //!   both ways; `TSQL-R` and `DTCS-R` (reverse squelch) have no Ferrite equivalent and import without tones.
-//! - Skip `S` is skip, `P` priority. Power is High, Mid or Low (a watt figure: 4 W and up High, 1.5 W up Mid).
-//! - Comment carries the zone's name: exported, and on import a Comment that names a zone puts the channel in it.
+//! - Skip `S` is skip, `P` priority (skip and priority both: `S`, with a note). Power is High, Mid or Low (a watt figure: 4 W and up High, 1.5 W up Mid).
+//! - Comment carries the zone's name: exported, and on import a Comment that names a zone puts the channel in it
+//!   (the zone of that exact name, else one differing only in case).
+//! - A name's leading spaces are kept (quoted on export; CHIRP's reader keeps them too), trailing ones dropped.
 //! - Modes FM, NFM, AM, NAM (narrow AM, CHIRP's name too; ferrite decision 447), WFM (BCR-33), USB, LSB, CW; others
 //!   (DV, DMR ...) are skipped with a note. The stock list's AM with Bandwidth Narrow is NAM, as FM's is NFM.
 //! - Latitude and Longitude (or Lat, Long, Lon, Lng), as some RepeaterBook exports have, are the channel's position
@@ -22,7 +27,7 @@
 //! [`into_new_zone`]: the file's channels, in their order, at free numbers in a new zone (a RepeaterBook or CHIRP
 //! export numbers from 0 or 1, so merging it would overwrite the owner's first channels).
 
-use crate::channels::{mhz_text, parse_mhz, ChanView, Position, ZoneView, ZONE_CAP};
+use crate::channels::{mhz_text, parse_mhz, ChanView, Position, ZoneView, MAX_SHIFT, ZONE_CAP};
 use crate::plan::Set;
 use crate::radioside::MAX_ZONES;
 use ferrite_app::chan::MAX_CHANNELS;
@@ -54,9 +59,10 @@ pub const COLUMNS: [&str; 21] = [
     "DVCODE",
 ];
 
-/// One field for CSV: quoted when it holds a comma, quote or line break.
+/// One field for CSV: quoted when it holds a comma, quote or line break, or starts or ends with a space (a name's
+/// leading spaces are kept: issue #85; a spreadsheet may trim an unquoted field's).
 fn field(s: &str) -> String {
-    if s.contains([',', '"', '\n', '\r']) {
+    if s.contains([',', '"', '\n', '\r']) || s.starts_with(' ') || s.ends_with(' ') {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
@@ -120,15 +126,47 @@ pub fn tone_columns(tx: u16, rx: u16) -> [String; 7] {
     [mode.into(), ctcss_text(r_tone), ctcss_text(c_tone), format!("{dtcs:03o}"), pol, format!("{rx_dtcs:03o}"), cross]
 }
 
+/// What [`export_report`] gives: the file, and what it couldn't carry.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Export {
+    pub text: String,
+    /// The channels written.
+    pub channels: usize,
+    /// Channels left out (a field the radio can't hold), by number.
+    pub left_out: Vec<u16>,
+    /// Channels both skipped and priority: CHIRP's one Skip column holds S, so their priority isn't in the file.
+    pub lost_priority: Vec<u16>,
+    /// The above as sentences, for the export's report.
+    pub notes: Vec<String>,
+}
+
 /// The channels as a CHIRP CSV file (CRLF lines, as CHIRP writes it).
 pub fn export(channels: &[ChanView], zones: &[ZoneView]) -> String {
+    export_report(channels, zones).text
+}
+
+/// The channels as a CHIRP CSV file, with what didn't go in (issue #85: never silently).
+///
+/// An RX-only channel is Duplex `off` (CHIRP's "transmit disabled") with its TX frequency in Offset, as a split
+/// writes it, so its shift or split comes back on import ([`import`]); simplex writes Offset 0.
+pub fn export_report(channels: &[ChanView], zones: &[ZoneView]) -> Export {
+    let mut rep = Export::default();
     let mut out = COLUMNS.join(",");
     out.push_str("\r\n");
     for v in channels {
-        let Ok(c) = v.channel() else { continue };
+        let Ok(c) = v.channel() else {
+            rep.left_out.push(v.number);
+            continue;
+        };
+        rep.channels += 1;
         let g = &c.cfg;
         let (duplex, offset) = if v.rx_only {
-            ("off".to_string(), 0)
+            let tx = if g.split {
+                g.offset.max(0) as u32
+            } else {
+                (c.rx as i64 + g.offset as i64).clamp(0, u32::MAX as i64) as u32
+            };
+            ("off".to_string(), if tx == c.rx { 0 } else { tx })
         } else if g.split {
             ("split".to_string(), g.offset.max(0) as u32)
         } else if g.offset > 0 {
@@ -141,6 +179,9 @@ pub fn export(channels: &[ChanView], zones: &[ZoneView]) -> String {
         let t = tone_columns(g.tx_tone, g.rx_tone);
         let step = STEPS.get(g.step as usize).map_or(1250, |s| s.0);
         let skip = if v.skip {
+            if v.priority {
+                rep.lost_priority.push(v.number);
+            }
             "S"
         } else if v.priority {
             "P"
@@ -150,7 +191,7 @@ pub fn export(channels: &[ChanView], zones: &[ZoneView]) -> String {
         let zone = v.zone.and_then(|z| zones.get(z as usize)).map_or("", |z| z.name.as_str());
         let row = [
             v.number.to_string(),
-            v.name.clone(),
+            v.name.trim_end().to_string(),
             format!("{}0", mhz_text(c.rx)),
             duplex,
             format!("{}0", mhz_text(offset)),
@@ -174,7 +215,27 @@ pub fn export(channels: &[ChanView], zones: &[ZoneView]) -> String {
         out.push_str(&row.iter().map(|s| field(s)).collect::<Vec<_>>().join(","));
         out.push_str("\r\n");
     }
-    out
+    rep.text = out;
+    rep.left_out.sort_unstable();
+    rep.lost_priority.sort_unstable();
+    let plural = |n: usize| if n == 1 { "channel" } else { "channels" };
+    if !rep.left_out.is_empty() {
+        let n = rep.left_out.len();
+        rep.notes.push(format!(
+            "{n} {} left out (a field the radio can't hold; fix it in the table): {}",
+            plural(n),
+            ranges(&rep.left_out)
+        ));
+    }
+    if !rep.lost_priority.is_empty() {
+        let n = rep.lost_priority.len();
+        rep.notes.push(format!(
+            "{n} {} lost priority (CHIRP has one Skip column: written as S): {}",
+            plural(n),
+            ranges(&rep.lost_priority)
+        ));
+    }
+    rep
 }
 
 /// CSV text to rows of fields (quotes, doubled quotes, commas and line breaks inside quotes).
@@ -220,6 +281,24 @@ pub struct Import {
 
 fn ctcss_of(s: &str) -> Option<u16> {
     crate::channels::parse_tone(s).ok().filter(|t| *t != 0 && t & DCS_FLAG == 0)
+}
+
+/// A CTCSS column a tone mode uses; what it can't read goes in `bad` (issue #85: never dropped silently).
+fn ctcss_field(col: &str, text: &str, bad: &mut Vec<String>) -> Option<u16> {
+    let t = ctcss_of(text);
+    if t.is_none() {
+        bad.push(format!("{col} {text:?}: not a CTCSS tone (60.0 to 260.0 Hz)"));
+    }
+    t
+}
+
+/// A DCS column a tone mode uses, as [`ctcss_field`].
+fn dcs_field(col: &str, text: &str, pol: char, bad: &mut Vec<String>) -> Option<u16> {
+    let t = dcs_of(text, pol);
+    if t.is_none() {
+        bad.push(format!("{col} {text:?}: not a DCS code (000 to 777)"));
+    }
+    t
 }
 
 fn dcs_of(code: &str, pol: char) -> Option<u16> {
@@ -315,9 +394,11 @@ pub fn from_stock_list(rows: &[Vec<String>]) -> Option<Vec<Vec<String>>> {
         };
         let skip = if get(r, "Scan").eq_ignore_ascii_case("false") { "S" } else { "" };
         let [r_tone, c_tone, dtcs, rx_dtcs] = f;
+        // A name's leading spaces are kept (issue #85), as CHIRP's own reader keeps them
+        let name = col("Name").and_then(|i| r.get(i)).map_or(String::new(), |s| s.trim_end().to_string());
         out.push(vec![
             get(r, "Index"),
-            get(r, "Name"),
+            name,
             rx,
             duplex,
             offset,
@@ -353,10 +434,11 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
         return Err("not a channel list Console reads: a CHIRP CSV file (a Frequency column) or the stock radio's list (RX MHz)".into());
     };
     let cols: Vec<Option<usize>> = COLUMNS.iter().map(|c| col(c)).collect();
-    let get = |r: &[String], name: &str| -> String {
+    let field_of = |r: &[String], name: &str| -> String {
         let i = COLUMNS.iter().position(|c| *c == name).and_then(|i| cols[i]);
-        i.and_then(|i| r.get(i)).map_or(String::new(), |s| s.trim().to_string())
+        i.and_then(|i| r.get(i)).cloned().unwrap_or_default()
     };
+    let get = |r: &[String], name: &str| -> String { field_of(r, name).trim().to_string() };
     // RepeaterBook's exports (some) carry the site's coordinates: the channel's position (CHAN-2, LINK-53).
     // CHIRP's own CSV has no such column.
     let any_col = |names: &[&str]| names.iter().find_map(|n| col(n));
@@ -393,7 +475,9 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
         let mut v = ChanView::new(number as u16, rx);
         v.mode = m.to_string();
         // Name: 16 characters of the name set (CHAN-31), others mapped to '-' as the radio would.
-        let raw = get(r, "Name");
+        // Leading spaces are the name's (issue #85): CHIRP's reader keeps them and the radio holds them; trailing
+        // ones go, as the radio's names don't keep them (ChanView::channel).
+        let raw = field_of(r, "Name").trim_end().to_string();
         let name = crate::channels::map_name(&raw);
         if name.len() > 16 {
             note(format!("name {raw:?} cut to 16 characters"));
@@ -401,47 +485,90 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
             note(format!("name {raw:?}: characters a channel name can't hold became -"));
         }
         v.name = name.chars().take(16).collect::<String>().trim_end().to_string();
-        // Duplex and offset.
-        let off = parse_mhz(&get(r, "Offset")).unwrap_or(0);
-        match get(r, "Duplex").to_ascii_lowercase().as_str() {
-            "" => {}
-            d @ ("+" | "-") if off > 0 => {
-                v.duplex = d.into();
+        // Duplex and offset. Offset may carry a sign (some tools write -0.600000): with Duplex blank it is the
+        // direction, with + or - it must agree (issue #85).
+        let off_text = get(r, "Offset").replace('\u{2212}', "-");
+        let (sign, mag) = match off_text.as_bytes().first() {
+            Some(b'-') => (Some('-'), off_text[1..].trim()),
+            Some(b'+') => (Some('+'), off_text[1..].trim()),
+            _ => (None, off_text.as_str()),
+        };
+        let off = match parse_mhz(mag) {
+            Some(o) => o,
+            None if mag.is_empty() => 0,
+            None => {
+                note(format!("offset {off_text:?}: not a frequency: taken as none"));
+                0
+            }
+        };
+        let duplex = get(r, "Duplex").to_ascii_lowercase();
+        match (duplex.as_str(), sign) {
+            ("" | "+" | "-", _) if off == 0 => {}
+            ("", Some(d)) | ("+", Some(d @ '+')) | ("-", Some(d @ '-')) => {
+                v.duplex = d.to_string();
                 v.offset = mhz_text(off);
             }
-            "+" | "-" => {}
-            "split" => {
+            ("+" | "-", None) => {
+                v.duplex = duplex.clone();
+                v.offset = mhz_text(off);
+            }
+            ("+" | "-", Some(_)) => {
+                note(format!("duplex {duplex} with offset {off_text}: taken as {duplex}"));
+                v.duplex = duplex.clone();
+                v.offset = mhz_text(off);
+            }
+            ("", None) => {} // CHIRP's simplex: an offset left there is not used
+            ("split", Some('-')) => note(format!("split with offset {off_text}: a TX frequency can't be negative: taken as simplex")),
+            ("split", _) if off > 0 => {
                 v.duplex = "split".into();
                 v.offset = mhz_text(off);
             }
-            "off" => v.rx_only = true,
-            d => note(format!("duplex {d:?}: taken as simplex")),
+            ("split", _) => note("split with no TX frequency: taken as simplex".into()),
+            ("off", _) => {
+                // TX disabled: RX only. Offset is the TX frequency as this export writes it (and a split's), or a
+                // shift left there (CHIRP keeps a turned-off channel's offset): a value within MAX_SHIFT of RX, or
+                // above MAX_SHIFT, is a TX frequency; a smaller one a shift (+ unless signed).
+                v.rx_only = true;
+                if off > 0 && sign.is_none() && (off > MAX_SHIFT || off.abs_diff(rx) <= MAX_SHIFT) {
+                    match v.with_tx(&mhz_text(off)) {
+                        Ok(t) => (v.duplex, v.offset) = (t.duplex, t.offset),
+                        Err(e) => note(format!("offset {off_text}: {e}: taken as simplex")),
+                    }
+                } else if off > 0 {
+                    v.duplex = sign.unwrap_or('+').to_string();
+                    v.offset = mhz_text(off);
+                }
+            }
+            (d, _) => note(format!("duplex {d:?}: taken as simplex")),
         }
         // Tones.
         let pol: Vec<char> = get(r, "DtcsPolarity").to_ascii_uppercase().chars().collect();
         let (tp, rp) = (pol.first().copied().unwrap_or('N'), pol.get(1).copied().unwrap_or('N'));
-        let r_tone = ctcss_of(&get(r, "rToneFreq"));
-        let c_tone = ctcss_of(&get(r, "cToneFreq"));
-        let dtcs = dcs_of(&get(r, "DtcsCode"), tp);
-        let rx_dtcs = dcs_of(&get(r, "RxDtcsCode"), rp);
-        let rx_dtcs_same = dcs_of(&get(r, "DtcsCode"), rp);
+        // A tone the mode uses that isn't one the radio holds is a note, never dropped silently (issue #85).
+        let mut bad: Vec<String> = Vec::new();
         let tone = get(r, "Tone");
         let (tx, rxt) = match tone.as_str() {
             "" => (None, None),
-            "Tone" => (r_tone, None),
-            "TSQL" => (c_tone, c_tone),
-            "DTCS" => (dtcs, rx_dtcs_same),
+            "Tone" => (ctcss_field("rToneFreq", &get(r, "rToneFreq"), &mut bad), None),
+            "TSQL" => {
+                let c = ctcss_field("cToneFreq", &get(r, "cToneFreq"), &mut bad);
+                (c, c)
+            }
+            "DTCS" => {
+                let code = get(r, "DtcsCode");
+                (dcs_field("DtcsCode", &code, tp, &mut bad), dcs_of(&code, rp))
+            }
             "Cross" => {
                 let cm = get(r, "CrossMode");
                 let (a, b) = cm.split_once("->").unwrap_or(("Tone", "Tone"));
                 let tx = match a.trim() {
-                    "Tone" => r_tone,
-                    "DTCS" => dtcs,
+                    "Tone" => ctcss_field("rToneFreq", &get(r, "rToneFreq"), &mut bad),
+                    "DTCS" => dcs_field("DtcsCode", &get(r, "DtcsCode"), tp, &mut bad),
                     _ => None,
                 };
                 let rx = match b.trim() {
-                    "Tone" => c_tone,
-                    "DTCS" => rx_dtcs,
+                    "Tone" => ctcss_field("cToneFreq", &get(r, "cToneFreq"), &mut bad),
+                    "DTCS" => dcs_field("RxDtcsCode", &get(r, "RxDtcsCode"), rp, &mut bad),
                     _ => None,
                 };
                 (tx, rx)
@@ -451,6 +578,9 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
                 (None, None)
             }
         };
+        for b in bad {
+            note(format!("{b}: imported without it"));
+        }
         v.tx_tone = crate::channels::tone_word(tx.unwrap_or(0));
         v.rx_tone = crate::channels::tone_word(rxt.unwrap_or(0));
         // Step: kHz to the radio's nearest step.
@@ -461,6 +591,7 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
                 None => note(format!("step {k} kHz: not one of the radio's; 12.5 kHz")),
             }
         }
+        // CHIRP's Skip holds one of S or P (so a channel both skipped and priority exports as S: export_report)
         match get(r, "Skip").to_ascii_uppercase().as_str() {
             "S" => v.skip = true,
             "P" => v.priority = true,
@@ -468,8 +599,14 @@ pub fn import(text: &str, zones: &[ZoneView]) -> Result<Import, String> {
         }
         v.power = power_of(&get(r, "Power")).into();
         let comment = get(r, "Comment");
-        v.zone =
-            zones.iter().position(|z| !comment.is_empty() && z.name.eq_ignore_ascii_case(&comment)).map(|i| i as u16);
+        // The zone of that name: exactly first, then ignoring case (issue #85: zones differing in case stay apart)
+        let named = |exact: bool| {
+            zones.iter().position(|z| {
+                let n = z.name.trim_end();
+                !comment.is_empty() && if exact { n == comment } else { n.eq_ignore_ascii_case(&comment) }
+            })
+        };
+        v.zone = named(true).or_else(|| named(false)).map(|i| i as u16);
         if let (Some(a), Some(b)) = (lat_col, lon_col) {
             let deg = |i: usize| r.get(i).and_then(|s| s.trim().parse::<f64>().ok());
             match (deg(a), deg(b)) {
@@ -917,5 +1054,144 @@ mod tests {
         assert_eq!(zone_name_for("Café, BC.csv", &[]), "Caf-- BC");
         assert_eq!(zone_name_for(".csv", &[]), "Import");
         assert_eq!(ranges(&[1, 2, 3, 7, 9, 10]), "1-3, 7, 9-10");
+    }
+
+    // ---- issue #85: what a round trip used to lose, from channel records (not re-imported files) ----
+
+    fn chan(number: u16, rx: &str) -> ChanView {
+        ChanView::new(number, parse_mhz(rx).unwrap())
+    }
+
+    /// Export, then import into the same zones.
+    fn trip(chans: &[ChanView], z: &[ZoneView]) -> Import {
+        import(&export(chans, z), z).unwrap()
+    }
+
+    /// Issue #85 item 1: an RX-only channel keeps its shift (+ and -) and its split: Duplex `off` with the TX
+    /// frequency in Offset, which CHIRP's own `off` (TX disabled) leaves alone. A CHIRP file's `off` with a shift
+    /// left in Offset (0.6) keeps it as a + shift.
+    #[test]
+    fn issue85_rx_only_keeps_shift() {
+        let mut a = chan(1, "146.94").with_shift("-0.6").unwrap();
+        let mut b = chan(2, "443.5").with_shift("+5").unwrap();
+        let mut c = chan(3, "222.00125").with_tx("146.34").unwrap();
+        let mut d = chan(4, "162.55");
+        for v in [&mut a, &mut b, &mut c, &mut d] {
+            v.rx_only = true;
+        }
+        let csv = export(&[a.clone(), b.clone(), c.clone(), d.clone()], &[]);
+        assert!(csv.contains(",146.940000,off,146.340000,"), "{csv}");
+        assert!(csv.contains(",162.550000,off,0.000000,"), "{csv}");
+        let got = import(&csv, &[]).unwrap();
+        assert!(got.notes.is_empty(), "{:?}", got.notes);
+        assert_eq!(got.channels, [a, b, c, d]);
+        let f = "Location,Name,Frequency,Duplex,Offset\r\n1,Leftover,146.940000,off,0.600000\r\n";
+        let l = &import(f, &[]).unwrap().channels[0];
+        assert_eq!((l.rx_only, l.duplex.as_str(), l.offset.as_str()), (true, "+", "0.60000"));
+    }
+
+    /// Issue #85 item 2 (TONE-15's 60.0-260.0 Hz): "88.50" and "88.500000" are 88.5; a tone the mode uses that
+    /// isn't one (123.45, 300.0, a DCS code 999) is a note, not silently none.
+    #[test]
+    fn issue85_tone_formats() {
+        assert_eq!(parse_tone("88.50"), Ok(885));
+        assert_eq!(parse_tone("88.500000"), Ok(885));
+        assert_eq!(parse_tone("100"), Ok(1000));
+        assert_eq!(parse_tone("88.5 Hz"), Ok(885));
+        assert!(parse_tone("123.45").is_err());
+        let f = "Location,Name,Frequency,Tone,rToneFreq,cToneFreq,DtcsCode,DtcsPolarity,RxDtcsCode,CrossMode\r\n\
+                 1,A,146.940000,Tone,88.50,88.5,023,NN,023,Tone->Tone\r\n\
+                 2,B,146.940000,TSQL,88.5,123.45,023,NN,023,Tone->Tone\r\n\
+                 3,C,146.940000,Cross,300.0,88.5,023,NN,999,Tone->DTCS\r\n\
+                 4,D,146.940000,,300.0,123.45,999,NN,999,Tone->Tone\r\n";
+        let i = import(f, &[]).unwrap();
+        let tones: Vec<(&str, &str)> = i.channels.iter().map(|c| (c.tx_tone.as_str(), c.rx_tone.as_str())).collect();
+        assert_eq!(tones, [("88.5", "off"), ("off", "off"), ("off", "off"), ("off", "off")]);
+        let has = |line: u32, what: &str| i.notes.iter().any(|n| n.starts_with(&format!("line {line}:")) && n.contains(what));
+        assert!(has(3, "cToneFreq \"123.45\""), "{:?}", i.notes);
+        assert!(has(4, "rToneFreq \"300.0\"") && has(4, "RxDtcsCode \"999\""), "{:?}", i.notes);
+        assert!(!i.notes.iter().any(|n| n.starts_with("line 5:")), "unused columns aren't checked: {:?}", i.notes);
+    }
+
+    /// Issue #85 item 3: a signed Offset is the direction when Duplex is blank or agrees; one that disagrees keeps
+    /// Duplex with a note; a negative split is a note. Never silently simplex.
+    #[test]
+    fn issue85_signed_offset() {
+        let f = "Location,Name,Frequency,Duplex,Offset\r\n\
+                 1,A,146.940000,,-0.600000\r\n\
+                 2,B,146.940000,-,-0.600000\r\n\
+                 3,C,443.500000,,+5.000000\r\n\
+                 4,D,146.940000,+,-0.600000\r\n\
+                 5,E,146.940000,split,-146.340000\r\n\
+                 6,F,146.940000,-,0.6 MHz\r\n";
+        let i = import(f, &[]).unwrap();
+        let d: Vec<(&str, &str)> = i.channels.iter().map(|c| (c.duplex.as_str(), c.offset.as_str())).collect();
+        assert_eq!(d, [("-", "0.60000"), ("-", "0.60000"), ("+", "5.00000"), ("+", "0.60000"), ("", ""), ("", "")]);
+        assert_eq!(i.notes.len(), 3, "{:?}", i.notes);
+        assert!(i.notes[0].starts_with("line 5:") && i.notes[0].contains("taken as +"), "{:?}", i.notes);
+        assert!(i.notes[1].starts_with("line 6:") && i.notes[2].starts_with("line 7:"), "{:?}", i.notes);
+    }
+
+    /// Issue #85 item 4: CHIRP's one Skip column keeps S for a channel both skipped and priority, and the export
+    /// says which lost priority; P alone and S alone come back as they were.
+    #[test]
+    fn issue85_skip_and_priority() {
+        let mut a = chan(1, "146.52");
+        (a.skip, a.priority) = (true, true);
+        let mut b = chan(2, "146.52");
+        b.priority = true;
+        let mut c = chan(3, "146.52");
+        c.skip = true;
+        let e = export_report(&[a.clone(), b.clone(), c.clone()], &[]);
+        assert_eq!(e.lost_priority, [1]);
+        assert_eq!(e.notes, ["1 channel lost priority (CHIRP has one Skip column: written as S): 1"]);
+        let got = import(&e.text, &[]).unwrap().channels;
+        assert_eq!(got, [ChanView { priority: false, ..a }, b, c]);
+    }
+
+    /// Issue #85 item 5: zones named apart only by case stay apart (the exact name first, then any case).
+    #[test]
+    fn issue85_zone_case() {
+        let z = vec![ZoneView::new(1, "Local"), ZoneView::new(2, "LOCAL"), ZoneView::new(3, "Hills")];
+        let mut a = chan(1, "146.52");
+        a.zone = Some(0);
+        let mut b = chan(2, "146.52");
+        b.zone = Some(1);
+        let mut c = chan(3, "146.52");
+        c.zone = Some(2);
+        let got = trip(&[a.clone(), b.clone(), c.clone()], &z);
+        assert_eq!(got.channels, [a, b, c]);
+        let f = "Location,Name,Frequency,Comment\r\n1,A,146.520000,hills\r\n";
+        assert_eq!(import(f, &z).unwrap().channels[0].zone, Some(2));
+    }
+
+    /// Issue #85 item 6 (CHAN-31: space is a name character): a name's leading spaces are kept both ways (quoted
+    /// on export; CHIRP's reader keeps them too); trailing ones go, as `ChanView::channel` drops them.
+    #[test]
+    fn issue85_name_spaces() {
+        let mut a = chan(1, "146.52");
+        a.name = "  Indent".into();
+        let mut b = chan(2, "146.52");
+        b.name = " A B".into();
+        let csv = export(&[a.clone(), b.clone()], &[]);
+        assert!(csv.contains(",\"  Indent\","), "{csv}");
+        assert_eq!(import(&csv, &[]).unwrap().channels, [a, b]);
+        let f = "Location,Name,Frequency\r\n1, Lead ,146.520000\r\n";
+        assert_eq!(import(f, &[]).unwrap().channels[0].name, " Lead");
+    }
+
+    /// Issue #85 item 7: a channel the radio can't hold (here a name with a character outside CHAN-31's set) is
+    /// left out of the export and said so, by number.
+    #[test]
+    fn issue85_left_out_said() {
+        let a = chan(1, "146.52");
+        let mut b = chan(5, "146.52");
+        b.name = "Bad@name".into();
+        let mut c = chan(6, "146.52");
+        c.rx = "not MHz".into();
+        let e = export_report(&[a, b, c], &[]);
+        assert_eq!((e.channels, e.left_out.as_slice()), (1, &[5u16, 6][..]));
+        assert!(e.notes[0].starts_with("2 channels left out") && e.notes[0].ends_with(": 5-6"), "{:?}", e.notes);
+        assert_eq!(e.text.lines().count(), 2);
     }
 }

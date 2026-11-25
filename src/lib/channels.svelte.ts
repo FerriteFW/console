@@ -630,8 +630,15 @@ class Channels {
     this.error = "";
     try {
       // The desktop app asks where (the save dialog); cancelled: nothing said
-      const to = await saveAs(`${this.fileBase()}-chirp.csv`, new Blob([chirpExport(this.table)], { type: "text/csv" }));
-      if (to) this.source = `Exported as CHIRP CSV: ${to}`;
+      const out = chirpExport(this.table);
+      const to = await saveAs(`${this.fileBase()}-chirp.csv`, new Blob([out.text], { type: "text/csv" }));
+      if (to) {
+        // Issue #85: say what didn't go in (channels left out, priority CHIRP can't carry), never only "Exported"
+        const n = `${out.channels} ${out.channels === 1 ? "channel" : "channels"}`;
+        const left = out.left_out.length ? `; ${out.left_out.length} left out` : "";
+        this.source = `Exported ${n} as CHIRP CSV${left}: ${to}`;
+        this.notes = out.notes;
+      }
     } catch (e) {
       this.error = `CHIRP export: ${(e as Error).message ?? e}`;
     }

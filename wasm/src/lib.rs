@@ -456,11 +456,12 @@ pub fn restore_file(text: &str) -> Result<String, JsError> {
     Ok(serde_json::json!({ "set": set, "saved": b.saved, "radio": b.radio }).to_string())
 }
 
-/// The set's channels as a CHIRP CSV file.
+/// The set's channels as a CHIRP CSV file: `{text, channels, left_out, lost_priority, notes}` (issue #85: what
+/// didn't go in is said).
 #[wasm_bindgen]
 pub fn chirp_export(set: &str) -> Result<String, JsError> {
     let s: plan::Set = from_json(set, "set")?;
-    Ok(chirp::export(&s.channels, &s.zones))
+    Ok(json(&chirp::export_report(&s.channels, &s.zones)))
 }
 
 /// A CHIRP CSV file to `{channels, notes, skipped}`; `zones` (JSON, the table's) let a Comment name a zone.
