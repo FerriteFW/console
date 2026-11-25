@@ -1,10 +1,10 @@
 // APRS settings through the bridge (LINK-43): the APRS record as MENU 0 5 shows it, a choice changed, a typed value
-// refused with the radio's reason, the write (backup first, the diff, the read back), then the backup restored; and
+// refused with the radio's reason, the write (the backup kept first, LINK-21.2, the diff, the read back), then the
+// backup restored (saved from the dialog as a .ferrite, opened, written); and
 // MENU 0 5's settings no record carries (telemetry, Mic-E, the comment: the radio's dump and set lines) the same way.
 // On a radio the backup is written back even when a step fails.
 import { type Page } from "@playwright/test";
-import { join } from "node:path";
-import { connect, disconnect, expect, onRadio, openConsole, shot, shotsDir, state, test } from "./helpers";
+import { connect, disconnect, expect, onRadio, openConsole, saveKept, shot, state, test } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -18,14 +18,13 @@ const dialog = () => page.getByRole("dialog");
 const value = (id: string) =>
   page.evaluate((x) => (window as any).ferrite.aprsSettings.view?.items.find((i: any) => i.id === x)?.value as string, id);
 
-async function startWrite() {
-  const dl = page.waitForEvent("download", { timeout: long() });
+/** Write to radio…: the backup kept (no download, LINK-21.2); saved from the dialog as `as` when given (its path). */
+async function startWrite(as?: string): Promise<string> {
   await page.getByRole("button", { name: "Write to radio…" }).click();
-  const d = await dl;
-  expect(d.suggestedFilename()).toMatch(/^ferrite-.*-aprs-backup\.json$/);
-  const path = join(shotsDir(), `${onRadio() ? "radio" : "sim"}-${d.suggestedFilename()}`);
-  await d.saveAs(path);
-  await expect(dialog()).toContainText("Backup saved", { timeout: long() });
+  await expect(dialog().locator('[data-k="kept"]')).toContainText("Backup kept in Console until it closes", { timeout: long() });
+  if (!as) return "";
+  const { path, file } = await saveKept(page, dialog(), as, "aprs", long());
+  expect(file.format).toBe("ferrite-console-aprs");
   return path;
 }
 
@@ -92,13 +91,13 @@ test("change: a choice is the menu's, a refused value the radio's reason", async
 });
 
 test("write: backup first, the diff, then the read back; the backup restores", async ({}, info) => {
-  backup = await startWrite();
+  backup = await startWrite("aprs-backup.ferrite");
   await expect(dialog()).toContainText("Power");
   await shot(page, info, "aprs-settings-03-diff");
   await commitWrite(1);
   const after = await value("0 5 6 3");
   await page.locator('input[type=file][accept^=".json"]').setInputFiles(backup);
-  await expect(page.getByText(/^Loaded .*aprs-backup\.json/)).toBeVisible();
+  await expect(page.getByText(/^Loaded .*aprs-.*backup\.ferrite/)).toBeVisible();
   await startWrite();
   await commitWrite(1);
   backup = null;
@@ -125,7 +124,7 @@ test("in the record since decision 347: telemetry, Mic-E and the comment, writte
   expect(await value("0 5 5 3")).toBe(commentTo);
   for (const id of ["0 5 6 4", "0 5 5 7", "0 5 5 3"]) await expect(page.locator(`[data-id="${id}"]`)).toHaveClass(/changed/);
   await shot(page, info, "aprs-settings-04-term-changed");
-  backup = await startWrite();
+  backup = await startWrite("aprs-term-backup.ferrite");
   const items = dialog().locator("li");
   await expect(items).toHaveCount(3);
   await expect(items.filter({ hasText: "0 5 6 4" }).locator("b")).toHaveText(telTo);
@@ -139,7 +138,7 @@ test("in the record since decision 347: telemetry, Mic-E and the comment, writte
   expect([await value("0 5 6 4"), await value("0 5 5 7"), await value("0 5 5 3")]).toEqual([telTo, miceTo, commentTo]);
   // the backup puts them back
   await page.locator('input[type=file][accept^=".json"]').setInputFiles(backup);
-  await expect(page.getByText(/^Loaded .*aprs-backup\.json/)).toBeVisible();
+  await expect(page.getByText(/^Loaded .*aprs-.*backup\.ferrite/)).toBeVisible();
   await startWrite();
   await commitWrite(3);
   backup = null;

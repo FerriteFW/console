@@ -1,7 +1,7 @@
 // The owner's lists as Svelte state (LINK-54 – LINK-56): the quick messages (APRS › Quick messages), the waypoints
 // (APRS › Waypoints, and the map) and the DTMF memories (Radio Settings › DTMF memories). Each as Channels & Zones
 // keeps its table: what the radio held when read (`base`), the list being edited (`items`), undo, the unwritten
-// edits kept in IndexedDB for the next visit, and Write: a fresh read saved as a backup file, the diff with
+// edits kept in IndexedDB for the next visit, and Write: a fresh read kept in memory as the backup, the diff with
 // ferrite's own checks, the records on confirm (`WRITE_MANY`), then a read back. Records, checks and the waypoints'
 // write order are the core's (core/src/lists.rs); only a radio whose HELLO says caps 128 has them.
 import { backupFailed } from "./backupError";
@@ -22,9 +22,9 @@ import {
   type QuickMessage,
   type Waypoint,
 } from "./core";
-import { download, stamp } from "./channels.svelte";
 import { dtmfJson, quickJson, readDtmf, readQuick, readWaypoints, WAYPOINTS_MAX, waypointsJson } from "./codeplug";
-import { radio } from "./radio.svelte";
+import { partRadio, radio } from "./radio.svelte";
+import { prewrite, type Kept } from "./prewrite";
 
 export type ListField = { field: string; from: string; to: string };
 export type ListChange = { kind: "added" | "changed" | "deleted"; label: string; name: string; fields: ListField[] };
@@ -33,9 +33,9 @@ export type Rec = { index: number; record: Uint8Array };
 export type ListPlan = { changes: ListChange[]; writes: Rec[]; problems: string[] };
 export type ListWriteStep =
   | { step: "backup" }
-  | { step: "review"; plan: ListPlan; backupName: string; drifted: boolean }
+  | { step: "review"; plan: ListPlan; kept: Kept; drifted: boolean }
   | { step: "writing"; plan: ListPlan; done: number }
-  | { step: "done"; plan: ListPlan; verified: boolean; error: string; written: number };
+  | { step: "done"; plan: ListPlan; verified: boolean; error: string; written: number; kept: Kept };
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const canon = (v: unknown): string =>
@@ -55,23 +55,6 @@ function memo<T>(check: (v: T) => string | undefined): (v: T) => string | undefi
     }
     return m.get(k);
   };
-}
-
-/** The parts' `radio` block: what the radio said about itself, without its unique ID. */
-function partRadio(): Record<string, string> {
-  const i = radio.info;
-  const m: Record<string, string> = { connection: radio.label };
-  if (i) {
-    m.firmware = i.firmware;
-    m.callsign = i.callsign;
-  }
-  return m;
-}
-
-function fileBase() {
-  const i = radio.info;
-  const who = (i?.callsign || i?.uid_text?.replace(/\s/g, "").slice(0, 10) || "radio").replace(/[^A-Za-z0-9-]/g, "");
-  return `ferrite-${who}-${stamp()}`;
 }
 
 export type ListKey = "quick" | "waypoints" | "dtmf";
@@ -215,16 +198,16 @@ abstract class ListEditor<T> {
     }
   }
 
-  /** Step 1 of a write: a fresh read, saved as a backup file, then the plan against it for review. */
+  /** Step 1 of a write: a fresh read, kept in memory as the backup (LINK-21.2), then the plan against it for review. */
   async startWrite() {
     this.error = "";
     this.write = { step: "backup" };
     try {
       const fresh = this.rekey(await this.readRadio(), this.base);
-      const backupName = `${fileBase()}-${this.key}-backup.json`;
-      await download(backupName, this.fileText(fresh, new Date().toISOString(), partRadio()), "application/json");
+      // LINK-21.2: the read kept in memory for the session (Put the radio back, Save this backup…), never a file.
+      const kept = prewrite.keep(this.key, { [this.key]: this.fileText(fresh, new Date().toISOString(), partRadio()) }, radio.label);
       const drifted = !!this.base && this.plan(this.base, fresh, false).changes.length > 0;
-      this.write = { step: "review", plan: this.plan(fresh, this.items, true), backupName, drifted };
+      this.write = { step: "review", plan: this.plan(fresh, this.items, true), kept, drifted };
     } catch (e) {
       this.write = null;
       this.error = backupFailed(e);
@@ -236,7 +219,7 @@ abstract class ListEditor<T> {
     const w = this.write;
     const link = radio.connectedLink;
     if (!w || w.step !== "review" || !link || w.plan.problems.length) return;
-    const { plan } = w;
+    const { plan, kept } = w;
     this.write = { step: "writing", plan, done: 0 };
     let error = "";
     let written = plan.writes.length;
@@ -266,7 +249,7 @@ abstract class ListEditor<T> {
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
     }
-    this.write = { step: "done", plan, verified, error, written };
+    this.write = { step: "done", plan, verified, error, written, kept };
   }
 
   closeWrite() {

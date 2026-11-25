@@ -6,7 +6,7 @@
 // (a unique name) and its channels, and afterAll takes them off again when a step fails.
 import { type Page } from "@playwright/test";
 import { join } from "node:path";
-import { connect, disconnect, expect, onRadio, openConsole, shot, shotsDir, state, test } from "./helpers";
+import { connect, disconnect, expect, onRadio, openConsole, saveKept, shot, state, test } from "./helpers";
 
 const long = () => (onRadio() ? 120_000 : 30_000);
 const fixture = (name: string) => join(import.meta.dirname, "fixtures", name);
@@ -106,14 +106,12 @@ for (const fx of FILES) {
       await expect(toolbar().getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
     }
 
-    /** Write to radio: the backup downloads (kept in the shots folder), the review shows. */
+    /** Write to radio: the backup kept in Console (LINK-21.2), saved from the dialog into the shots folder, the
+     *  review shows. */
     async function startWrite(as: string) {
-      const dl = page.waitForEvent("download", { timeout: long() });
       await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
-      const backup = await dl;
-      expect(backup.suggestedFilename()).toMatch(/^ferrite-.*-backup\.json$/);
-      await backup.saveAs(join(shotsDir(), `${onRadio() ? "radio" : "sim"}-${as}`));
-      await expect(wd()).toContainText("Backup saved", { timeout: long() });
+      const { file } = await saveKept(page, wd(), as, "channels", long());
+      expect(file.format).toBe("ferrite-console-channels");
     }
 
     async function commitWrite() {
@@ -161,7 +159,7 @@ for (const fx of FILES) {
         try {
           await readRadio();
           if ((await removeZone()) >= 0) {
-            await startWrite(`${fx.tag}-cleanup-backup.json`);
+            await startWrite(`${fx.tag}-cleanup-backup.ferrite`);
             await commitWrite();
           }
         } catch (e) {
@@ -218,7 +216,7 @@ for (const fx of FILES) {
       // the scan first. Slot A scanning (its VFO band), then the write.
       expect(await page.evaluate(() => (window as any).ferrite.radio.tune(0, "scan", 1).then((ok: boolean) => ok || (window as any).ferrite.radio.keyNote))).toBe(true);
       await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.connectedLink.scanningSlots()), { timeout: long() }).toContain("A");
-      await startWrite(`${fx.tag}-backup.json`);
+      await startWrite(`${fx.tag}-backup.ferrite`);
       await expect.poll(() => page.evaluate(() => (window as any).ferrite.radio.connectedLink.scanningSlots())).toEqual([]);
       await expect(wd().locator("h3.added")).toHaveText(`Added (${fx.want.length + 1})`);
       await expect(wd().locator("h3.changed")).toHaveCount(0);
@@ -240,7 +238,7 @@ for (const fx of FILES) {
       expect(onIt).toBe(true);
       expect(await removeZone()).toBe(fx.want.length);
       expect(canon(await table())).toBe(first);
-      await startWrite(`${fx.tag}-remove-backup.json`);
+      await startWrite(`${fx.tag}-remove-backup.ferrite`);
       await expect(wd().locator("h3.deleted")).toHaveText(`Deleted (${fx.want.length + 1})`);
       await expect(wd().locator("h3.added")).toHaveCount(0);
       await expect(wd().locator("h3.changed")).toHaveCount(0);

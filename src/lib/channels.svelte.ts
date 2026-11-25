@@ -1,9 +1,9 @@
 // Channels & Zones as Svelte state: the set read from the radio (`base`), the table being edited (`table`), and the
-// flows around them: read (READ records over the link, part by part), write (a fresh read saved as a backup file
-// first, then the diff, then the write session on confirm), CHIRP CSV in and out, backup files out and back in.
+// flows around them: read (READ records over the link, part by part), write (a fresh read kept in memory as the
+// backup first, LINK-21.2, then the diff, then the write session on confirm), CHIRP CSV in and out, files back in.
 // Unwritten edits are kept in IndexedDB (restored on the next visit); each table edit can be undone (`undo`).
 // Every record layout, check, diff and conversion is the Rust core's; this file only moves them and the files.
-import { saveAs, saveDownload } from "./download";
+import { saveAs, saveDownload, type SaveResult } from "./download";
 import { backupFailed } from "./backupError";
 import { debugLog } from "./debuglog";
 import {
@@ -48,7 +48,8 @@ import {
 import { intoChirpZone } from "./chirpzone";
 import { moveMap, orderMap, zoneMap } from "./reorder";
 import { WriteError } from "./link";
-import { radio } from "./radio.svelte";
+import { prewrite, type Kept as Backup } from "./prewrite";
+import { partRadio, radio } from "./radio.svelte";
 
 /** A read's progress; total 0 is an indeterminate bar (how much is to come isn't known yet). */
 export type Progress = { label: string; done: number; total: number };
@@ -66,9 +67,9 @@ type Snap = { set: ChannelSet; home: Home; presets: Preset[] };
 type Pre = { presets: PresetPlan | null };
 export type WriteStep =
   | { step: "backup" }
-  | ({ step: "review"; plan: Plan; home: HomeOp | null; fresh: ChannelSet; backupName: string; drifted: boolean } & Pre)
+  | ({ step: "review"; plan: Plan; home: HomeOp | null; fresh: ChannelSet; kept: Backup; drifted: boolean } & Pre)
   | ({ step: "writing"; plan: Plan; home: HomeOp | null; done: number } & Pre)
-  | ({ step: "done"; plan: Plan; home: HomeOp | null; verified: boolean; error: string; written: number } & Pre);
+  | ({ step: "done"; plan: Plan; home: HomeOp | null; verified: boolean; error: string; written: number; kept: Backup } & Pre);
 
 /** How many changes a write makes: the plan's records, the positions, the range presets and the home channel. */
 export const writeCount = (w: { plan: Plan; home: HomeOp | null } & Pre) =>
@@ -101,8 +102,8 @@ function readBackDiff(back: ChannelSet, want: ChannelSet): string {
   return out.join(" | ") || "(no record differs: the order or a field Console adds)";
 }
 
-/** A file to the user's downloads (the desktop app: its Downloads folder, download.ts); where it went. */
-export function download(name: string, text: string, type: string): Promise<string> {
+/** A file to the user's downloads without asking where (the desktop app: its Downloads folder, download.ts). */
+export function download(name: string, text: string, type: string): Promise<SaveResult> {
   return saveDownload(name, new Blob([text], { type }));
 }
 
@@ -210,17 +211,6 @@ class Channels {
     this.table = prev.set;
     this.home = prev.home;
     this.presets = prev.presets;
-  }
-
-  private radioMeta(): Record<string, string> {
-    const i = radio.info;
-    const m: Record<string, string> = { connection: radio.label };
-    if (i) {
-      m.firmware = i.firmware;
-      m.callsign = i.callsign;
-      if (i.uid_text) m.uid = i.uid_text;
-    }
-    return m;
   }
 
   private fileBase() {
@@ -341,13 +331,14 @@ class Channels {
     return this.#reading;
   }
 
-  /** A fresh read saved as a backup file: the radio as it is now. */
-  async backupRadio(): Promise<ReadResult & { name: string }> {
+  /** LINK-21.2: a fresh read, kept in memory as the write's backup (a .ferrite's channels part, with the range
+   *  presets when the radio gave them); no file. */
+  async backupRadio(): Promise<ReadResult & { kept: Backup }> {
     const { set, home, presets } = await this.readRadio();
-    const name = `${this.fileBase()}-backup.json`;
-    await download(name, backupFile(set, new Date().toISOString(), this.radioMeta()), "application/json");
-    if (presets?.length) await download(`${this.fileBase()}-presets.json`, presetsFile(presets, new Date().toISOString(), this.radioMeta()), "application/json");
-    return { set, home, presets, name };
+    const saved = new Date().toISOString();
+    const r = partRadio();
+    const parts = presets ? { channels: backupFile(set, saved, r), presets: presetsFile(presets, saved, r) } : { channels: backupFile(set, saved, r) };
+    return { set, home, presets, kept: prewrite.keep("channels", parts, radio.label) };
   }
 
   /** The range presets as `.ferrite`'s presets.json, unwritten changes too. */
@@ -396,7 +387,7 @@ class Channels {
     }
   }
 
-  /** Step 1 of a write: a fresh read, saved as a backup file, then the plan against it for review. */
+  /** Step 1 of a write: a fresh read, kept in memory as the backup (LINK-21.2), then the plan against it for review. */
   async startWrite() {
     this.error = "";
     this.write = { step: "backup" };
@@ -410,7 +401,7 @@ class Channels {
           throw new Error(`stopping the scan: ${(e as Error).message}`);
         }
       }
-      const { set: fresh, home: freshHome, presets: freshPresets, name } = await this.backupRadio();
+      const { set: fresh, home: freshHome, presets: freshPresets, kept } = await this.backupRadio();
       const plan = writePlan(fresh, this.table);
       // Range presets: only to a radio that gave them, and only when the table's differ from what it holds now.
       const want = $state.snapshot(this.presets) as Preset[];
@@ -424,7 +415,7 @@ class Channels {
         plan,
         home,
         fresh,
-        backupName: name,
+        kept,
         drifted,
         presets: presets && (presets.ops.length || presets.problems.length || presets.skips.length) ? presets : null,
       };
@@ -439,7 +430,7 @@ class Channels {
     const w = this.write;
     const link = radio.connectedLink;
     if (!w || w.step !== "review" || !link || w.plan.problems.length) return;
-    const { plan, home, presets } = w;
+    const { plan, home, presets, kept } = w;
     this.write = { step: "writing", plan, home, done: 0, presets };
     debugLog(`write: ${plan.ops.length} ops (${plan.changes.length} changes), ${plan.positions.length} positions, presets ${presets?.ops.length ?? 0}, home ${home ? "yes" : "no"}; via ${radio.kind} ${radio.baud ?? ""}`);
     let error = "";
@@ -529,7 +520,7 @@ class Channels {
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
     }
-    this.write = { step: "done", plan, home, verified, error, written, presets };
+    this.write = { step: "done", plan, home, verified, error, written, presets, kept };
   }
 
   closeWrite() {
@@ -629,16 +620,19 @@ class Channels {
   async exportChirp() {
     this.error = "";
     try {
-      // The desktop app asks where (the save dialog); cancelled: nothing said
+      // The save dialog (desktop, Chrome) or a download; console#106: "saved" only when it is.
       const out = chirpExport(this.table);
-      const to = await saveAs(`${this.fileBase()}-chirp.csv`, new Blob([out.text], { type: "text/csv" }));
-      if (to) {
-        // Issue #85: say what didn't go in (channels left out, priority CHIRP can't carry), never only "Exported"
-        const n = `${out.channels} ${out.channels === 1 ? "channel" : "channels"}`;
-        const left = out.left_out.length ? `; ${out.left_out.length} left out` : "";
-        this.source = `Exported ${n} as CHIRP CSV${left}: ${to}`;
-        this.notes = out.notes;
+      const r = await saveAs(`${this.fileBase()}-chirp.csv`, new Blob([out.text], { type: "text/csv" }));
+      if (r.status === "cancelled") {
+        this.source = "CHIRP export not saved: cancelled";
+        return;
       }
+      // Issue #85: say what didn't go in (channels left out, priority CHIRP can't carry), never only "Exported"
+      const n = `${out.channels} ${out.channels === 1 ? "channel" : "channels"}`;
+      const left = out.left_out.length ? `; ${out.left_out.length} left out` : "";
+      this.source =
+        r.status === "saved" ? `Exported ${n} as CHIRP CSV${left}: ${r.name}` : `Saving ${n} as CHIRP CSV${left}: ${r.name} — check your browser's downloads`;
+      this.notes = out.notes;
     } catch (e) {
       this.error = `CHIRP export: ${(e as Error).message ?? e}`;
     }

@@ -53,6 +53,6 @@ test("listen: Record writes a WAV of what's heard (12 kHz 16-bit mono), time and
   const secs = (b.length - 44) / 24_000;
   expect(secs).toBeGreaterThan(2);
   expect(secs).toBeLessThan(6);
-  await expect(page.getByText(/^Saved listen-/)).toBeVisible();
+  await expect(page.getByText(/^Saving as listen-.* — check your browser.s downloads/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Record" })).toBeVisible();
 });

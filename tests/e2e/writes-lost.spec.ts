@@ -29,9 +29,7 @@ async function lose(page: Page, dir: "out" | "in", n: number) {
 async function write(page: Page) {
   const toolbar = page.getByRole("toolbar", { name: "Channels" });
   const wd = page.getByRole("dialog", { name: "Write to the radio" });
-  const dl = page.waitForEvent("download");
   await toolbar.getByRole("button", { name: /^Write to radio/ }).click();
-  await dl;
   const go = wd.getByRole("button", { name: /^Write \d+ changes?$/ });
   await expect(go).toBeVisible({ timeout: 30_000 });
   await page.evaluate(() => ((window as any).__arm = true));

@@ -17,7 +17,7 @@
     {/if}
     <p class="warn">Keep the cable in. If it's cut, nothing is lost: Console has the backup and starts again from it.</p>
   {/if}
-  {#if migrate.savedAs}<p class="sub" data-k="saved">Backup saved as {migrate.savedAs}.</p>{/if}
+  {#if migrate.savedAs}<p class="sub" data-k="saved">{migrate.savedAs}</p>{/if}
   {#if migrate.stage === "done" && s}
     <p class="ok" data-k="moved">
       Moved {plural(s.channels, "channel")}, {plural(s.zones, "zone")}, {plural(s.contacts, "contact")}, {plural(s.waypoints, "waypoint")}, {plural(s.heard, "station heard", "stations heard")},

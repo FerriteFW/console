@@ -7,7 +7,7 @@
 import { channels } from "./channels.svelte";
 import { CONSOLE_VERSION } from "./codeplug.svelte";
 import { debugLines, debugLog, debugPrevious } from "./debuglog";
-import { saveAs } from "./download";
+import { saveAs, type SaveResult } from "./download";
 import { RadioError } from "./link";
 import { radio } from "./radio.svelte";
 import { isTauri } from "./transport/native";
@@ -73,12 +73,19 @@ export function debugText(report?: string[]): string {
   return lines.join("\n") + "\n";
 }
 
-/** Saves the report where the owner picks (the desktop app's save dialog; a browser download). The name, or null. */
-export async function saveDebugInfo(): Promise<string | null> {
-  const report = await radioReport();
-  debugLog("debug info saved");
+/** Saves the report where the owner picks (the desktop app's save dialog, Chrome's, else a browser download). The
+ *  dialog opens first, from the click; the radio is asked about itself once a place is picked (console#106). */
+export function saveDebugInfo(): Promise<SaveResult> {
   const d = new Date();
   const p = (v: number) => String(v).padStart(2, "0");
   const name = `ferrite-console-debug-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.txt`;
-  return saveAs(name, new Blob([debugText(report)], { type: "text/plain" }));
+  return saveAs(
+    name,
+    async () => {
+      const report = await radioReport();
+      debugLog("debug info saved");
+      return new Blob([debugText(report)], { type: "text/plain" });
+    },
+    { type: "text/plain" },
+  );
 }

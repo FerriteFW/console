@@ -12,7 +12,7 @@
 //   the update area: core/src/install.rs), then the stock .BTF through the bootloader, padded over stock's marker
 //   sector's first page with the marker the backup read put back (BACKUP-12, ferrite decision 338).
 import { debugLog } from "./debuglog";
-import { saveAs } from "./download";
+import { saveAs, type SaveResult } from "./download";
 import { createZip, readZip } from "./zip";
 import { CONSOLE_VERSION } from "./codeplug.svelte";
 import { ACK, askRestart, BootPort, bootRate, CMD_PROBE, sendAll } from "./bootflash";
@@ -931,8 +931,8 @@ class Install {
   }
 
   /** BACKUP-12.3: the menu icons this backup read, as a file of their own (for Back to stock on another computer, or
-   *  for another radio whose icons an earlier Ferrite install wrote over). The name it went as, or null. */
-  async saveIcons(): Promise<string | null> {
+   *  for another radio whose icons an earlier Ferrite install wrote over). How the save went (null: no icons). */
+  async saveIcons(): Promise<SaveResult | null> {
     if (!this.icons || !this.iconsStock) return null;
     const uid = (this.uid || "radio").replace(/\s+/g, "");
     return saveAs(`rt950pro-menu-icons-${uid}.bin`, new Blob([this.icons as BlobPart], { type: "application/octet-stream" }));

@@ -31,12 +31,10 @@ async function readRadio() {
   await expect.poll(() => state(page, (f) => f.channels.table.channels.length)).toBeGreaterThan(0);
 }
 
-/** Write to radio: backup, review; then the write and its read back. */
+/** Write to radio: the backup kept (LINK-21.2), review; then the write and its read back. */
 async function write(check?: () => Promise<void>) {
-  const dl = page.waitForEvent("download", { timeout: long() });
   await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
-  await dl;
-  await expect(wd()).toContainText("Backup saved", { timeout: long() });
+  await expect(wd()).toContainText("Backup kept in Console until it closes", { timeout: long() });
   await check?.();
   await wd().getByRole("button", { name: /^Write \d+ changes?$/ }).click();
   await expect(wd()).toContainText("Read back: the radio holds the table.", { timeout: long() });

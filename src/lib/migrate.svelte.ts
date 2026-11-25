@@ -14,12 +14,12 @@
 // Firmware Update runs it as part of an update whose new firmware stores another layout (firmware.svelte.ts).
 import { debugLog } from "./debuglog";
 import { saveBlob } from "./codeplug.svelte";
+import { saveLine } from "./download";
 import { erasedCrc, dataCrc32, loadCore, MigrateCopy, MigratePlan, migrateRegions, P, type MigrateSummary } from "./core";
 import { Eta } from "./eta";
 import { crc32 } from "./zip";
 import { Link, TimeoutError } from "./link";
 import { radio } from "./radio.svelte";
-import { isTauri } from "./transport/native";
 import { sleep, type Transport } from "./transport/types";
 
 export type MigrateStage = "idle" | "reading" | "writing" | "restarting" | "done" | "failed";
@@ -107,7 +107,7 @@ class Migrate {
   left = $state<number | null>(null);
   /** The translation's notes and counts, once made. */
   summary = $state<MigrateSummary | null>(null);
-  /** The backup file as saved ("" when only Console's own copy was kept). */
+  /** The backup file's line: saved, or saving in the browser's downloads ("" when only Console's own copy was kept). */
   savedAs = $state("");
   /** Console holds a copy of this radio's old data from an earlier try (its date), so a new try starts from it. */
   keptFrom = $state("");
@@ -256,8 +256,9 @@ class Migrate {
           const who = (info.callsign || uid.replace(/\s/g, "").slice(0, 10) || "radio").replace(/[^A-Za-z0-9-]/g, "");
           const name = `ferrite-${who}-layout${from}-backup-${stamp()}.bin`;
           try {
-            const as = await saveBlob(name, new Blob([file as BlobPart], { type: "application/octet-stream" }));
-            this.savedAs = as ? `${as}${isTauri() ? "" : " (your downloads)"}` : "";
+            // No click to open Chrome's dialog from here (mid-update): a download there, the desktop app's dialog.
+            const r = await saveBlob(name, new Blob([file as BlobPart], { type: "application/octet-stream" }), { dialog: false });
+            this.savedAs = r.status === "cancelled" ? "" : saveLine(r, "Saved", "the backup");
           } catch {
             this.savedAs = ""; // Console's own copy is kept regardless
           }

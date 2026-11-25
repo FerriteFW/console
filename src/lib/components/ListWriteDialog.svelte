@@ -1,7 +1,8 @@
 <script lang="ts">
-  // A list's write (quick messages, waypoints, DTMF memories): the backup read (saved as a file), the diff with
+  // A list's write (quick messages, waypoints, DTMF memories): the backup read (kept in memory, LINK-21.2), the diff with
   // ferrite's own checks, the records on confirm, and the read back.
   import type { ListChange, ListWriteStep } from "../lists.svelte";
+  import KeptBackup from "./KeptBackup.svelte";
 
   type Store = { write: ListWriteStep | null; noun: string; closeWrite(): void; commitWrite(): Promise<void> };
   let { store }: { store: Store } = $props();
@@ -35,7 +36,7 @@
       {#if w.step === "backup"}
         <p>Reading the radio's {store.noun} for a backup first…</p>
       {:else if w.step === "review"}
-        <p class="ok">Backup saved: <b>{w.backupName}</b> (your downloads). Open it here to put the radio back.</p>
+        <KeptBackup kept={w.kept} what={store.noun} close={() => store.closeWrite()} />
         {#if w.drifted}
           <p class="note">The radio's {store.noun} changed since they were read: this diff is against the radio as it is now.</p>
         {/if}
@@ -88,6 +89,7 @@
         {:else}
           <p class="note">Written, but the read back differs: the editor now shows what the radio holds.</p>
         {/if}
+        <KeptBackup kept={w.kept} what={store.noun} written close={() => store.closeWrite()} />
         <div class="actions"><button class="btn primary" onclick={() => store.closeWrite()}>Close</button></div>
       {/if}
     </div>

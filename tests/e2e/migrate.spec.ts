@@ -99,9 +99,7 @@ test("finish the update: layout 2's data backed up, moved and stamped; the radio
   // The moved radio takes writes again (its store mounted on layout 3; the unnamed zone kept as it was).
   await page.evaluate(() => (window as any).ferrite.channels.edit(1, "name", "Moved OK"));
   const toolbar = page.getByRole("toolbar", { name: "Channels" });
-  const dl = page.waitForEvent("download");
   await toolbar.getByRole("button", { name: /^Write to radio/ }).click();
-  await dl;
   const wd = page.getByRole("dialog", { name: "Write to the radio" });
   await wd.getByRole("button", { name: /^Write 1 change$/ }).click();
   await expect(wd).toContainText("Read back: the radio holds the table.", { timeout: 60_000 });

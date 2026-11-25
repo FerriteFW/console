@@ -12,6 +12,7 @@
   import { radio } from "../radio.svelte";
   import { parseGpx, toGpx } from "../gpx";
   import { saveBlob } from "../codeplug.svelte";
+  import { saveLine } from "../download";
 
   // Rows show the core's checks and words: drawn once it has loaded (a reload straight to this tab).
   let coreUp = $state(false);
@@ -68,8 +69,8 @@
     };
   }
   async function exportGpx() {
-    const name = await saveBlob("waypoints.gpx", new Blob([toGpx(waypoints.items.map((w) => ({ name: w.name, lat: w.lat / 1e7, lon: w.lon / 1e7 })))], { type: "application/gpx+xml" }));
-    if (name) notice = { text: `Saved ${waypoints.items.length} waypoints as ${name}.`, undo: false };
+    const r = await saveBlob("waypoints.gpx", new Blob([toGpx(waypoints.items.map((w) => ({ name: w.name, lat: w.lat / 1e7, lon: w.lon / 1e7 })))], { type: "application/gpx+xml" }));
+    notice = { text: saveLine(r, "Saved", `${waypoints.items.length} waypoints`), undo: false };
   }
 
   function remove(w: WaypointItem) {

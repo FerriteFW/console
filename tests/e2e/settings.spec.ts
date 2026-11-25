@@ -1,11 +1,10 @@
 // Radio Settings through the bridge: read the settings record, change Key beep (a choice) and Beep volume (a level),
-// write them (a backup and the diff first), read back, then restore the backup file (the restore path) and check
-// both are back. Then Battery Save (no record carries it: the radio's dump, a set line) with Shared VHF the same way.
+// write them (a backup kept in Console and the diff first, LINK-21.2), read back, then restore the backup saved from
+// the dialog as a .ferrite (the restore path) and check both are back. Then Battery Save (no record carries it: the
+// radio's dump, a set line) with Shared VHF, put back with the dialog's Put the radio back.
 // On the radio both are put back even when a test fails.
 import { type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { connect, disconnect, expect, onRadio, openConsole, shot, shotsDir, state, test } from "./helpers";
+import { connect, disconnect, expect, onRadio, openConsole, saveKept, shot, state, test } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -30,28 +29,25 @@ async function readRadio() {
   await expect(page.getByRole("button", { name: "Read from radio" })).toBeEnabled({ timeout: long() });
 }
 
-async function startWrite() {
-  const dl = page.waitForEvent("download", { timeout: long() });
+/** Write to radio…: the backup kept (no download, LINK-21.2), saved from the dialog when `as` is given. */
+async function startWrite(as?: string) {
   await page.getByRole("button", { name: "Write to radio…" }).click();
-  const d = await dl;
-  expect(d.suggestedFilename()).toMatch(/^ferrite-.*-settings-backup\.json$/);
-  const path = join(shotsDir(), `${onRadio() ? "radio" : "sim"}-${d.suggestedFilename()}`);
-  await d.saveAs(path);
-  await expect(dialog()).toContainText("Backup saved", { timeout: long() });
-  return path;
+  await expect(dialog().locator('[data-k="kept"]')).toContainText("Backup kept in Console until it closes", { timeout: long() });
+  return as ? saveKept(page, dialog(), as, "settings", long()) : null;
 }
 
-async function commitWrite(n: number) {
+async function commitWrite(n: number, close = true) {
   await dialog().getByRole("button", { name: `Write ${n} ${n === 1 ? "change" : "changes"}` }).click();
   await expect(dialog()).toContainText("Read back: the radio holds these settings.", { timeout: long() });
+  if (!close) return;
   await dialog().getByRole("button", { name: "Close" }).click();
   await expect(dialog()).toHaveCount(0);
 }
 
-/** The backup file into the editor, then written: the radio as it was. */
+/** The saved backup (.ferrite) into the editor with Open…, then written: the radio as it was. */
 async function restore(path: string) {
   await page.locator('input[type=file][accept^=".json"]').setInputFiles(path);
-  await expect(page.getByText(/^Loaded .*settings-backup\.json/)).toBeVisible();
+  await expect(page.getByText(/^Loaded .*\.ferrite/)).toBeVisible();
   await startWrite();
   await commitWrite(2);
 }
@@ -115,8 +111,7 @@ test("change and write: a backup first, the diff, then the write", async ({}, in
   await expect(page.getByText("not written: 2 settings changed")).toBeVisible();
   await page.getByRole("region", { name: "Display, sound, power" }).scrollIntoViewIfNeeded();
   await shot(page, info, "21-settings-edited");
-  const path = await startWrite();
-  const file = JSON.parse(readFileSync(path, "utf8"));
+  const { path, file } = (await startWrite("settings-backup.ferrite"))!;
   expect(file.format).toBe("ferrite-console-settings");
   expect(file.settings[BEEP]).toBe(was!.beep);
   expect(file.settings[VOL]).toBe(was!.vol);
@@ -162,8 +157,7 @@ test("a setting the settings record doesn't carry (Battery Save) with one it doe
   await vhf.selectOption(vhfTo);
   await expect(page.locator('[data-id="0 7 7 1"]')).toHaveClass(/changed/);
   await expect(page.locator('[data-id="0 5 9 7"]')).toHaveClass(/changed/);
-  const path = await startWrite();
-  const file = JSON.parse(readFileSync(path, "utf8"));
+  const { path, file } = (await startWrite("settings-term-backup.ferrite"))!;
   expect(file.extras["0 7 7 1"]).toBe(v["0 7 7 1"]);
   const items = dialog().locator("li");
   await expect(items).toHaveCount(2);
@@ -173,11 +167,14 @@ test("a setting the settings record doesn't carry (Battery Save) with one it doe
   await expect(dialog()).not.toContainText("set command");
   await shot(page, info, "25-settings-term-diff");
   backup = path;
-  await commitWrite(2);
-  await readRadio();
+  await commitWrite(2, false);
+  // The editor holds the read back.
   const after = await values();
   expect([after["0 7 7 1"], after["0 5 9 7"]]).toEqual([bsTo, vhfTo]);
-  await restore(backup);
+  // LINK-21.2: Put the radio back writes the kept read: its diff, then the write.
+  await dialog().getByRole("button", { name: "Put the radio back" }).click();
+  await expect(dialog().locator("li")).toHaveCount(2, { timeout: long() });
+  await commitWrite(2);
   backup = null;
   await readRadio();
   const back = await values();

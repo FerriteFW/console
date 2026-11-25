@@ -1,7 +1,8 @@
 <script lang="ts">
-  // A settings write's steps: the backup read (saved as a file), the diff with ferrite's own dry run, the write on
+  // A settings write's steps: the backup read (kept in memory, LINK-21.2), the diff with ferrite's own dry run, the write on
   // confirm, and the read back. For Radio Settings, and for APRS settings (`store`, `what`).
   import { settings, type SettingsWriteStep } from "../settings.svelte";
+  import KeptBackup from "./KeptBackup.svelte";
 
   type Store = { write: SettingsWriteStep | null; closeWrite(): void; commitWrite(): Promise<void> };
   let { store = settings as Store, what = "settings" }: { store?: Store; what?: string } = $props();
@@ -22,7 +23,7 @@
       {#if w.step === "backup"}
         <p>Reading the radio's {what} for a backup first…</p>
       {:else if w.step === "review"}
-        <p class="ok">Backup saved: <b>{w.backupName}</b> (your downloads). Load it here to put the radio back.</p>
+        <KeptBackup kept={w.kept} {what} close={() => store.closeWrite()} />
         {#if w.radio.length}
           <!-- LINK-21.1: what changed on the radio since the read, and which of those this write replaces. -->
           <div class="drift" data-k="drift">
@@ -92,6 +93,7 @@
         {:else}
           <p class="note">Written, but the read back differs: the editor now shows what the radio holds.</p>
         {/if}
+        <KeptBackup kept={w.kept} {what} written close={() => store.closeWrite()} />
         <div class="actions"><button class="btn primary" onclick={() => store.closeWrite()}>Close</button></div>
       {/if}
     </div>
