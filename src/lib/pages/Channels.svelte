@@ -18,7 +18,7 @@
   import LibraryDialog from "../components/library/LibraryDialog.svelte";
   import { library } from "../library.svelte";
   import { channels } from "../channels.svelte";
-  import { backUp, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
+  import { backUp, backUpAll, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
   import { settings } from "../settings.svelte";
   import { aprsSettings } from "../aprsSettings.svelte";
   import { contacts } from "../contacts.svelte";
@@ -307,6 +307,9 @@
             <hr />
             <button role="menuitem" disabled={!connected || busy} onclick={() => choose(() => void saving(() => backUp("channels")))}>
               <b>Back up radio…</b><span>A fresh read of the radio's channels to a .ferrite; the table is left alone</span>
+            </button>
+            <button role="menuitem" disabled={!connected || busy} onclick={() => choose(() => void saving(backUpAll))}>
+              <b>Back up everything…</b><span>A fresh read of channels, settings, APRS settings and lists to one .ferrite</span>
             </button>
             <button role="menuitem" disabled={busy || !pending} onclick={discard}>
               <b>Discard unwritten changes</b><span>The table back as it was read</span>

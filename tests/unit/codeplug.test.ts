@@ -149,6 +149,10 @@ test("names: callsign or radio, then yyyymmdd-hhmm", () => {
   assert.equal(codeplugName("VA7IF", d), "VA7IF-20261030-1412.ferrite");
   assert.equal(codeplugName(undefined, d), "radio-20261030-1412.ferrite");
   assert.equal(codeplugName("a/b c", d), "abc-20261030-1412.ferrite");
+  // console#101: a one-part backup names its part, so channels and settings saved the same minute differ
+  assert.equal(codeplugName("VA7IF", d, "channels"), "VA7IF-channels-20261030-1412.ferrite");
+  assert.equal(codeplugName("VA7IF", d, "settings"), "VA7IF-settings-20261030-1412.ferrite");
+  assert.equal(codeplugName("VA7IF", d, "aprs"), "VA7IF-aprs-20261030-1412.ferrite");
 });
 
 test("refused: not a zip, not a codeplug, a newer version, a listed part missing", async () => {

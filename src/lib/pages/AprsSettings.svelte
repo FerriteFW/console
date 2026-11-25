@@ -9,7 +9,7 @@
   import SettingsWriteDialog from "../components/SettingsWriteDialog.svelte";
   import { aprsSettings as s } from "../aprsSettings.svelte";
   import { radio } from "../radio.svelte";
-  import { backUp, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
+  import { backUp, backUpAll, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
   import type { SettingItem } from "../core";
 
   let fileInput: HTMLInputElement;
@@ -92,7 +92,8 @@
       <span class="label">File</span>
       <button class="btn" disabled={busy} onclick={() => fileInput.click()} title="A codeplug (.ferrite) or an older backup (.json) into the editors; Write then puts it on the radio">Open…</button>
       <button class="btn" disabled={busy || !s.record} onclick={() => saving(saveCodeplug)} title="Everything open in Console as one codeplug (.ferrite): these settings with their unwritten edits, the channels, Radio Settings and contacts">Save as…</button>
-      <button class="btn" disabled={!connected || busy} onclick={() => saving(() => backUp("aprs"))} title="Read the radio's APRS settings and save them to a .ferrite">Back up radio</button>
+      <button class="btn" disabled={!connected || busy} onclick={() => saving(() => backUp("aprs"))} title="Read the radio's APRS settings and save them to a .ferrite">Back up APRS</button>
+      <button class="btn" disabled={!connected || busy} onclick={() => saving(backUpAll)} title="Read everything the radio holds over the link (channels, settings, APRS settings, lists) into one .ferrite">Back up everything</button>
       <input bind:this={fileInput} type="file" accept={OPEN_ACCEPT} hidden onchange={open} />
     </div>
   </div>

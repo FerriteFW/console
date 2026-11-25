@@ -56,10 +56,12 @@ export function readContacts(text: string): ContactsFile {
 }
 
 /** `<who>-<yyyymmdd-hhmm>.ferrite`: the callsign, else "radio". */
-export function codeplugName(who: string | undefined, d = new Date()): string {
+export function codeplugName(who: string | undefined, d = new Date(), part?: string): string {
   const p = (n: number) => String(n).padStart(2, "0");
   const w = (who ?? "").replace(/[^A-Za-z0-9-]/g, "") || "radio";
-  return `${w}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.ferrite`;
+  // A one-part backup says which part it holds (console#101: channels and settings backups had the same name).
+  const what = part ? `-${part.replace(/[^A-Za-z0-9-]/g, "")}` : "";
+  return `${w}${what}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.ferrite`;
 }
 
 /** The radio's fingerprint: SHA-256 over its unique ID's bytes as INFO gives them (12), the first 8 hex digits. */

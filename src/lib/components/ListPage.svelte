@@ -7,7 +7,7 @@
   import ListWriteDialog from "./ListWriteDialog.svelte";
   import { radio } from "../radio.svelte";
   import { loadCore } from "../core";
-  import { backUp, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
+  import { backUp, backUpAll, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
   import type { lists } from "../lists.svelte";
 
   type Store = (typeof lists)[keyof typeof lists];
@@ -133,6 +133,9 @@
             <hr />
             <button role="menuitem" disabled={!connected || busy || !store.supported} onclick={() => void saving(() => backUp(store.key))}>
               <b>Back up radio…</b><span>A fresh read of the radio's {store.noun} to a .ferrite; the editor is left alone</span>
+            </button>
+            <button role="menuitem" disabled={!connected || busy} onclick={() => void saving(backUpAll)}>
+              <b>Back up everything…</b><span>A fresh read of channels, settings, APRS settings and lists to one .ferrite</span>
             </button>
             <button role="menuitem" disabled={busy || !pending} onclick={discard}>
               <b>Discard unwritten changes</b><span>Back as they were read</span>

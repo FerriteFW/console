@@ -6,7 +6,7 @@
   import SettingRows from "../components/SettingRows.svelte";
   import { settings } from "../settings.svelte";
   import { radio } from "../radio.svelte";
-  import { backUp, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
+  import { backUp, backUpAll, OPEN_ACCEPT, openFile, picked, saveCodeplug } from "../codeplug.svelte";
   import { channels } from "../channels.svelte";
   import { dtmf } from "../lists.svelte";
   import { present } from "../settingsNotes";
@@ -94,7 +94,8 @@
       <span class="label">File</span>
       <button class="btn" disabled={busy} onclick={() => fileInput.click()} title="A codeplug (.ferrite) or an older backup (.json) into the editors; Write then puts it on the radio">Open…</button>
       <button class="btn" disabled={busy || !settings.record} onclick={() => saving(saveCodeplug)} title="Everything open in Console as one codeplug (.ferrite): these settings with their unwritten edits, the channels, APRS settings and contacts">Save as…</button>
-      <button class="btn" disabled={!connected || busy} onclick={() => saving(() => backUp("settings"))} title="Read the radio's settings and save them to a .ferrite">Back up radio</button>
+      <button class="btn" disabled={!connected || busy} onclick={() => saving(() => backUp("settings"))} title="Read the radio's settings and save them to a .ferrite">Back up settings</button>
+      <button class="btn" disabled={!connected || busy} onclick={() => saving(backUpAll)} title="Read everything the radio holds over the link (channels, settings, APRS settings, lists) into one .ferrite">Back up everything</button>
       <input bind:this={fileInput} type="file" accept={OPEN_ACCEPT} hidden onchange={open} />
     </div>
     {#if view}

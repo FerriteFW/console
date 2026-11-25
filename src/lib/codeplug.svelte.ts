@@ -63,12 +63,12 @@ export function gather(saved: string): Parts {
 export const saveBlob = saveAs;
 
 /** Parts as a .ferrite file, saved: the notice's text ("" when the save dialog was cancelled). */
-export async function saveParts(parts: Parts, what = "Saved"): Promise<string> {
+export async function saveParts(parts: Parts, what = "Saved", part?: string): Promise<string> {
   const meta = radioMeta();
   const uid = radio.info?.uid;
   const m = manifest(parts, meta, CONSOLE_VERSION, new Date(), uid ? await fingerprint(new Uint8Array(uid)) : undefined);
   if (!m.parts.length) throw new Error("Nothing to save yet: read the radio or open a file first.");
-  const name = await saveBlob(codeplugName(meta.callsign), await buildCodeplug(parts, m));
+  const name = await saveBlob(codeplugName(meta.callsign, new Date(), part), await buildCodeplug(parts, m));
   return name ? `${what} ${list(m.parts, parts)} as ${name}${isTauri() ? "" : " (your downloads)"}.` : "";
 }
 
@@ -85,7 +85,7 @@ export async function backUp(part: "channels" | "settings" | "aprs" | ListKey): 
     const { set, presets } = await channels.readRadio();
     text = backupFile(set, saved, r);
     // The range presets are read with the channels, so they go with them.
-    if (presets) return saveParts({ channels: text, presets: presetsFile(presets, saved, r) }, "Backed up");
+    if (presets) return saveParts({ channels: text, presets: presetsFile(presets, saved, r) }, "Backed up", part);
   } else if (part === "settings") {
     const { record, extras } = await settings.readRadio();
     text = settingsCodeplugPart(record, extras, saved, r);
@@ -96,7 +96,7 @@ export async function backUp(part: "channels" | "settings" | "aprs" | ListKey): 
     const { record, extras } = await aprsSettings.readRadio();
     text = aprsBackup(aprsSettings.settingsRec, record, extras, saved, r);
   }
-  return saveParts({ [part]: text }, "Backed up");
+  return saveParts({ [part]: text }, "Backed up", part);
 }
 
 const PART_NAME: Record<Part, string> = {
@@ -199,6 +199,27 @@ function partOf(text: string): Part | null {
 }
 
 export type Opened = { notice: string; parts: Part[]; failed: string[] };
+
+/** Back up everything (console#101): a fresh read of every part the radio gives over the link (channels and zones
+ *  with the range presets, settings, APRS settings, quick messages, waypoints, DTMF memories) into one .ferrite; the
+ *  pages are left alone. A list the radio's firmware doesn't serve is left out. */
+export async function backUpAll(): Promise<string> {
+  const saved = new Date().toISOString();
+  const r = partRadio();
+  const parts: Parts = {};
+  const { set, presets } = await channels.readRadio();
+  parts.channels = backupFile(set, saved, r);
+  if (presets) parts.presets = presetsFile(presets, saved, r);
+  const s = await settings.readRadio();
+  parts.settings = settingsCodeplugPart(s.record, s.extras, saved, r);
+  const a = await aprsSettings.readRadio();
+  parts.aprs = aprsBackup(aprsSettings.settingsRec, a.record, a.extras, saved, r);
+  for (const k of ["quick", "waypoints", "dtmf"] as const) {
+    const l = lists[k];
+    if (l.supported) parts[k] = l.fileText(await l.readRadio(), saved, r);
+  }
+  return saveParts(parts, "Backed up", "full");
+}
 
 /** Open…: a .ferrite (every part it holds) or an older single-part JSON backup, into the pages. Throws (a reason to
  *  show) when the file is none of those, damaged, or newer than this Console reads. */
