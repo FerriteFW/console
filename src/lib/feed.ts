@@ -5,7 +5,9 @@ import { olderThan, sameVersion } from "./version.ts";
 
 export type Feed = {
   format: "ferrite-feed-1";
-  ferrite: { version: string; protocol: number; file: string; url: string; sha256: string };
+  // `notes` (UPD-25.2, console#42): the recent releases' notes, newest first; optional, so a feed without them (and a
+  // Console that doesn't know them) still works. Checked by notes.ts's feedNotes, not here.
+  ferrite: { version: string; protocol: number; file: string; url: string; sha256: string; notes?: unknown };
   console: { version: string };
 };
 

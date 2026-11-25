@@ -24,7 +24,8 @@ import { radio } from "./radio.svelte";
 import { signatureOf, signatureProblem, splitPicked, type Signed } from "./signature";
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
-import { newerFirmware } from "./updates.svelte";
+import { feed, newerFirmware } from "./updates.svelte";
+import { feedNotes, type ReleaseNote } from "./notes";
 import { LAYOUT_MOVING, markFrom, migrate } from "./migrate.svelte";
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
@@ -131,6 +132,8 @@ class Firmware {
   bundled = $state<{ version: string; file: string; sha256: string; minisig?: string; url?: string } | null>(null);
   /** UPD-25: a newer Ferrite is out that speaks another link protocol: it needs a newer Console (its version). */
   needsConsole = $state("");
+  /** UPD-25.2: the release notes from the feed: undefined until it's read, null when it couldn't be (offline). */
+  notes = $state<ReleaseNote[] | null | undefined>(undefined);
   #loading: Promise<void> | null = null;
 
   /** The manifest, once, then the feed: what the page offers besides a file. */
@@ -143,6 +146,8 @@ class Firmware {
       } catch {
         // no bundled release in this copy of Console: a file only
       }
+      const f = await feed();
+      this.notes = f ? feedNotes(f) : null;
       const n = await newerFirmware(this.bundled?.version ?? "");
       if (n && "usable" in n) this.bundled = { version: n.usable.version, file: n.usable.file, sha256: n.usable.sha256, url: n.usable.url };
       else if (n) this.needsConsole = n.needsConsole;

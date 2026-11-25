@@ -71,6 +71,8 @@ FIRMWARE="RELEASE.ffw READER.btf RESTORER.btf" tools/desktop-build.sh release --
   GitHub release: the updater reads `releases/latest/download/latest.json`), and `feed.json` with the `.ffw`: these
   two go on ferritefw.dev as `releases/latest.json` and `releases/ferrite-X.Y.Z.ffw` (the website repo's
   `src/releases/`), where `FEED` points. Windows' portable `.exe` doesn't update itself: it links to the download.
+  `feed.json` also carries the last 5 Ferrite releases' notes (UPD-25.2), the Ferrite part of the docs repo's
+  `release-notes/X.Y.Z.md` (`--notes DIR`, default `../docs/release-notes`): write the release's notes first.
 - Out: `target/desktop/`. A release ships the `.dmg`, the `.AppImage` and the Windows portable `.exe`.
 - The Mac build is signed with the team's Developer ID and notarized: it needs the "Developer ID Application" certificate in the keychain and the notarization profile `FerriteConsole` (`xcrun notarytool store-credentials FerriteConsole --team-id TEAM --apple-id APPLE_ID`, once). `UNSIGNED=1` builds without. The Linux and Windows builds aren't signed.
 

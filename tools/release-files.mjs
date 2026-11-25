@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 // A release's files, from tools/desktop-build.sh's target/desktop/ (DEVELOPING.md, "Releases"):
-//   node tools/release-files.mjs --ffw ferrite-0.9.0.ffw [--protocol 1]
+//   node tools/release-files.mjs --ffw ferrite-0.9.0.ffw [--protocol 1] [--notes ../docs/release-notes | --no-notes]
 // -> target/desktop/release/: the installers under their release names, the update bundles and their signatures,
 // Tauri's latest.json (Console's own updates, UPD-26: macOS, Apple silicon and Intel, and the Linux AppImage; Windows' portable .exe has none and
 // links to the download) and feed.json (UPD-25, format `ferrite-feed-1`: the latest Ferrite and Console), which goes
-// to ferritefw.dev/releases/latest.json with the .ffw beside it.
+// to ferritefw.dev/releases/latest.json with the .ffw beside it. The feed carries the last 5 Ferrite releases' notes
+// (UPD-25.2, `ferrite.notes`, from the docs repo's release-notes/X.Y.Z.md: tools/release-notes.mjs), so Update shows
+// the notes of the very release it offers; Consoles before 0.9.8 ignore the field.
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { releaseNotes } from "./release-notes.mjs";
 
 const args = process.argv.slice(2);
 const opt = (k, d) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
@@ -65,9 +68,10 @@ if (ffw) {
   if (!m) throw new Error(`${ffw}: no version in the name`);
   const file = `ferrite-${m[1]}.ffw`;
   copyFileSync(ffw, join(out, file));
+  const notes = args.includes("--no-notes") ? undefined : releaseNotes(opt("--notes", join(here, "../docs/release-notes")), m[1]);
   const feed = {
     format: "ferrite-feed-1",
-    ferrite: { version: m[1], protocol: Number(opt("--protocol", "1")), file, url: `${site}/${file}`, sha256: createHash("sha256").update(bytes).digest("hex") },
+    ferrite: { version: m[1], protocol: Number(opt("--protocol", "1")), file, url: `${site}/${file}`, sha256: createHash("sha256").update(bytes).digest("hex"), notes },
     console: { version },
   };
   writeFileSync(join(out, "feed.json"), JSON.stringify(feed, null, 1) + "\n");
