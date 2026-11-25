@@ -56,6 +56,7 @@ pub mod library;
 pub mod lists;
 pub mod liveview;
 pub mod log;
+pub mod merge;
 pub mod migrate;
 pub mod plan;
 pub mod presets;

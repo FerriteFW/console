@@ -43,6 +43,8 @@
   // Update waits for the owner to say so (ferrite SAFE-1.3, Nov 20, 2026).
   const needsPowerCycle = $derived(connected && !!mine && olderThan(mine, "0.9.5"));
   let powerCycled = $state(false);
+  // UPD-25.1: a release older than the radio's Ferrite is refused; an older file chosen by hand is a downgrade, noted.
+  const down = $derived(firmware.downgrade);
 
   void firmware.loadBundled();
 
@@ -71,9 +73,12 @@
       </div>
     {/if}
     <div class="row">
-      <button class="btn primary" disabled={!latest || (!!check && !ok) || (needsPowerCycle && !powerCycled)} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
+      <button class="btn primary" disabled={!latest || (!!check && !ok) || (!!down && "refuse" in down) || (needsPowerCycle && !powerCycled)} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
       {#if connected && current}<span class="sub">Up to date.</span>{/if}
     </div>
+    {#if down}
+      <p class={"refuse" in down ? "err" : "note"} role="alert" data-k="downgrade">{"refuse" in down ? down.refuse : down.note}</p>
+    {/if}
     <p class="sub hint">Channels and settings stay. Over the cable only. A radio still on its stock firmware: use the <a href="#/install">Install</a> tab.</p>
   </section>
 
@@ -196,6 +201,14 @@
   }
   .sub {
     color: var(--sub);
+  }
+  .note {
+    color: var(--amber);
+    margin: 8px 0 0;
+  }
+  .err {
+    color: var(--red);
+    margin: 8px 0 0;
   }
   .hint {
     margin: 6px 0 0;

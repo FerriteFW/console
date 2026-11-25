@@ -23,8 +23,27 @@
         <p>Reading the radio's {what} for a backup first…</p>
       {:else if w.step === "review"}
         <p class="ok">Backup saved: <b>{w.backupName}</b> (your downloads). Load it here to put the radio back.</p>
-        {#if w.drifted}
-          <p class="note">The radio's {what} changed since they were read: this diff is against the radio as it is now.</p>
+        {#if w.radio.length}
+          <!-- LINK-21.1: what changed on the radio since the read, and which of those this write replaces. -->
+          <div class="drift" data-k="drift">
+            <p class="note">
+              {#if w.whole}
+                Changed on the radio since the read. The loaded file is written whole: it replaces what it sets differently.
+              {:else}
+                Changed on the radio since the read. The write keeps these and puts only your edits on top{w.overridden.length ? "; where you edited the same setting, your edit wins" : ""}.
+              {/if}
+            </p>
+            <ul>
+              {#each w.radio as c (c.id)}
+                {@const o = w.overridden.find((x) => x.id === c.id)}
+                <li>
+                  <span class="nm">{c.path ? `${c.path} ` : ""}{c.name}</span>
+                  <span class="f"><s>{c.from || "–"}</s> → <b>{c.to || "–"}</b></span>
+                  {#if o}<span class="over" data-k="overridden">{w.whole ? "replaced" : "your edit wins"}: <b>{o.to || "–"}</b></span>{:else}<span class="kept">kept</span>{/if}
+                </li>
+              {/each}
+            </ul>
+          </div>
         {/if}
         {#if w.plan.problems.length}
           <div class="problems">
@@ -134,6 +153,24 @@
     padding: 10px 12px;
     margin-bottom: 10px;
     color: var(--red);
+  }
+  .drift ul {
+    margin: -4px 0 10px;
+    padding-left: 0;
+    list-style: none;
+    font-size: 13px;
+  }
+  .drift li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    padding: 3px 0;
+  }
+  .over {
+    color: var(--amber);
+  }
+  .kept {
+    color: var(--sub);
   }
   .problems ul,
   .diff ul {

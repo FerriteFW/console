@@ -450,6 +450,39 @@ pub fn plan(settings_rec: &[u8], base: &[u8], base_ex: &Extras, want: &[u8], wan
     Plan { changes, begin: begin_payload(ops.len() as u16), ops, cmds, problems }
 }
 
+/// The APRS record's fields (LINK-43, as `aprs_record` puts them): the frequency, the texts (custom path, comment,
+/// auto reply's pattern and reply) whole, every other byte on its own (LINK-21.1).
+fn fields() -> Vec<crate::merge::Field> {
+    use ferrite_app::aprs::{COMMENT_LEN, CUSTOM_LEN, REPLY_TEXT_LEN, REPLY_TO_LEN};
+    use ferrite_app::link::APRS_REPLY_AT;
+    let f = |at, len| crate::merge::Field { at, len, bits: false };
+    let comment = APRS_REPLY_AT - 3 - COMMENT_LEN;
+    vec![
+        f(0, 2),
+        f(8, CUSTOM_LEN),
+        f(comment, COMMENT_LEN),
+        f(APRS_REPLY_AT + 1, REPLY_TO_LEN),
+        f(APRS_REPLY_AT + 1 + REPLY_TO_LEN, REPLY_TEXT_LEN),
+    ]
+}
+
+/// LINK-21.1: the write's record and values: the edits put on the radio's APRS record as it is now, as Radio
+/// Settings' [`settings::merge`].
+#[allow(clippy::too_many_arguments)]
+pub fn merge(
+    settings_rec: &[u8],
+    base: &[u8],
+    base_ex: &Extras,
+    edited: &[u8],
+    edited_ex: &Extras,
+    fresh: &[u8],
+    fresh_ex: &Extras,
+    whole: bool,
+) -> crate::merge::Merged {
+    let d = |a: &[u8], ax: &Extras, b: &[u8], bx: &Extras| diff(settings_rec, a, ax, b, bx);
+    crate::merge::merge(&fields(), &[], (base, base_ex), (edited, edited_ex), (fresh, fresh_ex), "Other", whole, d)
+}
+
 /// The backup file: the record (hex), the terminal-backed values, with the settings as the menu shows them beside
 /// them for reading.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -558,6 +591,36 @@ mod tests {
             .iter()
             .find(|i| i.id == id)
             .unwrap_or_else(|| panic!("{id} in {:?}", v.items.iter().map(|i| &i.id).collect::<Vec<_>>()))
+    }
+
+    /// LINK-21.1 (console#80): an APRS write keeps what the radio changed since the read (the comment) and takes
+    /// the edits (the SSID); a setting changed on both sides takes the edit, and the dialog says so.
+    #[test]
+    fn merge_onto_the_fresh_read() {
+        let srec = record_of(&Settings::DEFAULT);
+        let base = default_record();
+        let at = ferrite_app::link::APRS_REPLY_AT - 3 - ferrite_app::aprs::COMMENT_LEN;
+        let mut edited = base.clone();
+        edited[7] = 9; // SSID 9
+        let mut fresh = base.clone();
+        fresh[at..at + 5].copy_from_slice(b"hello");
+        let e = ex0();
+        let m = merge(&srec, &base, &e, &edited, &e, &fresh, &e, false);
+        assert_eq!(m.record[7], 9);
+        assert_eq!(&m.record[at..at + 5], b"hello");
+        assert_eq!(m.radio.len(), 1, "{:?}", m.radio);
+        assert!(m.overridden.is_empty(), "{:?}", m.overridden);
+        // The radio's SSID changed too: the edit wins, listed as replacing the radio's.
+        assert_ne!(base[7], 5);
+        fresh[7] = 5;
+        let m = merge(&srec, &base, &e, &edited, &e, &fresh, &e, false);
+        assert_eq!(m.record[7], 9);
+        assert_eq!(&m.record[at..at + 5], b"hello");
+        assert_eq!(m.overridden.len(), 1, "{:?}", m.overridden);
+        assert_eq!(m.overridden[0].id, "0 5 5 1");
+        let p = plan(&srec, &fresh, &m.record);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(p.changes.len(), 1, "{:?}", p.changes);
     }
 
     /// LINK-43: the record's settings are MENU 0 5's own, named and valued as the menu shows them.

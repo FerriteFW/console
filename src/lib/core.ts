@@ -456,6 +456,16 @@ export const settingsSet = (record: Uint8Array, extras: Extras, id: string, valu
   edited(wasm.settings_set(record, js(extras), id, value));
 export const settingsPlan = (base: Uint8Array, baseEx: Extras, want: Uint8Array, wantEx: Extras): SettingsPlan =>
   JSON.parse(wasm.settings_plan(base, js(baseEx), want, js(wantEx)));
+/** LINK-21.1: what a write puts on the radio: the edits on the radio's record as it is now, and what changed there. */
+export type Merged = { record: Uint8Array; extras: Extras; radio: SettingChange[]; overridden: SettingChange[] };
+const merged = (s: string): Merged => {
+  const r = JSON.parse(s);
+  return { ...r, record: new Uint8Array(r.record) };
+};
+/** LINK-21.1: the edits (`base` as read -> `edited`) put on `fresh` (the radio's record read just now), field by field;
+ * `whole` (a loaded file) writes `edited` as it is. */
+export const settingsMerge = (base: Uint8Array, baseEx: Extras, edited: Uint8Array, editedEx: Extras, fresh: Uint8Array, freshEx: Extras, whole: boolean): Merged =>
+  merged(wasm.settings_merge(base, js(baseEx), edited, js(editedEx), fresh, js(freshEx), whole));
 export const settingsLen = () => wasm.settings_len();
 export const settingsBackup = (record: Uint8Array, extras: Extras, saved: string, radio: Record<string, string>) =>
   wasm.settings_backup(record, js(extras), saved, js(radio));
@@ -671,6 +681,16 @@ export const aprsView = (settings: Uint8Array, record: Uint8Array, extras: Extra
   JSON.parse(wasm.aprs_view(settings, record, js(extras)));
 export const aprsSet = (settings: Uint8Array, record: Uint8Array, extras: Extras, id: string, value: string): Edited =>
   edited(wasm.aprs_set(settings, record, js(extras), id, value));
+export const aprsMerge = (
+  settings: Uint8Array,
+  base: Uint8Array,
+  baseEx: Extras,
+  edited: Uint8Array,
+  editedEx: Extras,
+  fresh: Uint8Array,
+  freshEx: Extras,
+  whole: boolean,
+): Merged => merged(wasm.aprs_merge(settings, base, js(baseEx), edited, js(editedEx), fresh, js(freshEx), whole));
 export const aprsPlan = (settings: Uint8Array, base: Uint8Array, baseEx: Extras, want: Uint8Array, wantEx: Extras): SettingsPlan =>
   JSON.parse(wasm.aprs_plan(settings, base, js(baseEx), want, js(wantEx)));
 export const aprsRecordLen = () => wasm.aprs_record_len();
