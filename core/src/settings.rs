@@ -1651,7 +1651,7 @@ mod tests {
         // itself goes on only on the radio (the link keeps the radio's KISS), so choosing it here is refused.
         let mode = item(&v, "0 5 3");
         assert_eq!(mode.value, "Off");
-        assert!(mode.choices.iter().any(|c| c == "Tracker") && mode.choices.iter().any(|c| c == "On"), "{:?}", mode.choices);
+        assert!(mode.choices.iter().any(|c| c == "Tracker") && mode.choices.iter().any(|c| c == "On") && mode.choices.iter().any(|c| c == "Pager"), "{:?}", mode.choices);
         let mut ports = item(&v, "0 5 8").choices.clone();
         ports.sort();
         assert_eq!(ports, ["Bluetooth", "Cable"]);
@@ -1664,8 +1664,12 @@ mod tests {
         }
         let lpm = set(&rec, "0 7 7 3", "30 %").unwrap();
         assert_eq!(settings_of(&lpm).lpm_below, 30);
-        // Typed: the pager frequency.
-        assert_eq!(item(&v, "0 4 2 2").kind, Kind::Text);
+        // Typed: the pager frequency (0 4 2 3 since Pager mode: 0 4 2 2 is Decode, DEC-20).
+        assert_eq!(item(&v, "0 4 2 3").kind, Kind::Text);
+        assert_eq!(item(&v, "0 4 2 2").kind, Kind::Pick);
+        let mut speeds = item(&v, "0 4 2 5").choices.clone();
+        speeds.sort();
+        assert_eq!(speeds, ["1200", "2400"], "DEC-4: the chip modem's speeds");
         let call = item(&v, "0 8 6 1");
         assert_eq!((call.kind, call.value.as_str()), (Kind::Text, "N0CALL"));
         // Not here: Dry TX (this power-on, not a setting), APRS Settings' (its record's and MENU 0 5's
@@ -1712,9 +1716,9 @@ mod tests {
         assert!(e.starts_with("Theme: one of ") && e.contains("Night red"), "{e}");
         assert!(set(&rec, "0 9 4", "Canada").unwrap_err().contains(RADIO_ONLY));
         assert!(set(&rec, "0 9 2 3", "Terminal").unwrap_err().contains(RADIO_ONLY));
-        let new = set(&rec, "0 4 2 2", "439.9875").unwrap();
+        let new = set(&rec, "0 4 2 3", "439.9875").unwrap();
         assert_eq!(settings_of(&new).pocsag_freq, 43_998_750);
-        assert!(set(&rec, "0 4 2 2", "nonsense").is_err());
+        assert!(set(&rec, "0 4 2 3", "nonsense").is_err());
         let new = set(&rec, "0 8 6 1", "w1aw/7").unwrap();
         assert_eq!(settings_of(&new).callsign.as_bytes(), b"W1AW/7");
         assert!(set(&rec, "0 8 6 1", "W1AW-7").is_err());
