@@ -66,6 +66,10 @@ import { fdumpReadyRe, FDUMP_RESULT_RE, MDUMP_MARKER_RE, NAK_QUIET_MS, PROMPT_RE
 const READER_RATES = [500_000, 250_000, 115_200];
 /** The Rust reader's fdumpz rate (BACKUP-9.6, ferrite decision 265): one fixed, safe rate for long transfers. */
 const FDUMPZ_BAUD = 230_400;
+/** Backups read at the cable's own 115200, never switching rate (BACKUP-9.6, Alex Nov 25, 2026): the switch back
+ *  closed and reopened Web Serial's port while the reader sent its result line (#87), and the sync windows around
+ *  it were the other failures (#88). About a minute slower over a whole chip; the faster path stays for later. */
+const BACKUP_FAST = false;
 const NAK = 0x15;
 const CAN = 0x18;
 /** How long probes go out for the bootloader (flash.py's --wait is 30 s; a power cycle by hand takes longer). */
@@ -940,7 +944,7 @@ class Install {
    * read_range). */
   private async readChip(size: number, slow = false): Promise<Uint8Array> {
     let last: Error | null = null;
-    const fast = !!this.t!.setBaud && cablePrefs.highSpeed && !slow; // decision 408: 230400 only with High speed on
+    const fast = BACKUP_FAST && !!this.t!.setBaud && cablePrefs.highSpeed && !slow; // decision 408; off: BACKUP_FAST
     debugLog(`backup: reading ${size} B, ${fast ? "fast" : "at 115200"}`);
     if (this.readerFile && readerHasFdumpz(this.readerFile.bytes)) {
       const rate = fast ? FDUMPZ_BAUD : READER_RATES[READER_RATES.length - 1];
