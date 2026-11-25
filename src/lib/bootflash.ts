@@ -1,12 +1,14 @@
 // The stock bootloader's side of the cable, shared by Firmware Update and the Install page: its replies matched by
 // command, the probes that catch it, and a whole image sent as flash.py sends it (hello, model, count, every 1 KB
 // block, end). The frames come from the Rust core (core/src/firmware.rs, core/src/install.rs).
-import { BootReader, bootProbe, bootResultText, P, Session, type BootStep, type FirmwareUpdate } from "./core";
-import { sleep, type Transport } from "./transport/types";
+import { BootReader, bootProbe, bootResultText, P, Session, type BootStep, type FirmwareUpdate } from "./core.ts";
+import { sleep, type Transport } from "./transport/types.ts";
 
 export const CMD_PROBE = 0x42;
 export const ACK = 0x06;
 export const BAD_FRAME = 0xe1;
+/** "Block out of order or too far" (core/src/firmware.rs). */
+export const E_ORDER = 0xe2;
 /** The probe's answer once the bootloader is in update mode (06 is its power-on window). */
 export const E_INSIDE = 0xe5;
 
@@ -16,7 +18,10 @@ export class BootPort {
   private replies: [number, number][] = [];
   private wake: (() => void) | null = null;
 
-  constructor(readonly t: Transport) {
+  readonly t: Transport;
+
+  constructor(t: Transport) {
+    this.t = t;
     t.onData = (b) => {
       const flat = this.reader.feed(b);
       for (let i = 0; i + 1 < flat.length; i += 2) this.replies.push([flat[i], flat[i + 1]]);
@@ -70,14 +75,25 @@ export async function probe(port: BootPort, ms: number, held: () => void = () =>
   return null;
 }
 
-/** One frame, sent again (up to 3 times) when nothing or a garbled-frame reply comes back. */
+/** One frame, sent again (up to 3 times) when nothing or a garbled-frame reply comes back.
+ *
+ * INST-1.1 (FerriteFW/console#89): a block whose reply was lost may have been written all the same; the bootloader
+ * then answers its resend E2 (out of order: it wants the next block), and that resend counts as written. Only right
+ * after a try that got no reply at all: a garbled-frame reply (E1) means the block wasn't taken, and an E2 to a
+ * first send still fails. Unchecked on stock's bootloader (whether it checks the order, and what it answers a block
+ * sent twice, hasn't been seen on a radio); if it took the block wrongly, the next block's E2 still stops the flash. */
 export async function command(port: BootPort, frame: Uint8Array, step: BootStep, held: () => void = () => {}): Promise<number | null> {
+  let lost = false;
   for (let tries = 0; tries < 3; tries++) {
     held();
     port.clear();
     await port.t.write(frame);
     const r = await port.next(step.cmd, step.timeout_ms);
-    if (r === null || r === BAD_FRAME) continue;
+    if (r === null || r === BAD_FRAME) {
+      lost = r === null;
+      continue;
+    }
+    if (r === E_ORDER && lost && step.block !== null) return ACK;
     return r;
   }
   return null;
