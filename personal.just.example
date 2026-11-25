@@ -1,0 +1,31 @@
+# The maintainers' release recipes. Copy to personal.just (git-ignored); the justfile imports it.
+# Keys these use: FERRITE_REMOTE (.env; the Linux and Windows build box), WEBSITE (the website checkout, default ../website).
+# The signing keys stay where tools/desktop-build.sh looks: the Developer ID and the notarization profile
+# FerriteConsole in the keychain, the updater key in ~/.tauri (org/signing.md).
+
+# Check the release signing is in place here: the Developer ID, the notarization profile, the updater key
+signing-check:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bad=0
+    security find-identity -v -p codesigning | grep -q "Developer ID Application" && echo "ok  Developer ID" || { echo "MISSING  Developer ID Application certificate"; bad=1; }
+    xcrun notarytool history --keychain-profile "${NOTARY_PROFILE:-FerriteConsole}" >/dev/null 2>&1 && echo "ok  notarization profile" || { echo "MISSING  notarization profile ${NOTARY_PROFILE:-FerriteConsole}"; bad=1; }
+    [ -f "${TAURI_UPDATER_KEY:-$HOME/.tauri/ferrite-console-updater.key}" ] && echo "ok  updater key" || { echo "MISSING  updater key"; bad=1; }
+    exit $bad
+
+# A release's desktop builds with Ferrite's signed release in them: just release-build ~/Downloads/v0.9.8 (the folder of its files)
+release-build dir:
+    FIRMWARE="$(ls {{dir}}/ferrite-*.ffw) {{dir}}/ferrite-reader.btf {{dir}}/ferrite-restorer.btf" just desktop release
+
+# The release files from target/desktop/ -> target/desktop/release/ (installers, update bundles, latest.json, feed.json)
+release-files ffw:
+    node tools/release-files.mjs --ffw {{ffw}}
+
+# The website's feed: feed.json as releases/latest.json and the .ffw beside it, in the website checkout (commit there)
+release-feed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    site=${WEBSITE:-../website}/src/releases
+    cp target/desktop/release/feed.json "$site/latest.json"
+    cp target/desktop/release/*.ffw "$site/"
+    git -C "$site" status --short .

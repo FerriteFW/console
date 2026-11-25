@@ -6,10 +6,13 @@ Console is Svelte 5 (Vite) over a Rust core compiled to WebAssembly, in a Tauri 
 
 ## Set up
 
-- Node 20+, npm, and Rust via rustup (`rust-toolchain.toml` pins it).
-- `cargo install wasm-bindgen-cli --version 0.2.129 --locked`
-- The ferrite checkout next to this one (`../ferrite`).
-- `npm install`, then `npx playwright install chromium` once for the end-to-end tests.
+- Node 22.18+ (`.node-version`), npm, Rust via rustup (`rust-toolchain.toml` pins it) and [just](https://just.systems).
+- `just setup`, then `just --list` for the everyday commands. `just doctor` checks the versions.
+- Setup clones Ferrite beside this checkout (`../ferrite`) at the release with Console's version when it isn't there:
+  Console builds Ferrite's crates from it. An existing `../ferrite` is used as it is.
+- Without a Ferrite build in `../ferrite/target`, setup downloads that release's `.ffw`, reader and restorer into
+  `target/firmware/` for the desktop builds.
+- Optional: `.env` (from `.env.example`) for `just remote RECIPE` on another machine.
 
 ## Run
 

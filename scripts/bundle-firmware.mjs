@@ -39,9 +39,11 @@ function entry(path) {
 
 // The version Ferrite carries ("v0.1.0"): a .ffw's manifest says it; else read from its workspace (the image itself
 // is encrypted in the .btf).
-const cargo = readFileSync(join(root, "../ferrite/Cargo.toml"), "utf8");
-let version = `v${cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? "?"}`;
-if (ferrite.endsWith(".ffw")) {
+let version;
+if (!ferrite.endsWith(".ffw")) {
+  const cargo = readFileSync(join(root, "../ferrite/Cargo.toml"), "utf8");
+  version = `v${cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? "?"}`;
+} else {
   // manifest.json is the zip's first entry, stored: its bytes follow the 30-byte local header and the name.
   const z = readFileSync(ferrite);
   const at = 30 + z.readUInt16LE(26) + z.readUInt16LE(28);
