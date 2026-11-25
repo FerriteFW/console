@@ -78,6 +78,7 @@ export type Timing = {
   ble_pace_ms: number;
   baud_switch_ms: number;
   baud_fallback_ms: number;
+  baud_hello_ms: number;
   cable_baud: number;
   cable_fast_rates: number[];
   hold_for_long_ms: number;

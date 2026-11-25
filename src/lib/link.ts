@@ -35,6 +35,7 @@ import {
 } from "./core";
 import { sleep, type Transport } from "./transport/types";
 import { debugLog } from "./debuglog";
+import { STREAM_RETRY_SKIP, UnlockStrip, answerTimer, streamFate } from "./linkbits";
 
 /** A message type's name for the debug log ("WRITE_MANY"). */
 const msgName = (ty: number) => Object.entries(P.msg).find(([, v]) => v === ty)?.[0] ?? `0x${ty.toString(16)}`;
@@ -93,8 +94,8 @@ export class Link {
   private session = new Session();
   private waiters = new Map<number, Waiter>();
   private streamW: StreamWaiter | null = null;
-  /** LINK-15.1: the module's `!!!!` answer to the speed unlock is dropped, not fed to the session. */
-  private dropUnlock = false;
+  /** LINK-15.1: the module's `!!!!` answer to the speed unlock is cut out, not fed to the session. */
+  private unlockStrip = new UnlockStrip();
   /** Whether to ask for compression (LINK-35.2). Off on the cable (decision 408): 230400 has room enough, and a lost
    *  frame with compression on leaves the two ends' windows apart until a resync; Bluetooth's ~280 B/s needs it. */
   compress = true;
@@ -126,47 +127,54 @@ export class Link {
     this.compress = t.kind !== "cable";
     t.onData = (bytes) => {
       if (this.closed) return;
-      if (this.dropUnlock && bytes.length >= 4 && bytes[0] === 0x21 && bytes[1] === 0x21 && bytes[2] === 0x21 && bytes[3] === 0x21) {
-        this.dropUnlock = false;
-        return;
-      }
-      const answers: Answer[] = JSON.parse(this.session.feed(bytes));
-      for (const a of answers) {
-        this.frames++;
-        if (a.event && a.ty === P.msg.AUDIO_DATA) {
-          this.onAudio(new Uint8Array(a.rest));
-          continue;
-        }
-        if (a.event) {
-          this.onEvent(a.seq, new Uint8Array(a.rest));
-          continue;
-        }
-        const s = this.streamW;
-        if (s && (a.ty === (STREAM | 0x80) || a.ty === (STREAM_MORE | 0x80))) {
-          if (a.seq !== (s.seq + s.frames.length) % 256) {
-            s.done(true); // a frame lost on the way
-            continue;
-          }
-          if (a.status !== 0) {
-            s.frames.push(new Uint8Array([0xff, a.status, ...a.rest]));
-            s.done(false);
-            continue;
-          }
-          const f = new Uint8Array(a.rest);
-          s.frames.push(f);
-          s.poke();
-          s.onFrame?.(f);
-          if (a.ty === (STREAM | 0x80)) s.done(false);
-          continue;
-        }
-        const w = this.waiters.get(a.seq);
-        if (w && a.ty === (w.ty | 0x80)) {
-          this.waiters.delete(a.seq);
-          this.answeredAt.set(w.ty, this.frames);
-          w.resolve(a);
-        } else this.stray++;
-      }
+      this.take(this.unlockStrip.take(bytes));
     };
+  }
+
+  /** Bytes from the transport to the session, and the answers and events they complete to their waiters. */
+  private take(bytes: Uint8Array) {
+    if (this.closed || bytes.length === 0) return;
+    const answers: Answer[] = JSON.parse(this.session.feed(bytes));
+    for (const a of answers) {
+      this.frames++;
+      if (a.event && a.ty === P.msg.AUDIO_DATA) {
+        this.onAudio(new Uint8Array(a.rest));
+        continue;
+      }
+      if (a.event) {
+        this.onEvent(a.seq, new Uint8Array(a.rest));
+        continue;
+      }
+      const s = this.streamW;
+      if (s && (a.ty === (STREAM | 0x80) || a.ty === (STREAM_MORE | 0x80))) {
+        const fate = streamFate(a.seq, s.seq, s.frames.length);
+        if (fate === "stray") {
+          this.stray++; // a late frame of the stream before (issue #95)
+          continue;
+        }
+        if (fate === "gap") {
+          s.done(true); // a frame lost on the way
+          continue;
+        }
+        if (a.status !== 0) {
+          s.frames.push(new Uint8Array([0xff, a.status, ...a.rest]));
+          s.done(false);
+          continue;
+        }
+        const f = new Uint8Array(a.rest);
+        s.frames.push(f);
+        s.poke();
+        s.onFrame?.(f);
+        if (a.ty === (STREAM | 0x80)) s.done(false);
+        continue;
+      }
+      const w = this.waiters.get(a.seq);
+      if (w && a.ty === (w.ty | 0x80)) {
+        this.waiters.delete(a.seq);
+        this.answeredAt.set(w.ty, this.frames);
+        w.resolve(a);
+      } else this.stray++;
+    }
   }
 
   /** TERM-2: Ctrl-C closes the radio's terminal if it holds the cable; its goodbye is dropped; 0x00 takes the cable. */
@@ -217,13 +225,13 @@ export class Link {
     let resynced = !resync;
     let fellBack = false;
     for (;;) {
+      // issue #95: a coded answer came out of step (a lost frame): HELLO first, rather than wait out this request too
+      if (ty !== HELLO && this.session.lz_broken()) await this.resync();
       const seq = this.session.next_seq();
-      const got = new Promise<Answer | null>((resolve) => {
-        this.waiters.set(seq, { ty, seq, resolve });
-        setTimeout(() => resolve(null), timeoutMs);
-      });
+      const { got, arm } = answerTimer<Answer>((resolve) => this.waiters.set(seq, { ty, seq, resolve }));
       const sent = performance.now();
       await this.t.write(this.session.request(ty, payload, performance.now()));
+      arm(timeoutMs); // issue #92: from when the bytes are written, not while they wait in the transport's queue
       const a = await got;
       if (this.closed) throw new Error("not connected");
       if (a) {
@@ -387,10 +395,10 @@ export class Link {
       const { status } = await this.askRaw(BAUD, baudPayload(115200));
       if (status !== 0) return 9600;
       await sleep(150); // the answer has left; the radio switches once its ring is empty
-      this.dropUnlock = true;
+      this.unlockStrip.arm();
       const unlocked = await t.unlock!().catch(() => false);
       await sleep(400);
-      this.dropUnlock = false;
+      this.take(this.unlockStrip.disarm());
       for (let i = 0; i < 3; i++) {
         try {
           const { rest } = await this.askRaw(HELLO, this.helloAgain(), undefined, false);
@@ -449,10 +457,12 @@ export class Link {
         onFrame,
       };
       this.streamW = w;
-      arm();
-      void this.t.write(this.session.request(STREAM, new Uint8Array([ty, ...payload]), performance.now()));
+      // issue #92: the time-out from when the request is written (a failed write times out the same way)
+      this.t.write(this.session.request(STREAM, new Uint8Array([ty, ...payload]), performance.now())).then(arm, arm);
     });
-    this.session.skip(Math.max(frames.length, 1) + 1); // past the frames' seqs, and any still on the way
+    // past the frames' seqs, and any still on the way; after a gap well past them, so a late one is told from the
+    // next stream's (issue #95)
+    this.session.skip(gap ? STREAM_RETRY_SKIP : Math.max(frames.length, 1) + 1);
     const last = frames[frames.length - 1];
     if (last && last[0] === 0xff && !gap) throw new RadioError(STREAM, last[1], last.slice(2));
     if (gap) {
@@ -597,14 +607,15 @@ export class Link {
 
   /**
    * LINK-11, LINK-13.3: raise the cable's rate. For each rate, best first: BAUD, then (50 ms after its answer) the
-   * port switched and HELLO at the new rate within 1 s. A refusal tries the next rate; a HELLO that doesn't come
-   * back puts the port back at 115200, waits out the radio's own fall-back, and HELLOs there. The rate in use.
+   * port switched and HELLO at the new rate, a second if the first goes unanswered, within the radio's 3 s. A
+   * refusal tries the next rate; no answer puts the port back at 115200, waits out the radio's own fall-back, and
+   * HELLOs there. The rate in use.
    */
   raiseBaud(rates: number[] = cableFastRates()): Promise<number> {
     const t = this.t;
     if (!t.setBaud) return Promise.resolve(t.baud ?? 0);
     const { BAUD, HELLO } = P.msg;
-    const { baud_switch_ms, baud_fallback_ms, cable_baud } = P.timing;
+    const { baud_switch_ms, baud_fallback_ms, baud_hello_ms, cable_baud } = P.timing;
     return this.exclusive(async () => {
       for (const rate of rates) {
         const { status } = await this.askRaw(BAUD, baudPayload(rate));
@@ -613,7 +624,15 @@ export class Link {
         await sleep(baud_switch_ms);
         await t.setBaud!(rate);
         try {
-          await this.askRaw(HELLO, this.helloAgain(), Math.max(200, baud_fallback_ms - (performance.now() - at) - 100), false);
+          // issue #94: two HELLOs before going back (one late answer cost the raise): the first within 1 s of the
+          // switch (an older radio's proof), the second with what is left of the radio's 3 s
+          try {
+            await this.askRaw(HELLO, this.helloAgain(), baud_hello_ms, false);
+          } catch (e) {
+            if (!(e instanceof TimeoutError)) throw e;
+            debugLog(`link: no HELLO answer at ${rate} yet: once more`);
+            await this.askRaw(HELLO, this.helloAgain(), Math.max(200, baud_fallback_ms - (performance.now() - at) - 300), false);
+          }
           return rate;
         } catch {
           await t.setBaud!(cable_baud);
@@ -768,13 +787,18 @@ export class Link {
     }
     const send = (f: (typeof frames)[number]) => {
       const seq = this.session.next_seq();
-      const got = new Promise<Answer | null>((resolve) => {
-        this.waiters.set(seq, { ty: P.msg.WRITE_MANY, seq, resolve });
-        setTimeout(() => resolve(null), this.timeout() * 2);
-      });
+      const { got, arm } = answerTimer<Answer>((resolve) => this.waiters.set(seq, { ty: P.msg.WRITE_MANY, seq, resolve }));
+      const ms = this.timeout() * 2;
+      // issue #92: the time-out from when the frame is written (the second waits behind the first in the queue)
       this.t
         .write(this.session.request(P.msg.WRITE_MANY, f.body, performance.now()))
-        .catch((e) => debugLog(`link WRITE_MANY #${seq} (windowed): send failed: ${(e as Error).message}`));
+        .then(
+          () => arm(ms),
+          (e) => {
+            debugLog(`link WRITE_MANY #${seq} (windowed): send failed: ${(e as Error).message}`);
+            arm(ms);
+          },
+        );
       debugLog(`link WRITE_MANY #${seq} (windowed) ops ${f.at}-${f.at + f.run - 1}, ${f.body.length} B`);
       return { f, got, seq };
     };
