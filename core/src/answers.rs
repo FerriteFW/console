@@ -65,20 +65,31 @@ pub struct Build {
     pub bench: bool,
     /// The PA drive is held at 0 now (Dry TX on, or an old tx-dry build).
     pub dry: bool,
+    /// SELF-5.1 (decision 466): not an official release (bit 6). Older releases never set it, so they read as
+    /// official. Console then says "Unofficial firmware".
+    pub unofficial: bool,
 }
+
+/// SELF-5.1: the build byte's bit 6, set on any build but an official release. Masked here before the kind is read,
+/// so the name and Dry TX come out right whichever ferrite-core this is built against.
+pub const UNOFFICIAL: u8 = 0x40;
 
 impl Build {
     pub fn of(byte: u8) -> Self {
-        Build { byte, name: build::name(byte), bench: build::bench(byte), dry: build::dry(byte) }
+        let kind = byte & !UNOFFICIAL;
+        Build { byte, name: build::name(kind), bench: build::bench(kind), dry: build::dry(kind), unofficial: byte & UNOFFICIAL != 0 }
     }
 
-    /// How the connection bar names it: "tx+dry, bench".
+    /// How the connection bar names it: "tx+dry, bench" (", unofficial" after, SELF-5.1).
     pub fn label(&self) -> String {
+        let mut l = self.name.to_string();
         if self.bench {
-            format!("{}, bench", self.name)
-        } else {
-            self.name.to_string()
+            l.push_str(", bench");
         }
+        if self.unofficial {
+            l.push_str(", unofficial");
+        }
+        l
     }
 }
 
@@ -317,6 +328,19 @@ mod tests {
         a.extend(lp("2.0.0"));
         let h = Hello::parse(&a).unwrap();
         assert!(!h.current() && h.build.is_none());
+    }
+
+    /// SELF-5.1, LINK-35: bit 6 marks an unofficial build; the kind, bench and Dry TX read the same with it, and a
+    /// byte without it (an official release, or any release before the bit) is official.
+    #[test]
+    fn build_unofficial_bit() {
+        let b = Build::of(0x40 | 0x80 | 3);
+        assert_eq!((b.name, b.bench, b.dry, b.unofficial), ("tx+dry", true, true, true));
+        assert_eq!(b.label(), "tx+dry, bench, unofficial");
+        let b = Build::of(0x41);
+        assert_eq!((b.name, b.dry, b.unofficial, b.label().as_str()), ("tx", false, true, "tx, unofficial"));
+        let b = Build::of(1);
+        assert_eq!((b.name, b.unofficial, b.label().as_str()), ("tx", false, "tx"));
     }
 
     /// LINK-35, LINK-35.1: INFO's fields, the build byte and the 12 ID bytes after the callsign, the layouts.

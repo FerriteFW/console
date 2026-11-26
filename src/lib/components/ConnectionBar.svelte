@@ -65,6 +65,12 @@
       <span class="strip"
         >{[radio.info.callsign || "no callsign", radio.info.firmware, radio.info.build?.name, radio.kind === "cable" && radio.baud ? `${radio.baud} baud` : ""].filter(Boolean).join(" · ")}</span
       >
+      {#if radio.info.build?.unofficial}
+        <!-- SELF-5.1 (decision 466): not an official Ferrite release -->
+        <span class="unofficial" data-k="unofficial" title="This radio runs a build that isn't an official Ferrite release: bugs seen only on it can't be supported."
+          >Unofficial firmware</span
+        >
+      {/if}
       {#if newer}
         <a class="newer" href="#/firmware" data-k="newer" title="Ferrite {newer} is out. Update the radio from the Update tab: your channels and settings stay."
           >{newer} available</a
@@ -289,5 +295,10 @@
   .theme-menu .ic {
     display: inline-block;
     width: 1.6em;
+  }
+  .unofficial {
+    color: var(--amber);
+    margin-left: 0.5em;
+    white-space: nowrap;
   }
 </style>

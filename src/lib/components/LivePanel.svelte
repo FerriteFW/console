@@ -234,7 +234,7 @@
           <dd>{bt}</dd>
         {/if}
         <dt>Firmware</dt>
-        <dd>{[radio.info.firmware, build?.name].filter(Boolean).join(" · ")}</dd>
+        <dd>{[radio.info.firmware, build?.name, build?.unofficial ? "Unofficial firmware" : ""].filter(Boolean).join(" · ")}</dd>
         {#if radio.info.callsign}<dt>Callsign</dt><dd>{radio.info.callsign}</dd>{/if}
       </dl>
     {:else}
