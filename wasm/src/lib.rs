@@ -132,6 +132,12 @@ pub fn protocol() -> String {
     .to_string()
 }
 
+/// LINK-19.8: the radio's screen colours under `theme` (RGB565, in `ui::PALETTE`'s order).
+#[wasm_bindgen]
+pub fn screen_palette(theme: u8) -> Vec<u16> {
+    ferrite_console_core::ui::palette(theme)
+}
+
 #[wasm_bindgen]
 pub fn status_text(status: u8, rest: &[u8]) -> String {
     answers::status_text(status, rest)

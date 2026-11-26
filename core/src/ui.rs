@@ -337,3 +337,49 @@ mod tests {
         assert_eq!(parse_line("a b=-").str("b"), Some("-"));
     }
 }
+
+/// LINK-19.8: the colours the radio draws its screen in under `theme` (its `state` line's `theme=`, MENU 0 7 1), as
+/// RGB565 in the order of [`PALETTE`]'s names: the radio's own table (`ferrite_ui::theme`), so Live View's look-alike
+/// parts and a `t` line's `-` background match the radio, theme for theme. An unknown theme draws as dark.
+pub fn palette(theme: u8) -> Vec<u16> {
+    use ferrite_ui::gfx::*;
+    use ferrite_ui::theme;
+    let was = theme::get();
+    theme::set(if theme <= theme::CYBERPUNK { theme } else { theme::DARK });
+    let out = vec![
+        theme::map_bg(BG),
+        theme::map_bg(SURFACE),
+        theme::map(LINE),
+        theme::map(TEXT),
+        theme::map(SUB),
+        theme::map(DIM),
+        theme::map(BLUE),
+        theme::map(BLUE_FG),
+        theme::map(GREEN),
+        theme::map(AMBER),
+        theme::map(RED),
+        theme::map(VIOLET),
+    ];
+    theme::set(was);
+    out
+}
+
+/// The names of [`palette`]'s colours: Console's CSS colour variables (`--bg`, `--surface`, ...).
+pub const PALETTE: [&str; 12] = ["bg", "surface", "line", "text", "sub", "dim", "blue", "blue-fg", "green", "amber", "red", "violet"];
+
+#[cfg(test)]
+mod palette_tests {
+    use super::*;
+
+    /// LINK-19.8: daylight's background is light and its text dark; dark's the other way round (the Discord report:
+    /// daylight text on Console's dark background was unreadable).
+    #[test]
+    fn daylight_and_dark_palettes_are_opposites() {
+        let lum = |c: u16| ((c >> 11) & 31) as u32 * 8 + ((c >> 5) & 63) as u32 * 4 + (c & 31) as u32 * 8;
+        let (dark, day) = (palette(0), palette(1));
+        assert!(lum(dark[0]) < lum(dark[3]), "dark: background darker than text");
+        assert!(lum(day[0]) > lum(day[3]), "daylight: background lighter than text");
+        assert_eq!(palette(9), dark, "an unknown theme draws as dark");
+        assert_eq!(palette(0).len(), PALETTE.len());
+    }
+}
