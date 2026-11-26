@@ -1,8 +1,9 @@
 <script lang="ts">
-  // The write's steps: the backup read (saved as a file), the diff with ferrite's own checks, the write on confirm,
+  // The write's steps: the backup read (kept in memory, LINK-21.2), the diff with ferrite's own checks, the write on confirm,
   // and the read back.
   import { channels, writeCount } from "../channels.svelte";
   import type { Change } from "../core";
+  import KeptBackup from "./KeptBackup.svelte";
 
   const w = $derived(channels.write);
   const plan = $derived(w && w.step !== "backup" ? w.plan : null);
@@ -74,7 +75,7 @@
           <p class="sub">{channels.progress.label}</p>
         {/if}
       {:else if w.step === "review"}
-        <p class="ok">Backup saved: <b>{w.backupName}</b> (your downloads). Load it here to put the radio back.</p>
+        <KeptBackup kept={w.kept} what="channels and zones" close={() => channels.closeWrite()} />
         {#if w.drifted}
           <p class="note">The radio changed since the table was read: this diff is against the radio as it is now.</p>
         {/if}
@@ -157,6 +158,7 @@
         {:else}
           <p class="note">Written, but the read back differs from the table. The table keeps your edits; Write again shows what didn't reach the radio.</p>
         {/if}
+        <KeptBackup kept={w.kept} what="channels and zones" written close={() => channels.closeWrite()} />
         <div class="actions"><button class="btn primary" onclick={() => channels.closeWrite()}>Close</button></div>
       {/if}
     </div>

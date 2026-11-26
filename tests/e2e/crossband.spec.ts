@@ -22,10 +22,8 @@ async function readRadio() {
 }
 
 async function write() {
-  const dl = page.waitForEvent("download", { timeout: long() });
   await page.getByRole("button", { name: "Write to radio…" }).click();
-  await dl;
-  await expect(dialog()).toContainText("Backup saved", { timeout: long() });
+  await expect(dialog()).toContainText("Backup kept in Console until it closes", { timeout: long() });
   await expect(dialog().locator("li")).toHaveCount(1);
   await expect(dialog().locator("li")).toContainText("Hang time");
   await dialog().getByRole("button", { name: "Write 1 change" }).click();

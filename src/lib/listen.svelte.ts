@@ -7,6 +7,7 @@ import { JITTER } from "./jitter";
 import { audioCounts, Health } from "./listenHealth";
 import { RECORD_MAX_MS, WavRecorder, wavName } from "./wavrec";
 import { saveBlob } from "./codeplug.svelte";
+import { saveLine } from "./download";
 import type { Link } from "./link";
 import { radio } from "./radio.svelte";
 
@@ -229,8 +230,8 @@ class Listen {
     this.recTimer = null;
     const blob = r.finish(performance.now());
     try {
-      const name = await saveBlob(wavName(), blob);
-      this.recNote = name ? [why, `Saved ${name}`].filter(Boolean).join(": ") : "";
+      const r = await saveBlob(wavName(), blob);
+      this.recNote = r.status === "cancelled" ? [why, "Recording not saved: cancelled"].filter(Boolean).join(": ") : [why, saveLine(r, "Saved").replace(/\.$/, "")].filter(Boolean).join(": ");
     } catch (e) {
       this.recNote = `Recording not saved: ${(e as Error).message}`;
     }

@@ -32,7 +32,7 @@ test("debug info: version, connection, the link's log", async ({ page }) => {
   expect(radioPart).toMatch(/^data channels=\d+ zones=\d+ /m);
   expect(radioPart).toContain("-- the readback (ui)");
   expect(radioPart).toMatch(/^bar lock=/m);
-  await expect(page.getByRole("status").filter({ hasText: "Saved as ferrite-console-debug-" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: /Saving as ferrite-console-debug-.* — check your browser.s downloads/ })).toBeVisible();
 });
 
 test("debug info: the previous session's log survives a restart", async ({ page }) => {

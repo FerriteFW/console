@@ -53,6 +53,12 @@ export async function shot(page: Page, info: TestInfo, name: string) {
 export async function openConsole(page: Page, section = "live", bridge?: string) {
   const url = bridge ?? process.env.FERRITE_E2E_BRIDGE;
   if (!url) throw new Error("FERRITE_E2E_BRIDGE is not set (the bridge fixture starts the bridge)");
+  // Chrome's save dialog (console#106) closes by itself in headless Chromium (a cancel): Console's saves take the
+  // download instead, which the tests catch. A test's own stand-in for the dialog (install.spec) is left alone.
+  await page.addInitScript(() => {
+    const p = (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+    if (typeof p === "function" && /\[native code\]/.test(String(p))) Object.defineProperty(window, "showSaveFilePicker", { value: undefined, configurable: true });
+  });
   await page.goto(`/?bridge=${encodeURIComponent(url)}#/${section}`);
   await closeWelcome(page);
 }
@@ -103,4 +109,24 @@ export async function allowUnsigned(page: Page) {
     await f.firmware.setDevUnsigned(true);
     f.install.recheckFerrite();
   });
+}
+
+/** LINK-21.2: a write's dialog says its backup is kept in Console (no download); "Save this backup…" saves it as a
+ *  .ferrite (a download here: helpers' openConsole leaves no save dialog), kept in the shots folder as `as`. The
+ *  file's path and its `part` (settings.json, channels.json…) parsed. */
+export async function saveKept(page: Page, dialog: ReturnType<Page["getByRole"]>, as: string, part: string, timeout = 30_000) {
+  await expect(dialog.locator('[data-k="kept"]')).toContainText("Backup kept in Console until it closes", { timeout });
+  const dl = page.waitForEvent("download", { timeout });
+  await dialog.getByRole("button", { name: "Save this backup…" }).click();
+  const d = await dl;
+  expect(d.suggestedFilename()).toMatch(/\.ferrite$/);
+  const path = join(shotsDir(), `${target()}-${as}`);
+  mkdirSync(shotsDir(), { recursive: true });
+  await d.saveAs(path);
+  await expect(dialog.locator('[data-k="kept-note"]')).toContainText("check your browser's downloads");
+  const { readZip } = await import("../../src/lib/zip");
+  const { readFileSync } = await import("node:fs");
+  const z = await readZip(readFileSync(path));
+  const text = z.get(`${part}.json`);
+  return { path, file: text ? JSON.parse(new TextDecoder().decode(text)) : null };
 }

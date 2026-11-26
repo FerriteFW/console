@@ -14,12 +14,16 @@ const badge = (page: Page, section: string) => page.locator("nav[aria-label=Sect
 const read = (page: Page, key: string) =>
   expect.poll(() => page.evaluate((k) => (window as any).ferrite.lists[k].base !== null, key), { timeout: long, message: `${key} read` }).toBe(true);
 
-/** Write with the list's toolbar: the backup downloads, the diff shows, then Write N changes and the read back. */
+/** Write with the list's toolbar: the backup kept in Console (LINK-21.2: nothing downloaded), the diff shows, then
+ *  Write N changes and the read back. */
 async function write(page: Page, toolbar: string, noun: string, review?: () => Promise<void>) {
-  const dl = page.waitForEvent("download", { timeout: long });
+  let downloads = 0;
+  const count = () => downloads++;
+  page.on("download", count);
   await page.getByRole("toolbar", { name: toolbar }).getByRole("button", { name: /^Write to radio/ }).click();
-  await dl;
-  await expect(dialog(page)).toContainText("Backup saved", { timeout: long });
+  await expect(dialog(page)).toContainText("Backup kept in Console until it closes", { timeout: long });
+  page.off("download", count);
+  expect(downloads).toBe(0);
   await review?.();
   await dialog(page).getByRole("button", { name: /^Write \d+ changes?$/ }).click();
   await expect(dialog(page)).toContainText(`Read back: the radio holds these ${noun}.`, { timeout: long });

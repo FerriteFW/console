@@ -3,13 +3,14 @@
   import { isTauri } from "../transport/native";
   import { CONSOLE_VERSION as version } from "../codeplug.svelte";
   import { saveDebugInfo } from "../debugdump";
+  import { saveLine } from "../download";
   import { radio } from "../radio.svelte";
   let debugNote = $state("");
   async function saveDebug() {
     debugNote = radio.connectedLink ? "Asking the radio about itself…" : "";
     try {
-      const name = await saveDebugInfo();
-      if (name) debugNote = `Saved as ${name}. Attach it to your report.`;
+      const r = await saveDebugInfo();
+      debugNote = r.status === "cancelled" ? saveLine(r, "Saved") : `${saveLine(r, "Saved")} Attach it to your report.`;
     } catch (e) {
       debugNote = `Not saved: ${(e as Error).message}`;
     }

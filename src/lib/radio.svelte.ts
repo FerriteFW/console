@@ -814,3 +814,15 @@ class Radio {
 
 export const radio = new Radio();
 export { sleep };
+
+/** The codeplug parts' own `radio` block: what the radio said about itself (INFO), without its unique ID (codeplugs
+ *  get shared; a .ferrite's manifest has the fingerprint for it). */
+export function partRadio(): Record<string, string> {
+  const i = radio.info;
+  const m: Record<string, string> = { connection: radio.label };
+  if (i) {
+    m.firmware = i.firmware;
+    m.callsign = i.callsign;
+  }
+  return m;
+}

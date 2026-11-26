@@ -6,6 +6,7 @@
   import { install as I, markerText } from "../install.svelte";
   import { Eta, etaText } from "../eta";
   import { radio } from "../radio.svelte";
+  import { saveLine } from "../download";
   import { signatureText } from "../signature";
   import { bridgeEnabled } from "../transport/bridge";
 
@@ -166,7 +167,10 @@
               not read by this reader
             {:else if I.iconsStock}
               stock's, kept with this backup (Back to stock puts them back)
-              <button class="btn quiet" onclick={async () => (iconsNote = (await I.saveIcons()) ? "Saved." : "")}>Save them as a file…</button>
+              <button class="btn quiet" onclick={async () => {
+                const r = await I.saveIcons();
+                iconsNote = r ? saveLine(r, "Saved") : "";
+              }}>Save them as a file…</button>
               {iconsNote}
             {:else}
               not stock's: an earlier Ferrite install wrote over them (Back to stock needs them from a file)

@@ -20,9 +20,7 @@ test("write: a lost second frame is recovered, never a crash (issue #33)", async
   await imp.getByRole("button", { name: /^Import \d+/ }).click();
   await expect(imp).toHaveCount(0);
   const wd = page.getByRole("dialog", { name: "Write to the radio" });
-  const dl = page.waitForEvent("download");
   await toolbar.getByRole("button", { name: /^Write to radio/ }).click();
-  await dl;
   await expect(wd.getByRole("button", { name: /^Write \d+ changes?$/ })).toBeVisible({ timeout: 30_000 });
   // The cable as Web Serial was: async writes, one at a time, a second while one is going refused.
   await page.evaluate(() => {

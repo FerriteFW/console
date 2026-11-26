@@ -1,4 +1,4 @@
-import { saveDownload } from "./download";
+import { saveDownload, type SaveResult } from "./download";
 // The drawn screen as a PNG at the radio's 240 x 320 (or 2x): the Live View's screen element rasterised through an
 // SVG foreignObject, with the page's own stylesheets, its colour tokens and Ferrite's fonts embedded, so the image is
 // what the Live View shows, not a redraw of it.
@@ -96,7 +96,7 @@ export function pngName(screenId: string | undefined, d = new Date()): string {
 }
 
 /** The PNG to the downloads (the desktop app: its Downloads folder, download.ts). */
-export function download(blob: Blob, name: string): Promise<string> {
+export function download(blob: Blob, name: string): Promise<SaveResult> {
   return saveDownload(name, blob);
 }
 

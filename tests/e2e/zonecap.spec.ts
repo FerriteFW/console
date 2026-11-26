@@ -2,8 +2,7 @@
 // ("<name> 1" with 256, "<name> 2" with 44), is written (the radio takes it) and read back; moving another channel
 // into the full zone is refused with the reason, and the editors mark it full. On a simulator of its own (300
 // channels written), never on a radio.
-import { join } from "node:path";
-import { disconnect, expect, onRadio, openConsole, shotsDir, state, test } from "./helpers";
+import { disconnect, expect, onRadio, openConsole, state, test } from "./helpers";
 import { startBridge, type Bridges } from "./procs";
 
 test.skip(onRadio(), "the simulator only");
@@ -48,9 +47,7 @@ test("a 300-channel import splits over two zones of 256 and 44; written, read ba
   expect(t.channels.filter((c) => c.zone === z2).length).toBe(44);
 
   // Write: the radio takes both zones (the plan's order never overfills one), and the read back matches.
-  const dl = page.waitForEvent("download");
   await toolbar.getByRole("button", { name: /^Write to radio/ }).click();
-  await (await dl).saveAs(join(shotsDir(), "sim-zonecap-backup.json"));
   const wd = page.getByRole("dialog", { name: "Write to the radio" });
   await wd.getByRole("button", { name: /^Write \d+ changes?$/ }).click();
   await expect(wd).toContainText("Read back: the radio holds the table.", { timeout: 60_000 });

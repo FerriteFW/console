@@ -4,7 +4,7 @@
 import { type Download, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { closeWelcome, connect, disconnect, expect, onRadio, openConsole, shot, shotsDir, state, test } from "./helpers";
+import { closeWelcome, connect, disconnect, expect, onRadio, openConsole, saveKept, shot, shotsDir, state, test } from "./helpers";
 
 let page: Page;
 /** The channel the tests edit, its name as read, and the name written (while it is on the radio). */
@@ -46,15 +46,12 @@ async function save(d: Download, as?: string) {
   return path;
 }
 
-/** Write to radio...: the backup downloads, the review shows. Returns the backup's path. */
-async function startWrite() {
-  const dl = page.waitForEvent("download", { timeout: onRadio() ? 120_000 : 30_000 });
+/** Write to radio...: the backup kept in Console (LINK-21.2), the review shows; `as`: the backup saved from the
+ *  dialog too (its channels part returned). */
+async function startWrite(as?: string) {
   await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
-  const backup = await dl;
-  expect(backup.suggestedFilename()).toMatch(/^ferrite-.*-backup\.json$/);
-  const path = await save(backup);
-  await expect(dialog()).toContainText("Backup saved", { timeout: onRadio() ? 120_000 : 30_000 });
-  return path;
+  await expect(dialog()).toContainText("Backup kept in Console until it closes", { timeout: onRadio() ? 120_000 : 30_000 });
+  return as ? (await saveKept(page, dialog(), as, "channels", onRadio() ? 120_000 : 30_000)).file : null;
 }
 
 async function commitWrite() {
@@ -117,9 +114,8 @@ test.describe.serial("edit", () => {
     await setName(name);
     await expect(row()).toHaveClass(/changed|edit|dirty/);
     await shot(page, info, "11-edited");
-    const backup = await startWrite();
     // The backup holds the radio as it was: the old name.
-    const file = JSON.parse(readFileSync(backup, "utf8"));
+    const file = await startWrite("channels-backup.ferrite");
     expect(file.format).toBe("ferrite-console-channels");
     expect(JSON.stringify(file)).toContain(JSON.stringify(original));
     // The diff: exactly this channel, its name old to new.

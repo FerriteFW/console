@@ -66,9 +66,11 @@
     const h = s.header!;
     const when = h.time ? new Date(h.time * 1000).toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-") : `slot${s.k}`;
     const mode = modeName(h.vis).replace(/\s+/g, "").toLowerCase();
-    c?.toBlob((b) => {
-      if (b) void saveBlob(`ferrite-sstv-${when}${mode ? `-${mode}` : ""}.png`, b);
-    }, "image/png");
+    if (!c) return;
+    // The save dialog first, from the click (console#106); the PNG made once a place is picked.
+    void saveBlob(`ferrite-sstv-${when}${mode ? `-${mode}` : ""}.png`, () => new Promise((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error("no PNG"))), "image/png")), {
+      type: "image/png",
+    }).catch((err) => console.error("SSTV PNG:", err));
   }
 
   const date = (t: number) => (t ? new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "time unknown");

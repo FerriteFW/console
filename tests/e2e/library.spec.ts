@@ -80,10 +80,8 @@ test.describe.serial("write", () => {
     await shot(page, info, "31-library-fixed-rows");
 
     // Write: backup, the diff (22 channels and the zone added), no problems.
-    const dl = page.waitForEvent("download", { timeout: long() });
     await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
-    await dl;
-    await expect(writeDialog()).toContainText("Backup saved", { timeout: long() });
+    await expect(writeDialog()).toContainText("Backup kept in Console until it closes", { timeout: long() });
     await expect(writeDialog().locator("h3.added")).toHaveText("Added (23)");
     await expect(writeDialog().locator("li", { hasText: zone })).toHaveCount(1);
     await shot(page, info, "32-library-fixed-diff");

@@ -1,14 +1,14 @@
 // Radio Settings as Svelte state: the record read from the radio (`base`) with the values of the settings it doesn't
 // carry (`baseExtras`: Watch and Battery Save, read from the radio record), the record and values being edited, and
-// the view of them (the radio's menu: numbers, names, values, choices). Read, write (a fresh read saved as a backup
-// file first, then the diff, then the write on confirm: the records' write session, then a read back), backup
-// files out and back in. Every value, choice, check and diff is the Rust core's (ferrite's own App and link session);
+// the view of them (the radio's menu: numbers, names, values, choices). Read, write (a fresh read kept in memory as
+// the backup first, LINK-21.2, then the diff, then the write on confirm: the records' write session, then a read
+// back), backup files back in. Every value, choice, check and diff is the Rust core's (ferrite's own App and link session);
 // this file moves records and lines.
 import { backupFailed } from "./backupError";
 import {
   extrasFromRadio,
   P,
-  settingsBackup,
+  settingsCodeplugPart,
   settingsLen,
   settingsMerge,
   settingsPlan,
@@ -22,9 +22,9 @@ import {
   type SettingsPlan,
   type SettingsView,
 } from "./core";
-import { download, stamp } from "./channels.svelte";
 import { RadioError, WriteError, type Link } from "./link";
-import { radio } from "./radio.svelte";
+import { prewrite, type Kept } from "./prewrite";
+import { partRadio, radio } from "./radio.svelte";
 
 export type SettingsWriteStep =
   | { step: "backup" }
@@ -32,7 +32,8 @@ export type SettingsWriteStep =
       step: "review";
       plan: SettingsPlan;
       fresh: Uint8Array;
-      backupName: string;
+      /** LINK-21.2: the fresh read, kept in memory (Put the radio back, Save this backup…). */
+      kept: Kept;
       /** LINK-21.1: what is written: the edits on the radio's record as it is now (a loaded file whole). */
       want: Uint8Array;
       wantEx: Extras;
@@ -43,11 +44,11 @@ export type SettingsWriteStep =
       whole: boolean;
     }
   | { step: "writing"; plan: SettingsPlan }
-  | { step: "done"; plan: SettingsPlan; verified: boolean; error: string };
+  | { step: "done"; plan: SettingsPlan; verified: boolean; error: string; kept: Kept };
 
 /** LINK-21.1: the review step of a write from the merge (shared with APRS settings). */
-export function reviewStep(plan: SettingsPlan, fresh: Uint8Array, backupName: string, m: Merged, whole: boolean): SettingsWriteStep {
-  return { step: "review", plan, fresh, backupName, want: m.record, wantEx: m.extras, radio: m.radio, overridden: m.overridden, whole };
+export function reviewStep(plan: SettingsPlan, fresh: Uint8Array, kept: Kept, m: Merged, whole: boolean): SettingsWriteStep {
+  return { step: "review", plan, fresh, kept, want: m.record, wantEx: m.extras, radio: m.radio, overridden: m.overridden, whole };
 }
 
 export const same = (a: Uint8Array | null, b: Uint8Array | null) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
@@ -122,23 +123,6 @@ class RadioSettings {
     return Object.fromEntries(v.groups.flatMap((g) => g.items.map((i) => [i.id, i.value])));
   }
 
-  private radioMeta(): Record<string, string> {
-    const i = radio.info;
-    const m: Record<string, string> = { connection: radio.label };
-    if (i) {
-      m.firmware = i.firmware;
-      m.callsign = i.callsign;
-      if (i.uid_text) m.uid = i.uid_text;
-    }
-    return m;
-  }
-
-  private fileBase() {
-    const i = radio.info;
-    const who = (i?.callsign || i?.uid_text?.replace(/\s/g, "").slice(0, 10) || "radio").replace(/[^A-Za-z0-9-]/g, "");
-    return `ferrite-${who}-${stamp()}-settings`;
-  }
-
   /** The settings record from the radio (READ what 1, in parts) and the terminal-backed values (its dump). */
   async readRadio(): Promise<{ record: Uint8Array; extras: Extras }> {
     const link = radio.connectedLink;
@@ -198,11 +182,11 @@ class RadioSettings {
     this.source = "Edits undone: as read";
   }
 
-  async backupRadio(): Promise<{ record: Uint8Array; extras: Extras; name: string }> {
+  /** LINK-21.2: a fresh read, kept in memory as the write's backup (a .ferrite's settings part); no file. */
+  async backupRadio(): Promise<{ record: Uint8Array; extras: Extras; kept: Kept }> {
     const { record, extras } = await this.readRadio();
-    const name = `${this.fileBase()}-backup.json`;
-    await download(name, settingsBackup(record, extras, new Date().toISOString(), this.radioMeta()), "application/json");
-    return { record, extras, name };
+    const kept = prewrite.keep("settings", { settings: settingsCodeplugPart(record, extras, new Date().toISOString(), partRadio()) }, radio.label);
+    return { record, extras, kept };
   }
 
   /** A backup file (or a codeplug's settings.json) into the editor as unwritten changes (Write then shows the diff to
@@ -227,21 +211,21 @@ class RadioSettings {
     }
   }
 
-  /** Step 1: a fresh read saved as a backup file; the edits put on it (LINK-21.1: only the fields edited since the
+  /** Step 1: a fresh read kept as the backup (LINK-21.2); the edits put on it (LINK-21.1: only the fields edited since the
    * read; what the radio changed meanwhile stays, and the dialog lists it); then the diff (and ferrite's dry run). */
   async startWrite() {
     if (!this.record) return;
     this.error = "";
     this.write = { step: "backup" };
     try {
-      const { record: fresh, extras, name } = await this.backupRadio();
+      const { record: fresh, extras, kept } = await this.backupRadio();
       if (this.keepPin) this.show(settingsKeepPin(this.record, fresh), this.extras);
       const m: Merged =
         this.base && this.baseFromRadio
           ? settingsMerge(this.base, this.baseExtras, this.record!, this.extras, fresh, extras, this.whole)
           : { record: this.record!, extras: this.extras, radio: [], overridden: [] };
       const plan = settingsPlan(fresh, extras, m.record, m.extras);
-      this.write = reviewStep(plan, fresh, name, m, this.whole);
+      this.write = reviewStep(plan, fresh, kept, m, this.whole);
     } catch (e) {
       this.write = null;
       this.error = backupFailed(e);
@@ -256,6 +240,7 @@ class RadioSettings {
     const plan = w.plan;
     const want = w.want;
     const wantEx = w.wantEx;
+    const kept = w.kept;
     this.write = { step: "writing", plan };
     let error = "";
     radio.busy = this.busy = "Writing settings";
@@ -276,7 +261,7 @@ class RadioSettings {
     } catch (e) {
       error ||= `the read back failed: ${(e as Error).message}`;
     }
-    this.write = { step: "done", plan, verified, error };
+    this.write = { step: "done", plan, verified, error, kept };
   }
 
   closeWrite() {
