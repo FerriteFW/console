@@ -158,7 +158,7 @@ async function open(page: Page, picker = false, at: "install" | "restore" = "ins
 
 const card = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
 const wizard = (page: Page) => page.getByRole("dialog", { name: "Install Ferrite" });
-/** The wizard's step on screen (Connect, Back up, SSB, Install, Done). */
+/** The wizard's step on screen (Connect, Back up, Install, Done; no SSB step: decision 457). */
 const step = (page: Page) => wizard(page).locator('[aria-current="step"]');
 
 async function backUp(page: Page) {
@@ -166,7 +166,7 @@ async function backUp(page: Page) {
   await expect(wizard(page).getByRole("button", { name: "Save the backup…" })).toBeVisible({ timeout: 90_000 });
 }
 
-test("install: back up, save, SSB from the stock file, install with the patch", async ({ page }, info) => {
+test("install: back up, save, install; no SSB file asked for", async ({ page }, info) => {
   const flash = chip();
   const flashPath = join(dir(), "flash.bin");
   writeFileSync(flashPath, flash);
@@ -206,15 +206,10 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   expect(z.has("icons.bin")).toBe(false);
   await b.getByRole("button", { name: "I have saved it" }).click();
   await expect(b.locator('[data-k="saved"]')).toContainText("saved");
-  await expect(step(page)).toHaveText("SSB");
-
-  await page.getByLabel("Stock firmware file").setInputFiles({ name: "RT_950Pro_test.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
-  await expect(page.locator('[data-k="ssb"]')).toContainText("1200 records");
-  await expect(page.locator('[data-k="ssb"]')).toContainText("not one Ferrite knows");
-  await b.getByRole("button", { name: "Continue" }).click();
-
+  // Decision 457: straight to Install; one line on SSB (none from this radio) and the way to add it later.
   await expect(step(page)).toHaveText("Install");
-  await expect(b).toContainText("with your SSB patch");
+  await expect(b.locator('[data-k="ssb"]')).toContainText("Firmware › Add SSB");
+  await expect(b.getByLabel("Stock firmware file")).toHaveCount(0);
   await expect(b.locator('[data-k="release"]')).toHaveText("Ferrite v9.8.7");
   await b.getByRole("button", { name: "Install Ferrite" }).click();
   await expect(page.getByRole("region", { name: "Installed" })).toContainText("The radio runs Ferrite v", { timeout: 60_000 });
@@ -229,7 +224,7 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   expect(rs[0].errors).toEqual([]);
   expect(rs[1].reader).toBe(false);
   expect(rs[1].errors).toEqual([]);
-  expect(rs[1].blocks).toBeGreaterThan(ferriteBtf.length / 1024 + 9); // the patch (9.6 KB) is in it
+  expect(rs[1].blocks).toBeLessThan(ferriteBtf.length / 1024 + 9); // no patch bundled (none from the radio)
 });
 
 test("install: a refused reader says why on Back up before it is pressed (console#102)", async ({ page }) => {
@@ -269,7 +264,7 @@ test("install: Chrome's save dialog saves the backup once and reads it back", as
   await expect(b.locator('[data-k="saved"]')).toContainText(/saved: rt950pro-backup-[0-9A-Z]{20}-\d{8}-\d{6}\.fbin/);
   expect(await page.evaluate(() => (window as unknown as { __writes: number }).__writes)).toBe(1);
   expect(downloads).toBe(0);
-  await expect(step(page)).toHaveText("SSB");
+  await expect(step(page)).toHaveText("Install");
 });
 
 test("install: a copy that passes every chunk but not the radio's CRC is read again at 115200, and then kept", async ({ page }) => {
@@ -322,7 +317,6 @@ test("install: a pending phone update is refused after the backup; a bad checksu
   // Proving the save by picking the file again works too.
   await page.getByLabel("Saved backup").setInputFiles({ name: "saved.bin", mimeType: "application/octet-stream", buffer: chip(true) });
   await expect(w.locator('[data-k="saved"]')).toContainText("saved.bin");
-  await w.getByRole("button", { name: "Skip" }).click();
   await expect(w.locator('[data-k="install-block"]')).toContainText("update is waiting");
   await expect(w.getByRole("button", { name: "Install Ferrite" })).toBeDisabled();
   expect(results().length).toBe(1); // the reader only
@@ -401,7 +395,7 @@ test("menu icons: the backup reads stock's tiles and keeps them for back to stoc
 
 });
 
-test("SSB from the radio: a run of patch records that isn't the known patch isn't taken; the stock file is asked for", async ({ page }) => {
+test("SSB from the radio: a run of patch records that isn't the known patch isn't taken; Install goes on without SSB, no file asked for", async ({ page }) => {
   // INST-10.1 (console#41): the backup reads stock's image window (mdump 0x08024000 98304) for the patch. The fake's
   // window holds synthetic records (never the real patch), so its hash isn't the known one: not taken, and said.
   const flashPath = join(dir(), "flash.bin");
@@ -423,12 +417,10 @@ test("SSB from the radio: a run of patch records that isn't the known patch isn'
   const z = await readZip(readFileSync(await dl.path()));
   expect(JSON.parse(new TextDecoder().decode(z.get("manifest.json")!)).ssb).toBeNull(); // only a known patch is noted
   await b.getByRole("button", { name: "I have saved it" }).click();
-  await expect(step(page)).toHaveText("SSB");
-  await expect(b.locator('[data-k="ssb-radio"]')).toContainText("not the one Ferrite knows");
-  await expect(b.locator('[data-k="ssb"]')).toHaveCount(0);
-  await page.getByLabel("Stock firmware file").setInputFiles({ name: "RT_950Pro_test.BTF", mimeType: "application/octet-stream", buffer: stockBtf });
-  await expect(page.locator('[data-k="ssb"]')).toContainText("1200 records"); // the file's, as before
-  await expect(b.locator('[data-k="ssb-radio"]')).toHaveCount(0);
+  await expect(step(page)).toHaveText("Install");
+  await expect(b.locator('[data-k="ssb"]')).toContainText("No SSB patch found on the radio");
+  await expect(b.locator('[data-k="ssb"]')).toContainText("Firmware › Add SSB");
+  await expect(b.getByLabel("Stock firmware file")).toHaveCount(0); // decision 457: no file asked for
 });
 
 test("menu icons: the marker's `dump: end` in a later read doesn't end the icon read", async ({ page }) => {

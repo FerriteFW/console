@@ -150,6 +150,24 @@ test("firmware: a whole update through the fake bootloader, then connected again
   expect(r.sha256).toBe(sha(btf));
 });
 
+test("firmware: Add SSB on a radio without the patch: a file with none, and one with a patch Ferrite doesn't know, send nothing", async ({ page }) => {
+  // INST-10.2 (decision 457): the radio says it holds no patch (SSB_WRITE CHECK, LINK-73). The tests have only
+  // synthetic records (never the real patch), whose hash isn't the known one: Console refuses them before sending.
+  setMode({});
+  await openConsole(page, "firmware");
+  await connect(page);
+  const card = page.getByRole("region", { name: "SSB" });
+  await expect(card.locator('[data-k="ssb-held"]')).toContainText("no SSB yet");
+  const pick = (name: string, buffer: Buffer) => page.getByLabel("Stock firmware for SSB").setInputFiles({ name, mimeType: "application/octet-stream", buffer });
+  await pick("ferrite-test.btf", testBtf(24));
+  await expect(card.locator('[data-k="ssb-error"]')).toContainText("No SSB patch in ferrite-test.btf");
+  const raw = readFileSync(new URL("../../core/tests/fixtures/ssb-synthetic.bin", import.meta.url));
+  const packed = Buffer.concat([raw.subarray(0, 0x400), Buffer.alloc(0x400), raw.subarray(0x400)]);
+  await pick("RT_950Pro_test.BTF", Buffer.concat([packed, Buffer.alloc((1024 - (packed.length % 1024)) % 1024, 0xff)]));
+  await expect(card.locator('[data-k="ssb-error"]')).toContainText("not the one Ferrite knows");
+  await expect(card.locator('[data-k="ssb-held"]')).toContainText("no SSB yet");
+});
+
 test("firmware: a radio older than the bundled release gets a link to Update in the top bar; the same or newer none", async ({ page }) => {
   setMode({});
   let bundled = "v9.8.7";

@@ -10,6 +10,8 @@
   import ReleaseNotes from "../components/ReleaseNotes.svelte";
   import { CONSOLE_DOWNLOADS } from "../updates.svelte";
   import { olderThan } from "../version";
+  import { ssb } from "../ssb.svelte";
+  import { untrack } from "svelte";
 
   let fileInput: HTMLInputElement;
   let wizard = $state(false);
@@ -50,6 +52,20 @@
   void firmware.loadBundled();
 
   const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`;
+
+  // INST-10.2: whether the connected radio has SSB, asked once a connection is up (and again after an update).
+  let ssbInput = $state<HTMLInputElement>();
+  const live = $derived(radio.phase === "connected");
+  $effect(() => {
+    if (live && !firmware.running) untrack(() => void ssb.refresh());
+    else if (!live) ssb.forget();
+  });
+  async function ssbPicked(e: Event) {
+    const el = e.currentTarget as HTMLInputElement;
+    const f = el.files?.[0];
+    el.value = "";
+    if (f) await ssb.add(f);
+  }
 </script>
 
 {#if wizard}<UpdateWizard onclose={() => (wizard = false)} />{/if}
@@ -84,6 +100,28 @@
   </section>
 
   <ReleaseNotes notes={firmware.notes} running={connected ? mine : ""} offered={latest} byHand={chosen} />
+
+  {#if live}
+    <section class="card" aria-label="SSB">
+      <h2>SSB receive</h2>
+      {#if ssb.held === true}
+        <p data-k="ssb-held">This radio has SSB: USB, LSB and CW work in HF mode.</p>
+      {:else if ssb.tooOld}
+        <p data-k="ssb-held">Update Ferrite first, then you can add SSB here.</p>
+      {:else if ssb.held === false}
+        <p data-k="ssb-held">This radio has no SSB yet, so USB, LSB and CW are hidden in HF mode. Add it from your stock firmware file (.BTF, from the radio maker's website). Console takes the part it needs from the file, here on this computer.</p>
+      {/if}
+      {#if ssb.held === false && !ssb.tooOld}
+        <div class="row">
+          <button class="btn" disabled={!!ssb.total || firmware.running || !!radio.busy} onclick={() => ssbInput?.click()}>Add SSB…</button>
+          <input bind:this={ssbInput} type="file" accept=".btf,.BTF" hidden aria-label="Stock firmware for SSB" onchange={ssbPicked} />
+          {#if ssb.total}<span class="sub" data-k="ssb-progress">Sending… {Math.round((ssb.done * 100) / ssb.total)}%{radio.kind === "cable" ? "" : " (slower over Bluetooth)"}</span>{/if}
+        </div>
+      {/if}
+      {#if ssb.notice}<p class="note" data-k="ssb-notice">{ssb.notice}</p>{/if}
+      {#if ssb.error}<p class="err" role="alert" data-k="ssb-error">{ssb.error}</p>{/if}
+    </section>
+  {/if}
 
   <details class="card" aria-label="Advanced" open={chosen || undefined}>
     <summary>Advanced: install a file (.ffw or .btf)</summary>

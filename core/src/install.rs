@@ -844,6 +844,28 @@ pub fn ssb_from_radio(window: &[u8], base: u32, known: &[[u8; 32]]) -> Option<Ve
     known.contains(&sha256(p)).then(|| p.to_vec())
 }
 
+// ---- the SSB patch into a radio already on Ferrite (INST-10.2, ferrite LINK-73) ----
+
+/// INST-10.2: the `SSB_WRITE` payloads that send `patch` (ferrite LINK-73): `BEGIN` with its length and SHA-256,
+/// `PROGRAM` pieces of 64 bytes, `FINISH`. None for bytes the radio won't store: not whole patch records, too long
+/// or short, or a hash not in `known` (the radio refuses an unknown one over the link).
+pub fn ssb_write_plan(patch: &[u8], known: &[[u8; 32]]) -> Option<Vec<Vec<u8>>> {
+    use ferrite_core::link::ssb;
+    let sha = sha256(patch);
+    let len = u32::try_from(patch.len()).ok()?;
+    if !ferrite_core::ssb::len_valid(len) || !ferrite_core::ssb::records_ok(patch) || !known.contains(&sha) {
+        return None;
+    }
+    let mut out = vec![ssb::begin(len, &sha).to_vec()];
+    for (k, piece) in patch.chunks(ssb::PROGRAM_MAX).enumerate() {
+        let mut b = vec![0u8; 3 + piece.len()];
+        ssb::program((k * ssb::PROGRAM_MAX) as u16, piece, &mut b);
+        out.push(b);
+    }
+    out.push(vec![ssb::FINISH]);
+    Some(out)
+}
+
 /// The image with the patch appended at the next 1 KB boundary after its last non-0xFF byte (INST-11), and where:
 /// ssbpatch.py's `bundle`.
 pub fn ssb_bundle(img: &[u8], patch: &[u8]) -> (Vec<u8>, usize) {
@@ -1422,6 +1444,32 @@ mod tests {
             t += &format!("{:X}:{hx}*{:02X}\r\n", addr as usize + 32 * i, c.iter().fold(0u8, |a, &x| a.wrapping_add(x)));
         }
         t + "dump: end\r\n> "
+    }
+
+    /// INST-10.2 (ferrite LINK-73): a patch Ferrite knows goes as `BEGIN`, 64-byte `PROGRAM` pieces in order whose
+    /// bytes are the patch, and `FINISH`; every piece passes the radio's own check. An unknown hash, a length that
+    /// isn't whole records, or bytes that aren't patch records give no plan.
+    #[test]
+    fn ssb_write_plan_sends_a_known_patch_in_pieces() {
+        use ferrite_core::link::ssb;
+        let (_, patch) = fake_mcu(Some(0), 11);
+        let patch = &patch[..1979 * REC];
+        let sha = sha256(patch);
+        let plan = ssb_write_plan(patch, &[sha]).expect("a known patch");
+        assert_eq!(plan.len(), 1 + 1979 * REC / 64 + 1 + 1);
+        assert_eq!(plan[0], ssb::begin(patch.len() as u32, &sha));
+        assert_eq!(plan.last().unwrap(), &vec![ssb::FINISH]);
+        let mut back = Vec::new();
+        for p in &plan[1..plan.len() - 1] {
+            let off = u16::from_le_bytes([p[1], p[2]]) as usize;
+            assert_eq!((p[0], off), (ssb::PROGRAM, back.len()));
+            assert!(ssb::piece_ok(off as u32, &p[3..], patch.len() as u32));
+            back.extend_from_slice(&p[3..]);
+        }
+        assert_eq!(back, patch);
+        assert_eq!(ssb_write_plan(patch, &[ferrite_core::ssb::KNOWN_SHA256]), None, "a hash the radio doesn't know");
+        assert_eq!(ssb_write_plan(&patch[..patch.len() - 4], &[sha256(&patch[..patch.len() - 4])]), None);
+        assert_eq!(ssb_write_plan(&[0u8; 8000], &[sha256(&[0u8; 8000])]), None, "not patch records");
     }
 
     /// INST-10.1: the patch found in the MCU window read with `mdump`, wherever it sits (any byte offset, both

@@ -111,7 +111,7 @@ pub fn protocol() -> String {
                  "REBOOT": msg::REBOOT, "KEY": msg::KEY, "CMD": msg::CMD, "MORE": msg::MORE, "UI": msg::UI, "READ_MANY": msg::READ_MANY, "WRITE_MANY": msg::WRITE_MANY, "USED": msg::USED,
                  "LOG_READ": msg::LOG_READ, "SUBSCRIBE": msg::SUBSCRIBE, "EVENT": msg::EVENT, "HEARD": msg::HEARD, "MSGS": msg::MSGS, "MSG_SEND": msg::MSG_SEND, "MSG_STOP": msg::MSG_STOP,
                  "MSG_DELETE": msg::MSG_DELETE, "AUDIO": msg::AUDIO, "AUDIO_DATA": msg::AUDIO_DATA,
-                 "DATA_READ": msg::DATA_READ, "DATA_WRITE": msg::DATA_WRITE, "CLOCK": msg::CLOCK, "STATE": msg::STATE, "TUNE": msg::TUNE, "BEACON": msg::BEACON },
+                 "DATA_READ": msg::DATA_READ, "DATA_WRITE": msg::DATA_WRITE, "CLOCK": msg::CLOCK, "STATE": msg::STATE, "TUNE": msg::TUNE, "BEACON": msg::BEACON, "SSB_WRITE": msg::SSB_WRITE },
         "data": { "READ": ferrite_console_core::link::data::READ, "CRC": ferrite_console_core::link::data::CRC,
                   "READ_MAX": ferrite_console_core::link::data::READ_MAX, "SECTOR": ferrite_console_core::link::data::SECTOR },
         "what": { "SETTINGS": what::SETTINGS, "CHANNEL": what::CHANNEL, "ZONE": what::ZONE, "PRESET": what::PRESET, "APRS": what::APRS, "POSITION": what::POSITION,
@@ -929,6 +929,19 @@ pub fn ssb_on_radio(window: &[u8]) -> String {
 #[wasm_bindgen]
 pub fn ssb_from_radio(window: &[u8]) -> Option<Vec<u8>> {
     install::ssb_from_radio(window, install::SSB_MCU_ADDR, &install::SSB_KNOWN)
+}
+
+/// INST-10.2 (ferrite LINK-73): the `SSB_WRITE` payloads for `patch`, each led by its length (u8), or nothing when
+/// it isn't the known stock patch (the radio takes no other over the link).
+#[wasm_bindgen]
+pub fn ssb_write_plan(patch: &[u8]) -> Option<Vec<u8>> {
+    let plan = install::ssb_write_plan(patch, &install::SSB_KNOWN)?;
+    let mut out = Vec::new();
+    for p in plan {
+        out.push(p.len() as u8);
+        out.extend_from_slice(&p);
+    }
+    Some(out)
 }
 
 /// hwtest's binary dump, the host's side: see `install::Fdump`.
