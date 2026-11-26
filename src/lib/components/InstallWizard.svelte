@@ -1,6 +1,7 @@
 <script lang="ts">
   let iconsNote = $state("");
-  // Install as a full-screen wizard (Alex, Oct 29): Connect → Back up → SSB → Install → Done, one step on screen.
+  // Install as a full-screen wizard (Alex, Oct 29): Connect → Back up → Install → Done, one step on screen. SSB has
+  // no step of its own (decision 457): nothing to choose, so the Install step says in one line whether it comes along.
   // The flow and every gate are install.svelte.ts's (decision 261; BACKUP-2: nothing writes until the backup is
   // verified and saved): this only shows the step the flow is at. It can't be closed while the radio is busy.
   import { install as I, markerText } from "../install.svelte";
@@ -14,20 +15,8 @@
   const bridge = bridgeEnabled();
   void I.load();
 
-  const names = ["Connect", "Back up", "SSB", "Install", "Done"];
-  // SSB is optional: the owner moves past it with Continue or Skip (and can come back from Install).
-  let ssbPast = $state(false);
-  const step = $derived(
-    I.installStep === "done"
-      ? 5
-      : I.installStep !== "idle" || (I.unlocked && ssbPast)
-        ? 4
-        : I.unlocked
-          ? 3
-          : I.connected || I.backupStep !== "idle"
-            ? 2
-            : 1,
-  );
+  const names = ["Connect", "Back up", "Install", "Done"];
+  const step = $derived(I.installStep === "done" ? 4 : I.installStep !== "idle" || I.unlocked ? 3 : I.connected || I.backupStep !== "idle" ? 2 : 1);
   /** Console's usual connection (the top bar) holds the radio: it runs Ferrite already. */
   const elsewhere = $derived(!I.connected && radio.phase !== "idle" && radio.phase !== "updating");
   const cableOk = $derived(radio.available().cable === true);
@@ -45,17 +34,6 @@
     location.hash = "#/firmware";
   }
 
-  async function picked(e: Event) {
-    const el = e.currentTarget as HTMLInputElement;
-    const files = Array.from(el.files ?? []);
-    el.value = "";
-    if (files.length) await I.pickFile("stock", files);
-  }
-  async function dropped(e: DragEvent) {
-    e.preventDefault();
-    const files = Array.from(e.dataTransfer?.files ?? []);
-    if (files.length) await I.pickFile("stock", files);
-  }
   async function checkSaved(e: Event) {
     const el = e.currentTarget as HTMLInputElement;
     const f = el.files?.[0];
@@ -204,46 +182,24 @@
         </div>
       {/if}
     {:else if step === 3}
-      <h3>SSB receive (optional)</h3>
-      <p class="good" data-k="saved">Backup saved: {I.savedWhere}</p>
-      {#if I.ssbFrom === "radio" && I.ssb}
-        <!-- INST-10.1: the backup read it from the radio's own stock firmware; no file needed. -->
-        <p>USB, LSB and CW need a patch that only the stock firmware carries.</p>
-        <p class="good" data-k="ssb">Found the SSB patch on the radio: {I.ssb.records} records, the known stock patch. Console adds it to Ferrite when it installs, here on this computer.</p>
-      {:else}
-        <p>USB, LSB and CW need a patch that only the stock firmware carries. Drop in your own stock .BTF (from the radio maker's website) and Console takes the patch from it, here on this computer. Without it, Ferrite installs and those modes stay hidden.</p>
-        {#if I.ssbRadioNote && !I.ssb}<p class="sub" data-k="ssb-radio">{I.ssbRadioNote}</p>{/if}
-        <label class="drop" ondragover={(e) => e.preventDefault()} ondrop={dropped}>
-          <input type="file" accept=".btf,.BTF" hidden aria-label="Stock firmware file" onchange={picked} />
-          {I.stock ? I.stock.name : "Drop your stock .BTF here, or click to choose"}
-        </label>
-        {#if I.ssb}
-          <p class="good" data-k="ssb">SSB patch found: {I.ssb.records} records, {I.ssb.known ? "the known stock patch" : "not one Ferrite knows (the radio asks before storing it)"}.</p>
-        {:else if I.ssbError}
-          <p class="warn">{I.ssbError}</p>
-        {/if}
-      {/if}
-      {#if I.stock && I.ssbFrom !== "radio"}
-        <label class="check"><input type="checkbox" checked={I.keepStock} onchange={(e) => I.setKeepStock((e.currentTarget as HTMLInputElement).checked)} /> Keep this file in this browser for Back to stock</label>
-      {/if}
-      <div class="row">
-        <button class="btn" onclick={close}>Cancel</button>
-        {#if I.ssb}
-          <button class="btn primary" onclick={() => (ssbPast = true)}>Continue</button>
-        {:else}
-          <button class="btn primary" onclick={() => (ssbPast = true)}>Skip</button>
-        {/if}
-      </div>
-    {:else if step === 4}
       <h3>Ready to install</h3>
+      <p class="good" data-k="saved">Backup saved: {I.savedWhere}</p>
       {#if I.ferrite && I.ferriteCheck}
-        <p><span data-k="release">Ferrite {I.ferriteCheck.version ?? "(no version)"}</span>{#if I.ferriteSource === "bundled"}<span class="sub">, included with Console, checksum checked</span>{:else}<span class="sub">, from {I.ferrite.name}</span>{/if}{#if I.ssb}<span class="sub">, with your SSB patch</span>{/if}</p>
+        <p><span data-k="release">Ferrite {I.ferriteCheck.version ?? "(no version)"}</span>{#if I.ferriteSource === "bundled"}<span class="sub">, included with Console, checksum checked</span>{:else}<span class="sub">, from {I.ferrite.name}</span>{/if}</p>
         <!-- A bad signature is also in the image's problems (the install block says it). -->
         {#if I.ferriteSignature && I.ferriteSignature.kind !== "bad"}
           <p class="sub" data-k="signature">{signatureText(I.ferriteSignature)}</p>
         {/if}
       {:else if I.releaseError}
         <p class="warn">{I.releaseError}</p>
+      {/if}
+      <!-- INST-10.1, decision 457: the patch from the radio's own stock firmware, or none; never a file asked for. -->
+      {#if I.ssb}
+        <p class="good" data-k="ssb">Found the SSB patch on the radio. USB, LSB and CW will work.</p>
+      {:else if I.icons && !I.iconsStock}
+        <p class="sub" data-k="ssb">SSB: the radio keeps what it has. To add it, use Firmware › Add SSB after the install.</p>
+      {:else}
+        <p class="sub" data-k="ssb">No SSB patch found on the radio. Ferrite installs without it, so USB, LSB and CW stay hidden. You can add them later in Firmware › Add SSB, with your stock .BTF file.</p>
       {/if}
       {#if I.installStep === "idle"}
         {#if I.installBlock}
@@ -257,7 +213,6 @@
         {/if}
         {#if elsewhere}{@render connect(true, false)}{/if}
         <div class="row">
-          <button class="btn quiet back" onclick={() => (ssbPast = false)}>Back</button>
           <button class="btn" onclick={close}>Cancel</button>
           {#if I.connected || elsewhere}
             <button class="btn primary" disabled={!!I.installBlock || I.running} onclick={() => I.install()}>Install Ferrite</button>
@@ -404,9 +359,6 @@
   .save .row {
     margin-top: 10px;
   }
-  .back {
-    margin-right: auto;
-  }
   .sub,
   .msg {
     color: var(--sub);
@@ -476,25 +428,6 @@
   }
   progress {
     width: 100%;
-  }
-  .drop {
-    display: block;
-    padding: 28px 16px;
-    border: 1px dashed var(--line);
-    border-radius: 8px;
-    text-align: center;
-    cursor: pointer;
-    color: var(--sub);
-    overflow-wrap: anywhere;
-  }
-  .drop:hover {
-    background: var(--raised);
-    border-color: var(--blue);
-  }
-  .check {
-    display: flex;
-    gap: 6px;
-    align-items: center;
   }
   .done {
     text-align: center;

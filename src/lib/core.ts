@@ -85,7 +85,7 @@ export type Timing = {
   hold_for_long_ms: number;
 };
 export type Protocol = {
-  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "USED" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK" | "STATE" | "TUNE" | "BEACON", number>;
+  msg: Record<"HELLO" | "INFO" | "AUTH" | "READ" | "WRITE" | "DELETE" | "BEGIN" | "END" | "SLOT" | "BAUD" | "REBOOT" | "KEY" | "CMD" | "MORE" | "UI" | "READ_MANY" | "WRITE_MANY" | "USED" | "LOG_READ" | "SUBSCRIBE" | "EVENT" | "HEARD" | "MSGS" | "MSG_SEND" | "MSG_STOP" | "MSG_DELETE" | "AUDIO" | "AUDIO_DATA" | "DATA_READ" | "DATA_WRITE" | "CLOCK" | "STATE" | "TUNE" | "BEACON" | "SSB_WRITE", number>;
   /** LINK-59: `DATA_READ`'s ops and its most bytes, and the erase unit. */
   data: { READ: number; CRC: number; READ_MAX: number; SECTOR: number };
   what: Record<"SETTINGS" | "CHANNEL" | "ZONE" | "PRESET" | "APRS" | "POSITION" | "QUICK" | "WAYPOINT" | "DTMF" | "PRESET_SKIPS" | "SAT" | "SAT_INFO" | "RADIO", number>;
@@ -573,6 +573,15 @@ export const parseMdumpSsb = (text: string): Uint8Array | null => wasm.parse_mdu
 export const ssbOnRadio = (window: Uint8Array): SsbOnRadio => JSON.parse(wasm.ssb_on_radio(window));
 /** INST-10.1: the known stock patch from that read, or null. */
 export const ssbFromRadio = (window: Uint8Array): Uint8Array | null => wasm.ssb_from_radio(window) ?? null;
+/** INST-10.2 (ferrite LINK-73): the `SSB_WRITE` payloads that send `patch` (BEGIN, the pieces, FINISH), or null when
+ *  it isn't the known stock patch. */
+export function ssbWritePlan(patch: Uint8Array): Uint8Array[] | null {
+  const flat: Uint8Array | undefined = wasm.ssb_write_plan(patch);
+  if (!flat) return null;
+  const out: Uint8Array[] = [];
+  for (let i = 0; i < flat.length; i += 1 + flat[i]) out.push(flat.slice(i + 1, i + 1 + flat[i]));
+  return out;
+}
 export const restoreStart = (rest: Uint8Array): RestoreStart | null => JSON.parse(wasm.restore_start(rest));
 /** The backup's file name, carrying the radio's ID (decision 263). */
 export const backupName = (uid: string, date: string, marker: Uint8Array | null = null): string => wasm.backup_name(uid, date, marker ?? undefined);

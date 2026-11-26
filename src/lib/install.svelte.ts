@@ -5,10 +5,9 @@
 //   2. Back up: the reader image (Ferrite's read-only reader, or hwtest's) through the bootloader; the whole SPI flash read
 //      with the Rust reader's fdumpz (230400 baud, coded 16 KB chunks with a CRC each, BACKUP-9.6) or hwtest's fdump
 //      (500 kbaud down, 4 KB frames), checked against the radio's own flashcrc; saved by the owner before anything else.
-//   3. SSB (optional): the patch the backup found in the radio's own stock firmware (INST-10.1), else from the
-//      owner's own stock .BTF, found in the browser.
-//   4. Install: the bundled release (SHA-256 checked) or a file, with the patch bundled; refused without a saved
-//      backup or over a pending phone update.
+//   3. Install: the bundled release (SHA-256 checked) or a file, with the SSB patch bundled when the backup found it
+//      in the radio's own stock firmware (INST-10.1; no file asked for, decision 457: without it Firmware › Add SSB
+//      adds it later, INST-10.2); refused without a saved backup or over a pending phone update.
 //   Back to stock: the backup written into Ferrite's own ranges over the link (STOCK_RESTORE, never calibration or
 //   the update area: core/src/install.rs), then the stock .BTF through the bootloader, padded over stock's marker
 //   sector's first page with the marker the backup read put back (BACKUP-12, ferrite decision 338).
@@ -45,7 +44,6 @@ import {
   restoreStart,
   sha256Hex,
   ssbDescribe,
-  ssbExtract,
   ssbFromRadio,
   ssbOnRadio,
   statusText,
@@ -410,14 +408,11 @@ class Install {
   // 3. SSB
   stock = $state<Picked | null>(null);
   stockCheck = $state<ImageCheck | null>(null);
+  /** INST-10.1: the SSB patch the backup found in the radio's own stock image, bundled by Install; null: Install goes
+   *  without it (decision 457: the wizard asks for no file; Firmware › Add SSB adds it later, INST-10.2). */
   ssb = $state<SsbFound | null>(null);
-  ssbError = $state("");
-  /** INST-10.1: where the patch came from: the radio's own stock image (read by the backup) or the owner's file. */
-  ssbFrom = $state<"" | "radio" | "file">("");
   /** INST-10.1: what the backup's look in stock's image found, or null (not looked: already on Ferrite, or no backup). */
   ssbRadio = $state<SsbOnRadio | null>(null);
-  /** INST-10.1: why the backup has no patch from the radio (shown on the SSB step), or "". */
-  ssbRadioNote = $state("");
   keepStock = $state(false);
   // 4. Install
   release = $state<Release | null>(null);
@@ -675,26 +670,10 @@ class Install {
     }
   }
 
-  /** INST-10: the owner's stock file; the patch found here, never sent anywhere. Kept for the way back. */
+  /** The owner's stock file, for Back to stock (BACKUP-8). It never feeds Install's SSB (decision 457). */
   private pickStock(p: Picked) {
     this.stock = p;
     this.stockCheck = imageCheck("stock", p.bytes);
-    if (this.ssbFrom === "radio") return; // INST-10.1: the radio's own patch stays; the file is for Back to stock
-    this.ssbError = "";
-    this.patch = null;
-    this.ssb = null;
-    if (this.stockCheck.problems.length) {
-      this.ssbError = this.stockCheck.problems.join(" ");
-      return;
-    }
-    const patch = ssbExtract(p.bytes);
-    if (!patch) {
-      this.ssbError = "No SSB patch in this file. Ferrite installs without it: USB, LSB and CW stay hidden.";
-      return;
-    }
-    this.patch = patch;
-    this.ssb = ssbDescribe(patch);
-    this.ssbFrom = "file";
   }
 
   async setKeepStock(on: boolean) {
@@ -706,12 +685,6 @@ class Install {
   clearStock() {
     this.stock = null;
     this.stockCheck = null;
-    if (this.ssbFrom !== "radio") {
-      this.ssb = null;
-      this.patch = null;
-      this.ssbFrom = "";
-    }
-    this.ssbError = "";
     void keep.drop();
     this.keepStock = false;
   }
@@ -986,7 +959,6 @@ class Install {
   private async ssbFromStock(w: Wire) {
     this.dropRadioPatch();
     if (this.icons && !this.iconsStock) {
-      this.ssbRadioNote = "This radio doesn't run its stock firmware, so its SSB patch can't be read from it.";
       debugLog("backup: SSB patch not looked for (the menu icons aren't stock's)");
       return;
     }
@@ -994,7 +966,6 @@ class Install {
     const { text, done } = await this.mdump(w, MDUMP_SSB, "8024000:", 60_000);
     const window = done ? parseMdumpSsb(text) : null;
     if (!window) {
-      this.ssbRadioNote = "Console couldn't read the stock firmware's SSB patch from the radio.";
       debugLog(`backup: SSB read ${done ? "ended" : "never ended"} without a whole window (${text.length} chars)`);
       return;
     }
@@ -1002,27 +973,14 @@ class Install {
     this.ssbRadio = f;
     debugLog(`backup: SSB patch ${f.found}${f.found === "none" ? "" : ` at 0x${f.addr.toString(16)}, ${f.records} records, SHA-256 ${f.sha256}`}`);
     const patch = f.found === "known" ? ssbFromRadio(window) : null;
-    if (!patch) {
-      this.ssbRadioNote =
-        f.found === "unknown"
-          ? "The radio's stock firmware holds something like an SSB patch, but not the one Ferrite knows, so Console didn't take it."
-          : "No SSB patch found in the radio's stock firmware.";
-      return;
-    }
-    this.ssbRadioNote = "";
+    if (!patch) return;
     this.patch = patch;
     this.ssb = ssbDescribe(patch);
-    this.ssbFrom = "radio";
-    this.ssbError = "";
   }
 
-  /** INST-10.1: forget what an earlier backup read from the radio; the owner's file, if any, stands again. */
+  /** INST-10.1: forget what an earlier backup read from the radio. */
   private dropRadioPatch() {
-    this.ssbRadio = null;
-    this.ssbRadioNote = "";
-    if (this.ssbFrom !== "radio") return;
-    [this.patch, this.ssb, this.ssbFrom] = [null, null, ""];
-    if (this.stock) this.pickStock(this.stock);
+    [this.ssbRadio, this.patch, this.ssb] = [null, null, null];
   }
 
   /** A ranged `mdump`, taken whole through the sink (the text keeps 8 KB): its text, and whether it ended (`dump:
