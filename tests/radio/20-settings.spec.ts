@@ -56,7 +56,7 @@ test.afterAll(async () => {
 test("read: Console shows what the radio's own menu holds", async ({ oracle }, info) => {
   await readRadio();
   was = await beep().inputValue();
-  expect(await oracle.get("0 7 5 1")).toBe(`${BEEP}: ${was}`);
+  expect((await oracle.get("0 7 5 1")).replace(" (not the default)", "")).toBe(`${BEEP}: ${was}`);
   await shot(page, info, "20-settings-read");
 });
 
@@ -66,7 +66,7 @@ test("write: Key beep flipped in Console, and the radio's menu says so", async (
   await beep().selectOption(to);
   await writeOne();
   flipped = true;
-  expect(await oracle.get("0 7 5 1")).toBe(`${BEEP}: ${to}`);
+  expect((await oracle.get("0 7 5 1")).replace(" (not the default)", "")).toBe(`${BEEP}: ${to}`);
   const changed = byteDiff(before, await oracle.settings());
   console.log(`Key beep ${was} -> ${to}: settings bytes ${changed.join(", ")}`);
   expect(changed.length).toBeGreaterThan(0);
@@ -79,6 +79,6 @@ test("put back: the settings record is as it began", async ({ oracle }) => {
   await beep().selectOption(was!);
   await writeOne();
   flipped = false;
-  expect(await oracle.get("0 7 5 1")).toBe(`${BEEP}: ${was}`);
+  expect((await oracle.get("0 7 5 1")).replace(" (not the default)", "")).toBe(`${BEEP}: ${was}`);
   expect(byteDiff(startSnapshot().settings, await oracle.settings())).toEqual([]);
 });

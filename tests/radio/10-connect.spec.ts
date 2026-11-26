@@ -20,7 +20,7 @@ test("Console and the radio agree on what is connected", async ({ page, oracle }
   // A radio whose data waits in an older layout (UPD-16): Console reads and writes nothing until it's moved, and only
   // Alex moves a radio's data. Stop here, saying so, rather than fail in every later stage.
   const banner = page.getByRole("alert", { name: "Finish the update" });
-  expect(await banner.isVisible(), `${await banner.textContent().catch(() => "")} Finish the update by hand, then run again.`).toBe(false);
+  if (await banner.isVisible()) throw new Error(`${await banner.textContent()} Finish the update by hand, then run again.`);
 });
 
 test("a key in Live View moves the radio", async ({ page, oracle }, info) => {
