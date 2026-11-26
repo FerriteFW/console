@@ -39,4 +39,4 @@ Issues are what help most: bugs, ideas, design suggestions and fixes. We'd rathe
 
 ## Licence
 
-[PolyForm Noncommercial 1.0.0](LICENSE.md), copyright 2026 Alex Harvey: free for any noncommercial use.
+[PolyForm Noncommercial 1.0.0](LICENSE.md), copyright 2026 Alex Harvey: free for any noncommercial use. The names "Ferrite Console" and "Ferrite" and the logo are for FerriteFW's own releases: a changed build takes another name ([TRADEMARKS.md](https://github.com/FerriteFW/ferrite/blob/main/TRADEMARKS.md)).

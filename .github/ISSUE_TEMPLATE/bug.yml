@@ -1,0 +1,34 @@
+name: Bug report
+description: Something in Ferrite Console doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. We fix bugs in official releases: a bug seen only with unofficial firmware or an unofficial build of Console is closed unless it also happens with official releases.
+  - type: input
+    id: console
+    attributes:
+      label: Console version and system
+      description: From Console's About, and your system, for example "0.9.7, macOS 15 (desktop app)".
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Radio's firmware
+      description: The version line from the radio's About (MENU 0 9 8), and whether it says "Unofficial build" (Console then shows "Unofficial firmware"). "Stock" if it isn't on Ferrite.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what happened, what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Please attach the debug info (About › Save debug info), and screenshots.

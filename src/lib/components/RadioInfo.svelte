@@ -28,7 +28,10 @@
       <dd>{radio.info.firmware}</dd>
       <dt>Build</dt>
       <dd>
-        {build ? build.name : "not given"}{#if build?.bench}<span class="tag">bench</span>{/if}{#if build?.dry}<span
+        {build ? build.name : "not given"}{#if build?.unofficial}<span
+            class="tag dry"
+            title="Not an official Ferrite release (SELF-5.1)">Unofficial firmware</span
+          >{/if}{#if build?.bench}<span class="tag">bench</span>{/if}{#if build?.dry}<span
             class="tag dry"
             title="Dry TX on: the PA drive held at 0 (TX-48)">dry TX</span
           >{/if}

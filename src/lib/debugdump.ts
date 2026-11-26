@@ -53,6 +53,8 @@ export function debugText(report?: string[]): string {
     "",
     "== connection",
     `phase ${radio.phase}, ${radio.kind ?? "none"} ${radio.label}, baud ${radio.baud ?? "-"}, note "${radio.note}", error "${radio.error}", fails ${radio.fails}`,
+    // SELF-5.1: said plainly, so a report from unofficial firmware is seen at once
+    `firmware: ${radio.info?.firmware ?? radio.hello?.firmware ?? "not connected"}${(radio.info?.build ?? radio.hello?.build)?.unofficial ? ", Unofficial firmware" : ""}`,
     `hello: ${json(radio.hello)}`,
     `info: ${json(radio.info)}`,
     `radio crash (SAFE-8.2): ${radio.crash ? json(radio.crash) : "none seen this session"}`,

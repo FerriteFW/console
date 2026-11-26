@@ -4,7 +4,8 @@ import init, * as wasm from "../core-wasm/core.js";
 
 export type Answer = { ty: number; seq: number; status: number; rest: number[]; event?: boolean };
 
-export type Build = { byte: number; name: string; bench: boolean; dry: boolean };
+/** LINK-35's build byte; `unofficial` (SELF-5.1): any build but an official release (Console says "Unofficial firmware"). */
+export type Build = { byte: number; name: string; bench: boolean; dry: boolean; unofficial: boolean };
 /** LINK-62: the layout this firmware stores and the one the chip's data is in (they differ while it waits for
  *  Console to move the data: the radio shows D25 "Finish the update", UPD-16). */
 export type Layouts = { firmware: number; chip: number };
