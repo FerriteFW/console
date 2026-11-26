@@ -60,3 +60,13 @@ export const restoreProgress = (): RestoreProgress => ({ ranges: 0, verified: 0,
 export function stockOnlyAllowed(p: RestoreProgress): boolean {
   return p.ranges > 0 && p.verified === p.ranges && p.finished && p.stockBlocks > 0;
 }
+
+/**
+ * Why Back up can't start for want of a usable reader image, or "" when it can (console#102: a refused reader, such
+ * as an unsigned one with Allow unsigned files off, left the button looking dead with nothing said).
+ */
+export function readerProblem(hasReader: boolean, problems: readonly string[] | undefined): string {
+  if (!hasReader) return "This copy of Console can't take a backup: it has no reader image. Choose one under Advanced on the Install page.";
+  if (!problems?.length) return "";
+  return `Console can't take the backup: the reader image is refused (${problems.join("; ")}). Close this and fix it under Advanced on the Install page.`;
+}
