@@ -24,6 +24,10 @@ export type RadioConf = { name: string; cable: string; ble: string; build: strin
 /** FERRITE_RADIO (default: radios.toml's default) from ~/.config/ferrite/radios.toml; the cable is the one CH340
  *  plugged in (FERRITE_RADIO_SERIAL to name it). Only a radio with `cable = true` and a Bluetooth ID will do. */
 export function radioConf(): RadioConf {
+  // FERRITE_RADIO=sim: a headless simulator (setup.ts starts it), checked over its Bluetooth side, to try the stages
+  // without a radio. The stages that flash skip there.
+  if (process.env.FERRITE_RADIO === "sim")
+    return { name: "sim", cable: "", ble: process.env.FERRITE_RADIO_ORACLE ?? "", build: "", backup: "" };
   const path = join(homedir(), ".config", "ferrite", "radios.toml");
   const toml = existsSync(path) ? readFileSync(path, "utf8") : "";
   const name = process.env.FERRITE_RADIO ?? /^default\s*=\s*"([^"]+)"/m.exec(toml)?.[1] ?? "black";

@@ -1,14 +1,26 @@
 // Before the journey: which radio and cable, a look at the radio over Bluetooth (its firmware and what it holds, kept
 // in test-results/radio-run/start.json for the last stage), then the bridge on its cable for Console.
 // Refuses a radio whose build isn't the one radios.toml names, so a run never edits the wrong radio.
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { startBridge } from "../e2e/procs";
-import { Oracle, radioConf, runDir, type Snapshot } from "./radio";
+import { buildSim, startBridge } from "../e2e/procs";
+import { ferriteDir, Oracle, python, radioConf, runDir, type Snapshot } from "./radio";
 
 const BUILDS: Record<string, string> = { "tx-bench": "tx+dry", tx: "tx", receive: "receive" };
 
 export default async function setup() {
+  let stopSim: (() => void) | null = null;
+  if (process.env.FERRITE_RADIO === "sim") {
+    buildSim();
+    const b = await startBridge();
+    stopSim = b.stop;
+    process.env.FERRITE_E2E_BRIDGE = b.url;
+    // Bluetooth on (MENU 0 9 2 1) over the cable before Console holds it; the oracle then uses the Bluetooth side.
+    const on = spawnSync(python(), [`${ferriteDir}/tools/ferrite_link.py`, `tcp:127.0.0.1:${b.ports!.term}`, "term", "set 0 9 2 1 On"], { encoding: "utf8" });
+    if (on.status !== 0) throw new Error(`simulator Bluetooth on: ${on.stdout}${on.stderr}`);
+    process.env.FERRITE_RADIO_ORACLE = `tcp:127.0.0.1:${b.ports!.bt}`;
+  }
   const radio = radioConf();
   console.log(`radio journey: ${radio.name} on ${radio.cable}, checked over ${radio.ble}`);
   const o = new Oracle(radio.ble);
@@ -33,6 +45,7 @@ export default async function setup() {
   writeFileSync(join(runDir, "start.json"), JSON.stringify(snap, null, 1));
   console.log(`  ${snap.firmware} ${snap.build}: ${snap.channels.length} channels, ${snap.zones.length} zones, ${snap.presets.length} presets`);
   process.env.FERRITE_E2E_TARGET = "radio";
+  if (stopSim) return async () => stopSim!();
   if (process.env.FERRITE_E2E_BRIDGE) return;
   const b = await startBridge(radio.cable);
   process.env.FERRITE_E2E_BRIDGE = b.url;

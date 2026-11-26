@@ -72,8 +72,12 @@ test("read: Console's table holds the channels the radio holds", async ({ oracle
 });
 
 test("add: a new channel in Console is on the radio after Write", async ({ oracle }, info) => {
-  await toolbar().locator("..").getByRole("button", { name: "+ Add channel" }).click();
-  num = await state(page, (f) => Math.max(...f.channels.table.channels.map((c: any) => c.number as number)));
+  const nums = () => state(page, (f) => f.channels.table.channels.map((c: any) => c.number as number));
+  const had = new Set(await nums());
+  await page.getByRole("button", { name: "+ Add channel" }).click();
+  // The number Console gave it (the first free one, not always the last)
+  num = (await nums()).find((n) => !had.has(n))!;
+  expect(num).toBeGreaterThan(0);
   expect(await oracle.channel(num)).toBeNull(); // a free number on the radio too
   const name = `E2E ${stamp}`;
   await row().getByLabel("Name").fill(name);
