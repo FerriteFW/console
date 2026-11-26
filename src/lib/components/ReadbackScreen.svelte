@@ -3,6 +3,7 @@
   // screens (home's cards, lists, help, toasts, the hint bar), not pixel-identical. The pixel mirror (SCREEN) gets
   // its own source (PixelScreen.svelte); this one stays as the fallback and for Bluetooth.
   import type { Kv, ScreenItem, Ui, UiLine } from "../core";
+  import { PALETTE, screenPalette } from "../core";
 
   let { ui }: { ui: Ui } = $props();
 
@@ -69,6 +70,27 @@
     const bg = it.bg === null ? "" : `background:${css565(it.bg)};`;
     return box + bg + `color:${css565(it.fg)};font:${weight} ${size}px/${it.h}px ${family(fam)};`;
   }
+
+  /**
+   * LINK-19.8: the radio's theme (its `state` line's `theme=`), so the screen and Console's own parts of it (bar,
+   * cards, rows, hints) take the radio's colours, not Console's: a daylight radio's dark text drawn on Console's dark
+   * background was unreadable (Discord, Nov 25, 2026). A radio before 0.9.8 doesn't say: a screen sent as drawn is
+   * judged by its text on the screen's own background (mostly dark text: daylight), else Console's own colours.
+   */
+  const radioTheme = $derived.by((): number | null => {
+    const t = ui.state.theme;
+    if (t !== undefined && t !== null && t !== "") return n(t);
+    const own = items.filter((it) => it.k === "t" && it.bg === null) as Extract<ScreenItem, { k: "t" }>[];
+    if (!own.length) return null;
+    const lum = (c: number) => ((c >> 11) & 31) * 8 * 0.3 + ((c >> 5) & 63) * 4 * 0.59 + (c & 31) * 8 * 0.11;
+    const darkText = own.filter((it) => lum(it.fg) < 128).length;
+    return darkText * 2 > own.length ? 1 : 0;
+  });
+  const paletteVars = $derived.by(() => {
+    if (radioTheme === null) return "";
+    const p = screenPalette(radioTheme);
+    return PALETTE.map((k, i) => `--${k}:${css565(p[i])};`).join("");
+  });
 
   /** A text squeezed to the width the radio measured, when Console's font runs wider (never stretched). */
   function fit(el: HTMLElement, w: number) {
@@ -145,7 +167,7 @@
   <div class="aprsrow st"><span class="l"><b class:t={first}>{r.call}</b> <span class="age">{r.age}</span></span><span class="r">{r.right}</span></div>
 {/snippet}
 
-<div class="screen" data-readback-screen style:width={`${W}px`} style:height={`${H}px`} aria-label="The radio's screen, from the UI readback">
+<div class="screen" data-readback-screen data-theme-radio={radioTheme ?? undefined} style={paletteVars} style:width={`${W}px`} style:height={`${H}px`} aria-label="The radio's screen, from the UI readback">
   <!-- status bar -->
   <div class="sbar" style:height={`${BAR}px`}>
     <span class="title">{title}</span>

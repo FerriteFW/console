@@ -124,6 +124,9 @@ export type DemoRadio = wasm.DemoRadio;
 
 /** LINK-13.4: one receive-audio block's samples (12 kHz µ-law decoded, 16-bit); empty for a keep-alive. */
 export const audioDecode = (p: Uint8Array): Int16Array => wasm.audio_decode(p);
+/** LINK-19.8: the radio's screen colours under a theme (MENU 0 7 1), RGB565, in PALETTE's order (core ui.rs). */
+export const screenPalette = (theme: number): Uint16Array => wasm.screen_palette(theme);
+export const PALETTE = ["bg", "surface", "line", "text", "sub", "dim", "blue", "blue-fg", "green", "amber", "red", "violet"] as const;
 export const statusText = (s: number, rest: Uint8Array = new Uint8Array()) => wasm.status_text(s, rest);
 export const helloPayload = (name: string) => wasm.hello_payload(name);
 /** HELLO's payload without asking for compression (a radio on another protocol: its caps can't be read). */
