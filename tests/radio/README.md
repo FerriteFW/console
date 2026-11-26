@@ -31,13 +31,37 @@ Console driven as a user drives it, against a real radio. A second program check
 | 10 connect | Connect, Live View, a key | Same firmware, build and screen; the key moved it; no pending data move |
 | 20 settings | Read, flip Key beep, write, flip back | `get 0 7 5 1` says each value; the record ends byte for byte as it began |
 | 30 channels | Read, + Add channel, rename, delete, each written | The record's name and RX after each write; gone after the delete |
+| 40 library, zones | FRS from the library into a new zone; then those 22 and the zone deleted | 22 more channels in one more zone, FRS 1 on 462.5625; then the numbers as they began |
+| 50 backup | Back up everything; open it again | The file holds every part and the radio's channel numbers; nothing to write |
+| 60 stock * | Back to stock: the radio's backup and stock's firmware | (The radio runs stock: no Bluetooth check) |
+| 70 install * | Install: back up the whole radio, save it, install Ferrite | Console connected to Ferrite as usual |
+| 80 update ** | Firmware Update with a local image | The radio answers with that build; it lost nothing |
+| 85 restore * | The stage-50 backup opened and written: settings, then channels | The radio answers over Bluetooth again; its channels are back |
 | 90 end | | Firmware, channel, zone and preset numbers, and settings as at the start |
 
-Each stage that changes the radio puts it back, even when it fails. A failure stops the run.
+- Each stage that changes the radio puts it back, even when it fails. A failure stops the run.
+- `*`: `FERRITE_RADIO_FLASH=1 FERRITE_RADIO_STOCK=1` only.
+- `**`: `FERRITE_RADIO_FLASH=1` only.
+- The flashing stages never run on the simulator.
+
+## Without a radio
+
+`FERRITE_RADIO=sim npm run radio`: a headless simulator, checked over its Bluetooth side. Use it to try the stages' scripts. The flashing stages skip.
+
+## A run with the flashing stages
+
+1. **Image:** in `../ferrite`, `tools/mkbtf.sh tx-bench` makes `target/ferrite-txbench.ffw`. `FERRITE_RADIO_IMAGE` names another.
+2. **Backup's radio ID:** in radios.toml, add `uid = "..."` to the radio's block. It's the ID About shows on the radio the backup came from, checked by hand.
+   - Console asks for it when it can't tell a backup's radio (decision 263).
+   - The stage types it only when the radio on the cable shows the same ID.
+3. **Stock firmware:** `FERRITE_RADIO_STOCK_BTF`, else `firmware/stock/RT_950Pro_V0.29_OEM.BTF`.
+4. **Run:** `FERRITE_RADIO_FLASH=1 FERRITE_RADIO_STOCK=1 npm run radio`. About 40 minutes, most of it the whole-radio backup and the flashes.
+5. **Afterwards:**
+   - Install leaves the installed image on the radio.
+   - Its whole-radio backup (`.fbin`) and the stage-50 `.ferrite` stay in `test-results/radio-run/`.
+   - Keep them private, like every radio backup.
 
 ## Not yet
 
-- **Zones**, and **Add from library** (a fixed set).
-- **Update:** install a local tx-bench `.ffw` from the Firmware page. It flashes, so it runs only when asked.
-- **Install from stock:** Back to stock from the radio's backup, then Install. It flashes twice, so it runs only when asked.
+- **The 0.9.7 fallback:** the Live View theme guess for a radio that doesn't send `theme=`. It needs a radio on 0.9.7.
 - **Finish the update** (a data move): only Alex moves a radio's data, by hand. The connect stage stops when a move is pending.

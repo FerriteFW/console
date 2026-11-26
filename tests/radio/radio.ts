@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createInterface, type Interface } from "node:readline";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { test as e2e } from "../e2e/helpers";
 
@@ -19,7 +19,7 @@ export const python = () => {
   return existsSync(venv) ? venv : "python3";
 };
 
-export type RadioConf = { name: string; cable: string; ble: string; build: string; backup: string };
+export type RadioConf = { name: string; cable: string; ble: string; build: string; backup: string; uid: string };
 
 /** FERRITE_RADIO (default: radios.toml's default) from ~/.config/ferrite/radios.toml; the cable is the one CH340
  *  plugged in (FERRITE_RADIO_SERIAL to name it). Only a radio with `cable = true` and a Bluetooth ID will do. */
@@ -27,7 +27,7 @@ export function radioConf(): RadioConf {
   // FERRITE_RADIO=sim: a headless simulator (setup.ts starts it), checked over its Bluetooth side, to try the stages
   // without a radio. The stages that flash skip there.
   if (process.env.FERRITE_RADIO === "sim")
-    return { name: "sim", cable: "", ble: process.env.FERRITE_RADIO_ORACLE ?? "", build: "", backup: "" };
+    return { name: "sim", cable: "", ble: process.env.FERRITE_RADIO_ORACLE ?? "", build: "", backup: "", uid: "" };
   const path = join(homedir(), ".config", "ferrite", "radios.toml");
   const toml = existsSync(path) ? readFileSync(path, "utf8") : "";
   const name = process.env.FERRITE_RADIO ?? /^default\s*=\s*"([^"]+)"/m.exec(toml)?.[1] ?? "black";
@@ -40,32 +40,44 @@ export function radioConf(): RadioConf {
   const ports = readdirSync("/dev").filter((f) => f.startsWith("cu.usbserial-"));
   const cable = process.env.FERRITE_RADIO_SERIAL ?? (ports.length === 1 ? `/dev/${ports[0]}` : "");
   if (!cable) throw new Error(`plug in the cable, or name it in FERRITE_RADIO_SERIAL (found: ${ports.join(", ") || "none"})`);
-  return { name, cable, ble: `ble:${ble}`, build: field("build"), backup: field("backup").replace(/^~/, homedir()) };
+  return { name, cable, ble: `ble:${ble}`, build: field("build"), backup: field("backup").replace(/^~/, homedir()), uid: field("uid") };
 }
 
-/** The radio over its Bluetooth, one session for the run (oracle.py): reads, and keys pressed; never a write. */
+/** The radio over its Bluetooth, one session for the run (oracle.py): reads, and keys pressed; never a write. When
+ *  the radio restarts (an update, a reinstall) the session ends; the next question starts a new one. */
 export class Oracle {
-  private proc: ChildProcess;
-  private lines: Interface;
+  private proc!: ChildProcess;
   private waiting: ((line: string) => void)[] = [];
-  private ready: Promise<void>;
+  private ready!: Promise<void>;
   private err = "";
+  private dead = false;
 
-  constructor(ble: string) {
-    this.proc = spawn(python(), [join(root, "tests", "radio", "oracle.py"), ble], {
+  constructor(private ble: string) {
+    this.start();
+  }
+
+  private start() {
+    this.dead = false;
+    this.waiting = [];
+    this.err = "";
+    this.proc = spawn(python(), [join(root, "tests", "radio", "oracle.py"), this.ble], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, FERRITE_DIR: ferriteDir },
     });
     this.proc.stderr!.on("data", (d) => (this.err = (this.err + d).slice(-2000)));
-    this.lines = createInterface({ input: this.proc.stdout! });
-    this.lines.on("line", (l) => this.waiting.shift()?.(l));
+    createInterface({ input: this.proc.stdout! }).on("line", (l) => this.waiting.shift()?.(l));
     this.ready = new Promise((ok, no) => {
       this.waiting.push((l) => (JSON.parse(l).ready ? ok() : no(new Error(`oracle: ${l}`))));
-      this.proc.on("exit", (code) => no(new Error(`oracle ended (${code}): ${this.err}`)));
+      this.proc.on("exit", (code) => {
+        this.dead = true;
+        no(new Error(`oracle ended (${code}): ${this.err}`));
+      });
     });
+    this.ready.catch(() => {});
   }
 
   async ask<T>(q: Record<string, unknown>, ms = 90_000): Promise<T> {
+    if (this.dead) this.start();
     await this.ready;
     const line = await new Promise<string>((ok, no) => {
       const t = setTimeout(() => no(new Error(`oracle: no answer to ${JSON.stringify(q)} in ${ms / 1000} s; ${this.err}`)), ms);
@@ -73,8 +85,18 @@ export class Oracle {
       this.proc.stdin!.write(JSON.stringify(q) + "\n");
     });
     const a = JSON.parse(line);
-    if ("error" in a) throw new Error(`oracle ${JSON.stringify(q)}: ${a.error}`);
+    if ("error" in a) {
+      // A session the radio dropped (it restarted): the next question starts a new one.
+      if (/Timeout|disconnect|closed|EOF/i.test(a.error)) this.restart();
+      throw new Error(`oracle ${JSON.stringify(q)}: ${a.error}`);
+    }
     return a.ok as T;
+  }
+
+  /** A new session (after the radio restarted). */
+  restart() {
+    this.proc.kill();
+    this.dead = true;
   }
 
   hello = () => this.ask<{ firmware: string; build: string; bench: boolean }>({ do: "hello" });
@@ -120,3 +142,17 @@ export function byteDiff(a: string, b: string): string[] {
   }
   return out;
 }
+
+/** The stages that flash run only when asked (FERRITE_RADIO_FLASH=1, and FERRITE_RADIO_STOCK=1 for Back to stock and
+ *  a fresh Install), and never on the simulator. */
+export const flashing = () => process.env.FERRITE_RADIO_FLASH === "1" && process.env.FERRITE_RADIO !== "sim";
+export const stockRound = () => flashing() && process.env.FERRITE_RADIO_STOCK === "1";
+
+/** The image Update installs: FERRITE_RADIO_IMAGE, else ferrite's tx-bench build (`tools/mkbtf.sh tx-bench`). */
+export const updateImage = () => process.env.FERRITE_RADIO_IMAGE ?? join(ferriteDir, "target", "ferrite-txbench.ffw");
+/** Stock's firmware for Back to stock: FERRITE_RADIO_STOCK_BTF, else the archived V0.29. */
+export const stockBtf = () => process.env.FERRITE_RADIO_STOCK_BTF ?? join(root, "..", "..", "firmware", "stock", "RT_950Pro_V0.29_OEM.BTF");
+/** The run's whole-radio .ferrite (stage 50), which stage 85 writes back after the stock round. */
+export const everythingFile = () => join(runDir, "everything.ferrite");
+/** Set by stage 60 once the radio is on stock: stages 70 and 85 run only then. */
+export const stockMark = () => join(runDir, "on-stock");
