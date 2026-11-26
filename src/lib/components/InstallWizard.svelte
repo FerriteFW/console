@@ -134,10 +134,10 @@
       {#if I.connected}<p class="sub">Connected: <span data-k="port">{I.label}</span>.</p>{/if}
       {#if I.backupStep === "idle"}
         <p>Console loads a small read-only reader into the radio, reads all 4 MB of its flash and checks it against the radio's own CRC. About 4 minutes.</p>
-        {#if !I.readerFile}<p class="warn">This copy of Console can't take a backup: it has no reader image. Choose one under Advanced on the Install page.</p>{/if}
+        {#if I.readerProblem}<p class="warn" role="alert" data-k="reader-problem">{I.readerProblem}</p>{:else}{@render err("backup")}{/if}
         <div class="row">
           <button class="btn" onclick={close}>Cancel</button>
-          <button class="btn primary" disabled={!I.connected || I.running || !I.readerFile} onclick={() => I.backUp()}>Back up the radio</button>
+          <button class="btn primary" disabled={!I.connected || I.running || !!I.readerProblem} onclick={() => I.backUp()}>Back up the radio</button>
         </div>
       {:else if I.backupStep === "running"}
         {@render progress()}
@@ -147,7 +147,7 @@
         {#if I.connected}
           <div class="row">
             <button class="btn" onclick={close}>Cancel</button>
-            <button class="btn primary" disabled={I.running || !I.readerFile} onclick={() => I.backUp()}>Try again</button>
+            <button class="btn primary" disabled={I.running || !!I.readerProblem} onclick={() => I.backUp()}>Try again</button>
           </div>
         {:else}
           {@render connect(true, true)}

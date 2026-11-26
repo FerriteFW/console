@@ -56,7 +56,7 @@ import { signatureOf, signatureProblem, splitPicked, type Signed } from "./signa
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
 import { Link, TimeoutError } from "./link";
-import { installIdProblem, otherRadio, restoreProgress, stockOnlyAllowed, uidKey } from "./installGuard";
+import { installIdProblem, otherRadio, readerProblem as readerProblemOf, restoreProgress, stockOnlyAllowed, uidKey } from "./installGuard";
 import { cablePrefs } from "./cablePrefs.svelte";
 import { radio } from "./radio.svelte";
 import { sleep, type Transport } from "./transport/types";
@@ -414,6 +414,8 @@ class Install {
   restorerProblem = $state("");
   readerFile = $state<Picked | null>(null);
   readerCheck = $state<ImageCheck | null>(null);
+  /** Why Back up can't start for want of a usable reader, or "" (console#102: shown before the button is pressed). */
+  readerProblem = $derived(readerProblemOf(!!this.readerFile, this.readerCheck?.problems));
   readerSource = $state<"bundled" | "file" | "">("");
   readerSignature = $state<Signed | null>(null);
   installStep = $state<Step>("idle");
@@ -820,8 +822,8 @@ class Install {
 
   async backUp() {
     if (this.running || !this.t || !this.wire) return;
-    if (!this.readerFile || this.readerCheck?.problems.length) {
-      this.error = "No reader image: Console can't take the backup. Pick one under Advanced.";
+    if (this.readerProblem || !this.readerFile) {
+      this.error = this.readerProblem;
       this.errorAt = "backup";
       return;
     }

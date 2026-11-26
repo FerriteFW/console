@@ -232,6 +232,28 @@ test("install: back up, save, SSB from the stock file, install with the patch", 
   expect(rs[1].blocks).toBeGreaterThan(ferriteBtf.length / 1024 + 9); // the patch (9.6 KB) is in it
 });
 
+test("install: a refused reader says why on Back up before it is pressed (console#102)", async ({ page }) => {
+  const flashPath = join(dir(), "flash.bin");
+  writeFileSync(flashPath, chip());
+  setMode({ flash: flashPath });
+  await serveRelease(page);
+  await open(page);
+  await expect(step(page)).toHaveText("Back up");
+  const go = wizard(page).getByRole("button", { name: "Back up the radio" });
+  await expect(go).toBeEnabled();
+  // Allow unsigned files off: the e2e build's unsigned reader is refused (UPD-27).
+  await page.evaluate(async () => {
+    const f = (window as any).ferrite;
+    await f.firmware.setDevUnsigned(false);
+    f.install.recheckFerrite();
+  });
+  await expect(wizard(page).locator('[data-k="reader-problem"]')).toContainText("Allow unsigned files");
+  await expect(go).toBeDisabled();
+  await allowUnsigned(page);
+  await expect(wizard(page).locator('[data-k="reader-problem"]')).toHaveCount(0);
+  await expect(go).toBeEnabled();
+});
+
 test("install: Chrome's save dialog saves the backup once and reads it back", async ({ page }) => {
   const flashPath = join(dir(), "flash.bin");
   writeFileSync(flashPath, chip());
