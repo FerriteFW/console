@@ -51,7 +51,7 @@
     if (x.off) return { text: "off", tone: "" };
     if (x.scanning) return { text: x.open ? "scan · RX" : "scanning", tone: x.open ? "rx" : "busy" };
     if (x.open) return { text: x.dbm !== null ? `RX ${x.dbm} dBm` : "RX", tone: "rx" };
-    if (x.broadcast) return { text: x.muted ? "muted" : "FM", tone: x.muted ? "warn" : "" };
+    if (x.broadcast) return { text: x.muted ? "muted" : "WFM", tone: x.muted ? "warn" : "" };
     if (x.muted) return { text: "muted", tone: "warn" };
     return { text: x.aprs ? "APRS" : "idle", tone: "" };
   }
