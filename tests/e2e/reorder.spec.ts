@@ -197,9 +197,8 @@ test.describe.serial("reorder", () => {
     expect(t.channels.map((c) => c.number)).toEqual(order.map((_, i) => i + 1));
     expect(t.channels.map((c) => `${c.name}|${c.rx}`)).toEqual(order);
     // The write dialog says how many change number.
-    const dl = page.waitForEvent("download", { timeout: long() });
+    // The backup before the write stays in Console (LINK-21.2): no download to wait for.
     await toolbar().getByRole("button", { name: /^Write to radio/ }).click();
-    await dl;
     await expect(dialog()).toContainText("change number", { timeout: long() });
     await shot(page, info, "reorder-50-renumber-write");
     await dialog().getByRole("button", { name: "Cancel" }).click();

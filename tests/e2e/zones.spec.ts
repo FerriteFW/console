@@ -14,6 +14,7 @@ const members = () => page.getByRole("list", { name: "Channels in this zone" });
 const table = () => state(page, (f) => f.channels.table as { zones: any[]; channels: any[] });
 const home = () => state(page, (f) => f.channels.home as number | null | undefined);
 /** The write dialog's line for channel `n` (not 10 for 1). */
+const moveLine = (from: number, to: number) => dialog().locator("li").filter({ has: page.locator("span.what", { hasText: new RegExp(`^Ch ${from} → ${to}$`) }) });
 const diffLine = (n: number) => dialog().locator("li").filter({ has: page.locator("span.what", { hasText: new RegExp(`^Ch ${n}$`) }) });
 const cmd = (line: string) => page.evaluate((l) => (window as any).ferrite.radio.connectedLink.cmd(l) as Promise<string>, line);
 
@@ -146,8 +147,9 @@ test.describe.serial("zones", () => {
     await shot(page, info, "zones-11-swapped");
 
     await write(async () => {
-      await expect(diffLine(upper.number)).toHaveCount(1);
-      await expect(diffLine(lower.number)).toHaveCount(1);
+      // A swap is two moves (#111): each channel is written at its new number.
+      await expect(moveLine(upper.number, lower.number)).toHaveCount(1);
+      await expect(moveLine(lower.number, upper.number)).toHaveCount(1);
       const h = dialog().locator("li.home");
       await expect(h.locator("s")).toHaveText(String(lower.number));
       await expect(h.locator("b")).toHaveText(String(upper.number));
