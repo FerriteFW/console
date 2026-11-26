@@ -564,6 +564,15 @@ export const imageCheck = (kind: "reader" | "restorer" | "stock", btf: Uint8Arra
 export const readerLine = <T>(kind: "flash" | "sys" | "flashcrc", line: string): T | null => JSON.parse(wasm.reader_line(kind, line));
 export const ssbExtract = (btf: Uint8Array): Uint8Array | undefined => wasm.ssb_extract(btf);
 export const ssbDescribe = (patch: Uint8Array): SsbFound => JSON.parse(wasm.ssb_describe(patch));
+/** INST-10.1: what the backup's look in stock's image found ("known": taken; never the bytes). */
+export type SsbOnRadio = { found: "known" | "unknown" | "none"; addr: number; records: number; sha256: string };
+/** INST-10.1: the reader's read of stock's image where the patch lives (MCU 0x08024000, 96 KB, read only). */
+export const MDUMP_SSB = "mdump 0x08024000 98304\r";
+/** INST-10.1: that read's bytes, checked line by line, or null. */
+export const parseMdumpSsb = (text: string): Uint8Array | null => wasm.parse_mdump_ssb(text) ?? null;
+export const ssbOnRadio = (window: Uint8Array): SsbOnRadio => JSON.parse(wasm.ssb_on_radio(window));
+/** INST-10.1: the known stock patch from that read, or null. */
+export const ssbFromRadio = (window: Uint8Array): Uint8Array | null => wasm.ssb_from_radio(window) ?? null;
 export const restoreStart = (rest: Uint8Array): RestoreStart | null => JSON.parse(wasm.restore_start(rest));
 /** The backup's file name, carrying the radio's ID (decision 263). */
 export const backupName = (uid: string, date: string, marker: Uint8Array | null = null): string => wasm.backup_name(uid, date, marker ?? undefined);

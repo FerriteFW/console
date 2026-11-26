@@ -236,6 +236,7 @@ class FakeReader:
     Rust reader's image), fdumpz too (BACKUP-9.6), unless MODE.json says "no_fdumpz" (answered `?`, as hwtest).
     "corrupt_every": N spoils every Nth frame once (NAKed); "cut_every": N sends every Nth frame once 100 bytes short
     (Console asks again once the frame's time is up); "icons": a file of 161472 bytes the reader's `mdump 0x08080000 161472` answers with (BACKUP-12.3);
+    "ssb_window": a file of 98304 bytes `mdump 0x08024000 98304` answers with (INST-10.1);
     "wrong_first_dump": the first whole read serves a copy with one
     byte flipped, its frames and CRCs consistent with it, so only `flashcrc` tells (an Intel Mac's report, Nov 16,
     2026)."""
@@ -300,6 +301,13 @@ class FakeReader:
                 out = "".join(f"{addr + i:X}:{b[i:i + 32].hex().upper()}*{sum(b[i:i + 32]) & 0xFF:02X}\n" for i in range(0, n, 32))
                 # "split_marker": the icons come slowly too, as a radio's 35 s (here one pause)
                 return (PAUSE if self.mode.get("split_marker") else b"") + self.console(out + "dump: end\n")
+            ssb = read_mode(self.mode_path).get("ssb_window")
+            if (addr, n) == (0x08024000, 98304) and ssb:
+                # INST-10.1: the stock image's window the backup looks in for the SSB patch, from MODE.json's
+                # "ssb_window" file (synthetic records in tests, never the real patch)
+                b = open(ssb, "rb").read()
+                out = "".join(f"{addr + i:X}:{b[i:i + 32].hex().upper()}*{sum(b[i:i + 32]) & 0xFF:02X}\n" for i in range(0, n, 32))
+                return self.console(out + "dump: end\n")
             if (addr, n) != (0x080F0000, 16):
                 return self.console("mdump: the fake knows 0x080F0000 16 only\n")
             m = bytes.fromhex(read_mode(self.mode_path).get("marker", "FF" * 16))

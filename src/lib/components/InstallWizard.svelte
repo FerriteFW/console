@@ -206,17 +206,24 @@
     {:else if step === 3}
       <h3>SSB receive (optional)</h3>
       <p class="good" data-k="saved">Backup saved: {I.savedWhere}</p>
-      <p>USB, LSB and CW need a patch that only the stock firmware carries. Drop in your own stock .BTF (from the radio maker's website) and Console takes the patch from it, here on this computer. Without it, Ferrite installs and those modes stay hidden.</p>
-      <label class="drop" ondragover={(e) => e.preventDefault()} ondrop={dropped}>
-        <input type="file" accept=".btf,.BTF" hidden aria-label="Stock firmware file" onchange={picked} />
-        {I.stock ? I.stock.name : "Drop your stock .BTF here, or click to choose"}
-      </label>
-      {#if I.ssb}
-        <p class="good" data-k="ssb">SSB patch found: {I.ssb.records} records, {I.ssb.known ? "the known stock patch" : "not one Ferrite knows (the radio asks before storing it)"}.</p>
-      {:else if I.ssbError}
-        <p class="warn">{I.ssbError}</p>
+      {#if I.ssbFrom === "radio" && I.ssb}
+        <!-- INST-10.1: the backup read it from the radio's own stock firmware; no file needed. -->
+        <p>USB, LSB and CW need a patch that only the stock firmware carries.</p>
+        <p class="good" data-k="ssb">Found the SSB patch on the radio: {I.ssb.records} records, the known stock patch. Console adds it to Ferrite when it installs, here on this computer.</p>
+      {:else}
+        <p>USB, LSB and CW need a patch that only the stock firmware carries. Drop in your own stock .BTF (from the radio maker's website) and Console takes the patch from it, here on this computer. Without it, Ferrite installs and those modes stay hidden.</p>
+        {#if I.ssbRadioNote && !I.ssb}<p class="sub" data-k="ssb-radio">{I.ssbRadioNote}</p>{/if}
+        <label class="drop" ondragover={(e) => e.preventDefault()} ondrop={dropped}>
+          <input type="file" accept=".btf,.BTF" hidden aria-label="Stock firmware file" onchange={picked} />
+          {I.stock ? I.stock.name : "Drop your stock .BTF here, or click to choose"}
+        </label>
+        {#if I.ssb}
+          <p class="good" data-k="ssb">SSB patch found: {I.ssb.records} records, {I.ssb.known ? "the known stock patch" : "not one Ferrite knows (the radio asks before storing it)"}.</p>
+        {:else if I.ssbError}
+          <p class="warn">{I.ssbError}</p>
+        {/if}
       {/if}
-      {#if I.stock}
+      {#if I.stock && I.ssbFrom !== "radio"}
         <label class="check"><input type="checkbox" checked={I.keepStock} onchange={(e) => I.setKeepStock((e.currentTarget as HTMLInputElement).checked)} /> Keep this file in this browser for Back to stock</label>
       {/if}
       <div class="row">

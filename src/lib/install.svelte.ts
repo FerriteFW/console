@@ -5,7 +5,8 @@
 //   2. Back up: the reader image (Ferrite's read-only reader, or hwtest's) through the bootloader; the whole SPI flash read
 //      with the Rust reader's fdumpz (230400 baud, coded 16 KB chunks with a CRC each, BACKUP-9.6) or hwtest's fdump
 //      (500 kbaud down, 4 KB frames), checked against the radio's own flashcrc; saved by the owner before anything else.
-//   3. SSB (optional): the patch from the owner's own stock .BTF, found in the browser.
+//   3. SSB (optional): the patch the backup found in the radio's own stock firmware (INST-10.1), else from the
+//      owner's own stock .BTF, found in the browser.
 //   4. Install: the bundled release (SHA-256 checked) or a file, with the patch bundled; refused without a saved
 //      backup or over a pending phone update.
 //   Back to stock: the backup written into Ferrite's own ranges over the link (STOCK_RESTORE, never calibration or
@@ -28,7 +29,9 @@ import {
   ICONS_LEN,
   imageCheck,
   MDUMP_ICONS,
+  MDUMP_SSB,
   parseMdumpIcons,
+  parseMdumpSsb,
   loadCore,
   markerWord,
   nameMarker,
@@ -43,6 +46,8 @@ import {
   sha256Hex,
   ssbDescribe,
   ssbExtract,
+  ssbFromRadio,
+  ssbOnRadio,
   statusText,
   type BackupCheck,
   type FdStep,
@@ -51,6 +56,7 @@ import {
   type ImageCheck,
   type RestoreSummary,
   type SsbFound,
+  type SsbOnRadio,
 } from "./core";
 import { signatureOf, signatureProblem, splitPicked, type Signed } from "./signature";
 import { writeParts } from "./parts";
@@ -265,7 +271,8 @@ const markers = {
 
 /** BACKUP-2.1: the backup file's manifest. `spi.bin` is the whole SPI flash as the reader read it (what a `.bin`
  *  backup held before 0.9.3); `icons.bin` stock's menu tiles from MCU 0x08080000 when they were stock's
- *  (BACKUP-12.3); the marker the 16 bytes at 0x080F0000 in hex (BACKUP-12.1). */
+ *  (BACKUP-12.3); the marker the 16 bytes at 0x080F0000 in hex (BACKUP-12.1); `ssb` that the backup found the
+ *  SSB patch in stock's image, where and its SHA-256, never its bytes (INST-10.1; absent in older files). */
 type FbinManifest = {
   format: "ferrite-backup";
   version: 1;
@@ -276,12 +283,22 @@ type FbinManifest = {
   spi: { file: "spi.bin"; bytes: number; sha256: string; crc32: string };
   marker: string | null;
   icons: { file: "icons.bin"; bytes: number; sha256: string } | null;
+  ssb?: { addr: string; bytes: number; sha256: string } | null;
 };
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 /** The `.fbin` bytes for a backup. */
-async function fbin(spi: Uint8Array, crc32: string, sha: string, uid: string, chip: string, marker: Uint8Array | null, icons: Uint8Array | null): Promise<Uint8Array> {
+async function fbin(
+  spi: Uint8Array,
+  crc32: string,
+  sha: string,
+  uid: string,
+  chip: string,
+  marker: Uint8Array | null,
+  icons: Uint8Array | null,
+  ssb: SsbOnRadio | null = null,
+): Promise<Uint8Array> {
   const m: FbinManifest = {
     format: "ferrite-backup",
     version: 1,
@@ -292,6 +309,7 @@ async function fbin(spi: Uint8Array, crc32: string, sha: string, uid: string, ch
     spi: { file: "spi.bin", bytes: spi.length, sha256: sha, crc32 },
     marker: marker ? hexOf(marker) : null,
     icons: icons ? { file: "icons.bin", bytes: icons.length, sha256: sha256Hex(icons) } : null,
+    ssb: ssb?.found === "known" ? { addr: `0x${ssb.addr.toString(16).toUpperCase().padStart(8, "0")}`, bytes: ssb.records * 8, sha256: ssb.sha256 } : null,
   };
   const entries = [
     { name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(m, null, 1) + "\n") },
@@ -394,6 +412,12 @@ class Install {
   stockCheck = $state<ImageCheck | null>(null);
   ssb = $state<SsbFound | null>(null);
   ssbError = $state("");
+  /** INST-10.1: where the patch came from: the radio's own stock image (read by the backup) or the owner's file. */
+  ssbFrom = $state<"" | "radio" | "file">("");
+  /** INST-10.1: what the backup's look in stock's image found, or null (not looked: already on Ferrite, or no backup). */
+  ssbRadio = $state<SsbOnRadio | null>(null);
+  /** INST-10.1: why the backup has no patch from the radio (shown on the SSB step), or "". */
+  ssbRadioNote = $state("");
   keepStock = $state(false);
   // 4. Install
   release = $state<Release | null>(null);
@@ -655,6 +679,7 @@ class Install {
   private pickStock(p: Picked) {
     this.stock = p;
     this.stockCheck = imageCheck("stock", p.bytes);
+    if (this.ssbFrom === "radio") return; // INST-10.1: the radio's own patch stays; the file is for Back to stock
     this.ssbError = "";
     this.patch = null;
     this.ssb = null;
@@ -669,6 +694,7 @@ class Install {
     }
     this.patch = patch;
     this.ssb = ssbDescribe(patch);
+    this.ssbFrom = "file";
   }
 
   async setKeepStock(on: boolean) {
@@ -680,8 +706,11 @@ class Install {
   clearStock() {
     this.stock = null;
     this.stockCheck = null;
-    this.ssb = null;
-    this.patch = null;
+    if (this.ssbFrom !== "radio") {
+      this.ssb = null;
+      this.patch = null;
+      this.ssbFrom = "";
+    }
     this.ssbError = "";
     void keep.drop();
     this.keepStock = false;
@@ -875,6 +904,7 @@ class Install {
       this.icons = await this.readIcons(w);
       this.iconsStock = !!this.icons && iconsPlausible(this.icons);
       debugLog(`backup: menu icons ${this.icons ? `read, ${this.iconsStock ? "stock's tiles" : "not stock's (Ferrite's code or blank)"}` : "not read"}`);
+      await this.ssbFromStock(w);
       let data = await this.readChip(chip.size);
       this.message = "Checking: the radio's own CRC of the whole chip (about a minute)…";
       w.clear();
@@ -901,7 +931,7 @@ class Install {
       this.backup = data;
       this.check = c;
       this.backupName = backupName(this.uid, stamp(), this.marker).replace(/\.bin$/, ".fbin");
-      this.backupFile = await fbin(data, c.crc32, c.sha256, this.uid, this.chip, this.marker, this.iconsStock ? this.icons : null);
+      this.backupFile = await fbin(data, c.crc32, c.sha256, this.uid, this.chip, this.marker, this.iconsStock ? this.icons : null, this.ssbRadio);
       ids.put(c.sha256, this.uid);
       if (this.marker) markers.put(c.sha256, this.marker);
       if (this.icons && this.iconsStock) await iconStore.put(c.sha256, this.icons);
@@ -943,18 +973,73 @@ class Install {
   /** BACKUP-12.3: the reader's `mdump` of the icon area, checked line by line; null when it doesn't come whole (an
    *  older reader, a lost line: the backup goes on without them). */
   private async readIcons(w: Wire): Promise<Uint8Array | null> {
+    const { text, done } = await this.mdump(w, MDUMP_ICONS, "8080000:", 90_000);
+    const icons = done ? parseMdumpIcons(text) : null;
+    if (!icons) debugLog(`backup: icons reply ${done ? "ended" : "never ended"}, ${text.length} chars: first ${JSON.stringify(text.slice(0, 120))}, last ${radioSaid(text, 200)}`);
+    return icons;
+  }
+
+  /** INST-10.1 (console#41): the SSB patch from stock's own image in MCU flash, read with `mdump` (read only, about
+   *  20 s), kept for Install when it is the known stock patch. Not looked for when the menu icons show the radio
+   *  already runs Ferrite (its image wrote over stock's). Nothing of the patch is logged: only where, its size and
+   *  hash; a read that fails logs its length alone. */
+  private async ssbFromStock(w: Wire) {
+    this.dropRadioPatch();
+    if (this.icons && !this.iconsStock) {
+      this.ssbRadioNote = "This radio doesn't run its stock firmware, so its SSB patch can't be read from it.";
+      debugLog("backup: SSB patch not looked for (the menu icons aren't stock's)");
+      return;
+    }
+    this.message = "Looking for the SSB patch in the stock firmware (about 20 s)…";
+    const { text, done } = await this.mdump(w, MDUMP_SSB, "8024000:", 60_000);
+    const window = done ? parseMdumpSsb(text) : null;
+    if (!window) {
+      this.ssbRadioNote = "Console couldn't read the stock firmware's SSB patch from the radio.";
+      debugLog(`backup: SSB read ${done ? "ended" : "never ended"} without a whole window (${text.length} chars)`);
+      return;
+    }
+    const f = ssbOnRadio(window);
+    this.ssbRadio = f;
+    debugLog(`backup: SSB patch ${f.found}${f.found === "none" ? "" : ` at 0x${f.addr.toString(16)}, ${f.records} records, SHA-256 ${f.sha256}`}`);
+    const patch = f.found === "known" ? ssbFromRadio(window) : null;
+    if (!patch) {
+      this.ssbRadioNote =
+        f.found === "unknown"
+          ? "The radio's stock firmware holds something like an SSB patch, but not the one Ferrite knows, so Console didn't take it."
+          : "No SSB patch found in the radio's stock firmware.";
+      return;
+    }
+    this.ssbRadioNote = "";
+    this.patch = patch;
+    this.ssb = ssbDescribe(patch);
+    this.ssbFrom = "radio";
+    this.ssbError = "";
+  }
+
+  /** INST-10.1: forget what an earlier backup read from the radio; the owner's file, if any, stands again. */
+  private dropRadioPatch() {
+    this.ssbRadio = null;
+    this.ssbRadioNote = "";
+    if (this.ssbFrom !== "radio") return;
+    [this.patch, this.ssb, this.ssbFrom] = [null, null, ""];
+    if (this.stock) this.pickStock(this.stock);
+  }
+
+  /** A ranged `mdump`, taken whole through the sink (the text keeps 8 KB): its text, and whether it ended (`dump:
+   *  end` after its first line `first`, or the refusal or `?` of a reader that can't). */
+  private async mdump(w: Wire, cmd: string, first: string, ms: number): Promise<{ text: string; done: boolean }> {
     let text = "";
     let done = false;
-    let started = false; // a `dump: end` before the first icon line is someone else's
+    let started = false; // a `dump: end` before the first line is someone else's
     w.sink = (b) => {
       text += latin1(b);
       const tail = text.slice(-200);
-      started ||= text.includes("8080000:");
+      started ||= text.includes(first);
       done ||= (started && /dump: end/.test(tail)) || /mdump: [^\r\n]*only|\?  \(help\)/.test(tail);
     };
     try {
-      await w.write(MDUMP_ICONS);
-      const end = performance.now() + 90_000;
+      await w.write(cmd);
+      const end = performance.now() + ms;
       while (!done && performance.now() < end) {
         this.held();
         await sleep(200);
@@ -963,9 +1048,7 @@ class Install {
       w.sink = null;
       w.clear();
     }
-    const icons = done ? parseMdumpIcons(text) : null;
-    if (!icons) debugLog(`backup: icons reply ${done ? "ended" : "never ended"}, ${text.length} chars: first ${JSON.stringify(text.slice(0, 120))}, last ${radioSaid(text, 200)}`);
-    return icons;
+    return { text, done };
   }
 
   /** The whole chip: the Rust reader's fdumpz at 230400 with High speed on, else 115200 (BACKUP-9.6, ferrite decision 265) when the reader image
@@ -1224,6 +1307,8 @@ class Install {
     this.markerRead = false;
     this.icons = null;
     this.iconsStock = false;
+    // INST-10.1: a patch the backup read was this radio's; the owner's file, if any, stands again.
+    this.dropRadioPatch();
     if (this.errorAt === "backup") {
       this.error = "";
       this.errorAt = "";
