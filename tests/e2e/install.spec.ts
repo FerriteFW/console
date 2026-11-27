@@ -251,7 +251,7 @@ function feedFfw(btf: Buffer): Buffer {
   return b;
 }
 
-/** INST-2.2 (ferrite#293): the website build carries no Ferrite release, so Install takes ferritefw.dev's feed's, as
+/** INST-15 (ferrite#293): the website build carries no Ferrite release, so Install takes ferritefw.dev's feed's, as
  *  Update does: downloaded, its checksum checked, said to be from ferritefw.dev; offline, it says so. */
 test("install: the website's release comes from the feed (ferrite#293)", async ({ page }) => {
   const ffw = feedFfw(ferriteBtf);

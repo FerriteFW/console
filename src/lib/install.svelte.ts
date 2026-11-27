@@ -421,7 +421,7 @@ class Install {
   ferrite = $state<Picked | null>(null);
   ferriteCheck = $state<FirmwareCheck | null>(null);
   ferriteSource = $state<"bundled" | "file" | "">("");
-  /** INST-2.2: the release came from ferritefw.dev's feed (the website build carries none of its own). */
+  /** INST-15: the release came from ferritefw.dev's feed (the website build carries none of its own). */
   ferriteFromFeed = $state(false);
   /** The images' minisig signatures (signature.ts): a bad one is also a problem in the image's check. */
   ferriteSignature = $state<Signed | null>(null);
@@ -534,7 +534,7 @@ class Install {
   }
 
   /** UPD-15: a bundled file is used only when its SHA-256 is the manifest's. */
-  /** INST-2.2: the website build carries no Ferrite release (only the reader and restorer), so Install takes the
+  /** INST-15: the website build carries no Ferrite release (only the reader and restorer), so Install takes the
    *  latest from ferritefw.dev's feed, as Update does (UPD-25): its .ffw downloaded, used only when its SHA-256 is
    *  the feed's, then checked whole (its signature inside, UPD-27). Offline, or a release needing a newer Console:
    *  said, and a file can still be picked under Advanced. */
