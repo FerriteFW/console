@@ -184,8 +184,8 @@ class Firmware {
     if (this.picked.length && !this.running) await this.pick(this.picked, this.fromRelease, this.expect);
   }
 
-  /** The picked files (a .ffw; or a .btf, and its .minisig when there is one), checked by the core. `expect`: the
-   *  release Update offers (UPD-25.1), null for a file chosen by hand. */
+  /** The picked files, checked by the core: a .ffw; or, for the release Update offers only (a bundled one), a .btf
+   *  and its .minisig. `expect`: that release (UPD-25.1), null for a file chosen by hand (a .ffw only: UPD-28). */
   async pick(picked: FileList | File[], release = false, expect: { version: string; fromFeed: boolean } | null = null) {
     if (this.running) return;
     const files = Array.from(picked);
@@ -200,6 +200,21 @@ class Firmware {
     this.ffwSummary = null;
     const ffwFile = files.find((f) => /\.ffw$/i.test(f.name));
     if (ffwFile) return this.pickFfw(ffwFile, release);
+    // UPD-28: by hand, only a .ffw. A bare .btf here was mostly someone going back (to stock, or an old release
+    // over newer data) or adding SSB: each has its own place, which says what it keeps.
+    if (!expect) {
+      this.fileName = files[0].name;
+      this.check = null;
+      this.bytes = null;
+      this.signature = null;
+      this.error = /\.btf$/i.test(files[0].name)
+        ? `${files[0].name} is a bare firmware image (.btf): Update installs only a Ferrite update file (.ffw). ` +
+          "To go back to the stock firmware, use Back to stock (it puts your backup back first). For SSB, use Add SSB above with your stock .BTF. " +
+          "For an earlier Ferrite release, choose that release's .ffw."
+        : `${files[0].name} is not a Ferrite update file (.ffw).`;
+      this.stage = "pick";
+      return;
+    }
     const { btf: file, sig } = splitPicked(files);
     this.fileName = file?.name ?? files[0].name;
     this.error = "";

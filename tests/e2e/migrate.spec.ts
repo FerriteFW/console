@@ -6,7 +6,8 @@
 // stamps, and connects again on layout 3 with everything there; and as part of an update (Firmware Update's wizard,
 // the bridge's fake bootloader). Never on a radio: only Alex moves a radio's data, by hand.
 import { type Page } from "@playwright/test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { allowUnsigned, disconnect, expect, onRadio, openConsole, test } from "./helpers";
@@ -181,11 +182,23 @@ function testBtf(kb = 24): Buffer {
   return Buffer.concat([raw, Buffer.alloc((1024 - (raw.length % 1024)) % 1024, 0xff)]);
 }
 
+/** UPD-28: Update takes a .ffw by hand: the image alone in one, packed by ferrite's tools/ffw.py (unsigned). */
+function imageFfw(btf: Buffer): Buffer {
+  const d = mkdtempSync(join(tmpdir(), "ferrite-ffw-"));
+  writeFileSync(join(d, "x.btf"), btf);
+  const ffw = new URL("../../../ferrite/tools/ffw.py", import.meta.url).pathname;
+  const r = spawnSync("python3", [ffw, "pack", join(d, "x.ffw"), "--btf", join(d, "x.btf"), "--kind", "tx", "--build", "e2e0002", "--version", "9.8.7"], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`ffw.py: ${r.stderr}`);
+  const b = readFileSync(join(d, "x.ffw"));
+  rmSync(d, { recursive: true, force: true });
+  return b;
+}
+
 test("an update whose firmware stores another layout moves the data as part of it (one flow)", async ({ page }) => {
   writeFileSync(b.fakeboot!, JSON.stringify({ deaf_ms: 300 }));
   await connectWaiting(page, "firmware");
   await allowUnsigned(page); // a local, unsigned test image (UPD-27)
-  await page.getByLabel("Firmware file").setInputFiles({ name: "test.btf", mimeType: "application/octet-stream", buffer: testBtf() });
+  await page.getByLabel("Firmware file").setInputFiles({ name: "test.ffw", mimeType: "application/octet-stream", buffer: imageFfw(testBtf()) }); // UPD-28: a .ffw by hand
   const pc = page.locator('[data-k="power-cycled"]'); // a v0.9.4 radio asks for the power-cycle first
   if (await pc.count()) await pc.check();
   await page.getByRole("button", { name: /^(Update|Install again)…$/ }).click();
