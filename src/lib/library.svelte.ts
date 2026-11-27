@@ -9,19 +9,23 @@ import { channels } from "./channels.svelte";
 import { radio } from "./radio.svelte";
 import { appFetch } from "./appfetch";
 import { tuneSummary, type Tune } from "./tune";
+import { combine, localeRegion, parseRegion, radioRegion, REGIONS, type FixedSet, type Region, type Split } from "./fixedsets";
+import { sites } from "./sites.svelte";
 
-export type FixedFreq = { number: number; name: string; rx: number; tx: number; notes?: string; ctcss?: number; dcs?: number };
-export type FixedSet = {
-  name: string;
-  displayName?: string;
-  description: string;
-  defaultPower: string;
-  defaultBandwidth: string;
-  /** "AM" for airband (the core makes it NAM there); else ("Analog") NFM or FM by the bandwidth. */
-  defaultMode?: string;
-  rxOnly?: boolean;
-  frequencies: FixedFreq[];
-};
+const REGION_KEY = "ferrite.library.region";
+
+/** The region the Fixed tab last showed (a convenience; none kept: a guess from the browser's language). */
+function keptRegion(): Region {
+  try {
+    const r = localStorage.getItem(REGION_KEY);
+    if (r && (REGIONS as readonly string[]).includes(r)) return r as Region;
+  } catch {
+    // no storage: guess
+  }
+  return localeRegion(typeof navigator === "undefined" ? undefined : navigator.language);
+}
+
+export type { FixedFreq, FixedSet } from "./fixedsets";
 
 const url = (name: string) => `${import.meta.env.BASE_URL}data/${name}`;
 
@@ -36,6 +40,12 @@ class Library {
   open = $state(false);
   tab = $state<"fixed" | "near">("fixed");
   fixed = $state<FixedSet[] | null>(null);
+  /** The region the Fixed tab shows: the radio's when one is connected (and it has one set), else picked. */
+  fixedRegion = $state<Region>(keptRegion());
+  /** Where the sets came from: data.ferritefw.dev, its copy kept for offline use, or the bundled US and Canada list. */
+  fixedFrom = $state<"data" | "kept" | "bundled">("data");
+  /** Where a country inside the region differs (the region file's splits). */
+  fixedSplits = $state<Split[]>([]);
   error = $state("");
   /** The place for Near me (airports and licensed sites), as typed, and what it parses to. */
   placeText = $state("");
@@ -64,12 +74,43 @@ class Library {
     return p;
   }
 
-  async loadFixed() {
-    if (this.fixed) return;
+  /**
+   * The fixed sets for `region` (default: the connected radio's, else the one shown last): its file and OTHER's from
+   * data.ferritefw.dev (or the copies kept from the last fetch), else the bundled US and Canada list.
+   */
+  async loadFixed(region?: Region) {
+    const r = region ?? radioRegion(radio.info?.region) ?? this.fixedRegion;
+    if (this.fixed && r === this.fixedRegion) return;
+    this.fixedRegion = r;
     try {
-      this.fixed = await this.once("fixed", () => fetchJson<FixedSet[]>("fixed-channels.json"));
-    } catch (e) {
-      this.error = (e as Error).message;
+      localStorage.setItem(REGION_KEY, r);
+    } catch {
+      // not kept: fine
+    }
+    this.fixed = null;
+    this.fixedSplits = [];
+    try {
+      const got = await this.once(`fixed:${r}`, async () => {
+        const one = async (x: Region) => {
+          const { text, kept } = await sites.client.fixed(x);
+          return { file: parseRegion(text, x), kept };
+        };
+        const [mine, other] = await Promise.all([one(r), r === "OTHER" ? null : one("OTHER")]);
+        return { sets: combine(mine.file, other?.file ?? null), splits: mine.file.splits ?? [], kept: mine.kept || !!other?.kept };
+      });
+      if (this.fixedRegion !== r) return;
+      this.fixed = got.sets;
+      this.fixedSplits = got.splits;
+      this.fixedFrom = got.kept ? "kept" : "data";
+    } catch {
+      try {
+        const sets = await this.once("fixed:bundled", () => fetchJson<FixedSet[]>("fixed-channels.json"));
+        if (this.fixedRegion !== r) return;
+        this.fixed = sets;
+        this.fixedFrom = "bundled";
+      } catch (e) {
+        this.error = (e as Error).message;
+      }
     }
   }
 

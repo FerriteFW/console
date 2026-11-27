@@ -1030,6 +1030,30 @@ mod tests {
         assert!(a.channels.iter().all(|c| c.rx_only && c.mode == "NAM"), "{:?}", a.channels);
     }
 
+    /// data.ferritefw.dev's region files (fixed-1: the extra keys are ignored) go in the same way: every channel
+    /// of every set, none refused outright; licence-free sets as the user can transmit on them, at low power.
+    #[test]
+    fn fixed_region_files() {
+        #[derive(Deserialize)]
+        struct File {
+            sets: Vec<FixedSet>,
+        }
+        for text in [include_str!("../../tests/e2e/fixtures/sitedata/fixed/US.json"), include_str!("../../tests/e2e/fixtures/sitedata/fixed/OTHER.json")] {
+            let f: File = serde_json::from_str(text).unwrap();
+            assert!(!f.sets.is_empty());
+            for s in &f.sets {
+                let picks: Vec<usize> = (0..s.frequencies.len()).collect();
+                let a = add(&fixed_items(s, &picks, &s.name), &Set::default(), true);
+                assert!(a.notes.iter().all(|n| !n.ends_with("skipped") || n.contains("already")), "{}: {:?}", s.name, a.notes);
+                assert_eq!(a.zones.len(), 1, "{}", s.name);
+            }
+        }
+        let f: File = serde_json::from_str(include_str!("../../tests/e2e/fixtures/sitedata/fixed/US.json")).unwrap();
+        let murs = f.sets.iter().find(|s| s.name.contains("MURS")).unwrap();
+        let a = add(&fixed_items(murs, &[0], "MURS"), &Set::default(), true);
+        assert_eq!(a.channels[0].power, "Low");
+    }
+
     #[test]
     fn places() {
         let p = parse_place("45.4215,-75.6972").unwrap();

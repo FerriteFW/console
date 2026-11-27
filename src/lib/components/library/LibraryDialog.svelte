@@ -20,7 +20,7 @@
   import type { Tune } from "../../tune";
 
   const tabs = [
-    { id: "fixed", label: "Fixed sets", sub: "FRS, GMRS, MURS, PMR446, marine, weather, airband, resource roads, calling" },
+    { id: "fixed", label: "Fixed sets", sub: "By region: calling, licence-free, marine, weather, airband, satellites" },
     { id: "near", label: "Near me", sub: "What's near a place, on a map" },
   ] as const;
   const KINDS: { id: Kind; label: string; what: [string, string] }[] = [

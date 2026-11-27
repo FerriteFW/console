@@ -1,6 +1,9 @@
 <script lang="ts">
-  // Fixed sets (NeonPlug's): pick a set, pick its channels, add them into a zone.
+  // Fixed sets by region (data.ferritefw.dev's fixed/, else the bundled US and Canada list): pick a region and a set,
+  // pick its channels, add them into a zone.
   import { library, type FixedSet } from "../../library.svelte";
+  import { radio } from "../../radio.svelte";
+  import { correctionUrl, radioRegion, REGION_NAMES, REGION_ORDER, setKey, type Region } from "../../fixedsets";
   import { channels } from "../../channels.svelte";
   import { libraryFixedItems } from "../../core";
   import ZoneTarget, { zoneName, type Target } from "./ZoneTarget.svelte";
@@ -9,17 +12,22 @@
 
   library.loadFixed();
   let setName = $state("");
+  const radioHas = $derived(radioRegion(radio.info?.region));
+  function pickRegion(r: Region) {
+    setName = "";
+    library.loadFixed(r);
+  }
   let picked = $state<Set<number>>(new Set());
   let target = $state<Target>({ kind: "new", name: "", existing: 0, split: true });
 
   const sets = $derived(library.fixed ?? []);
-  const set = $derived<FixedSet | undefined>(sets.find((s) => s.name === setName));
+  const set = $derived<FixedSet | undefined>(sets.find((s) => setKey(s) === setName));
   const mhz = (f: number) => f.toFixed(4).replace(/0{1,2}$/, "");
 
   function choose(s: FixedSet) {
-    setName = s.name;
+    setName = setKey(s);
     picked = new Set(s.frequencies.map((_, i) => i));
-    target = { ...target, kind: target.kind === "each" ? "new" : target.kind, name: (s.displayName ?? s.name).slice(0, 16) };
+    target = { ...target, kind: target.kind === "each" ? "new" : target.kind, name: (s.id ? s.name : (s.displayName ?? s.name)).slice(0, 16) };
   }
   $effect(() => {
     if (!setName && sets.length) choose(sets[0]);
@@ -41,23 +49,52 @@
   }
 </script>
 
+<div class="region">
+  <label>
+    Region
+    <select aria-label="Fixed sets for" value={library.fixedRegion} onchange={(e) => pickRegion((e.currentTarget as HTMLSelectElement).value as Region)}>
+      {#each REGION_ORDER as r (r)}
+        <option value={r}>{REGION_NAMES[r]}{r === radioHas ? " (the radio's)" : ""}</option>
+      {/each}
+    </select>
+  </label>
+  <span class="sub">
+    {#if library.fixedFrom === "bundled"}
+      Couldn't reach data.ferritefw.dev: showing the built-in US and Canada sets.
+    {:else if library.fixedFrom === "kept"}
+      Offline: the copy kept from the last fetch.
+    {:else if library.fixedRegion !== "OTHER"}
+      With the international sets (marine, aviation emergency, satellites).
+    {/if}
+  </span>
+  {#if library.fixedFrom !== "bundled"}
+    <span class="spacer"></span>
+    <a class="sub" href={correctionUrl(library.fixedRegion)} target="_blank" rel="noreferrer">Missing a set? Suggest one</a>
+  {/if}
+</div>
 {#if !library.fixed}
   <p class="sub">Loading the sets…</p>
 {:else}
   <div class="cols">
     <ul class="sets" role="listbox" aria-label="Channel sets">
-      {#each sets as s (s.name)}
+      {#each sets as s (setKey(s))}
         <li>
-          <button role="option" aria-selected={s.name === setName} class:on={s.name === setName} onclick={() => choose(s)}>
+          <button role="option" aria-selected={setKey(s) === setName} class:on={setKey(s) === setName} onclick={() => choose(s)}>
             <b>{s.displayName ?? s.name}</b>
             <span class="count">{s.frequencies.length}</span>
-            <span class="desc">{s.description}</span>
+            <span class="desc">{s.countries ? `${s.countries.join(", ")} only. ` : ""}{s.description}</span>
           </button>
         </li>
       {/each}
     </ul>
     {#if set}
       <div class="chans">
+        {#if set.source?.length}
+          <p class="src">
+            From {#each set.source as src, i (i)}{i ? "; " : ""}<a href={src.url} target="_blank" rel="noreferrer">{src.title}</a>{/each}.
+            Something wrong or missing? <a href={correctionUrl(library.fixedRegion, set)} target="_blank" rel="noreferrer">Suggest a correction</a>.
+          </p>
+        {/if}
         <div class="head">
           <span>{picked.size} of {set.frequencies.length} channels · {set.defaultMode === "AM" ? "NAM" : set.defaultBandwidth.startsWith("12.5") ? "NFM" : "FM"}, {set.defaultPower} power{set.rxOnly ? ", RX only" : ""}</span>
           <span class="spacer"></span>
@@ -71,7 +108,7 @@
               <span class="nm">{f.name}</span>
               <span class="f">{mhz(f.rx)}</span>
               <span class="tx">{f.tx !== f.rx ? `TX ${mhz(f.tx)}` : ""}</span>
-              <span class="nt">{f.notes ?? ""}</span>
+              <span class="nt">{f.note ?? f.notes ?? ""}</span>
             </label>
           {/each}
         </div>
@@ -86,6 +123,23 @@
 {/if}
 
 <style>
+  .region {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .region label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .src {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--dim);
+  }
   .cols {
     display: grid;
     grid-template-columns: minmax(220px, 300px) 1fr;

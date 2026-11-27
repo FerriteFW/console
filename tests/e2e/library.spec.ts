@@ -1,5 +1,5 @@
 // Add channels (the channel library): a fixed set into a new zone, written to the radio and read back; airports
-// near a typed place as NAM, RX-only rows; the Airband fixed set; licensed sites (Canada and the US) near it. The
+// near a typed place as NAM, RX-only rows; a region's fixed sets; licensed sites (Canada and the US) near it. The
 // write test runs on the simulator only: on a radio it would add 22 channels (FERRITE_E2E_LIBRARY_WRITE=1 lets it,
 // at your own risk). Airports and licensed sites never use the network: data.ferritefw.dev is served from
 // tests/e2e/fixtures/sitedata (a few tiny tiles) by ./sitedata.ts.
@@ -59,8 +59,10 @@ test.describe.serial("write", () => {
 
   test("fixed set: FRS into a new zone, written and read back", async ({}, info) => {
     const before = await state(page, (f) => ({ chs: f.channels.table.channels.length, zones: f.channels.table.zones.length }));
+    await serveData(page);
     await openLibrary("Fixed sets");
-    await lib().getByRole("option", { name: /^FRS/ }).click();
+    await lib().getByLabel("Fixed sets for").selectOption("US");
+    await lib().getByRole("option", { name: /^Family Radio Service \(US\)/ }).click();
     await expect(lib().getByRole("button", { name: "Add 22 channels" })).toBeEnabled();
     await expect(lib().getByLabel("New zone name")).toHaveValue("FRS");
     // A unique zone name: a run against a radio that already has an "FRS" zone still makes a new one.
@@ -75,7 +77,7 @@ test.describe.serial("write", () => {
     expect(after.zones.length).toBe(before.zones + 1);
     expect(after.zones.at(-1).name).toBe(zone);
     await expect(page.locator("tr.added")).toHaveCount(22);
-    await expect(page.getByText("22 channels added from FRS, 1 new zone")).toBeVisible();
+    await expect(page.getByText("22 channels added from Family Radio Service (US), 1 new zone")).toBeVisible();
     await page.locator("tr.added").first().scrollIntoViewIfNeeded();
     await shot(page, info, "31-library-fixed-rows");
 
@@ -168,27 +170,30 @@ test.describe.serial("near a place", () => {
     await shot(page, info, "35-library-airport-rows");
   });
 
-  test("fixed set: Airband (common), NAM and RX only", async ({}, info) => {
+  test("fixed set: Canada's common airband (data.ferritefw.dev's fixed/), NAM and RX only", async ({}, info) => {
+    await serveData(page);
     const before = await state(page, (f) => f.channels.table.channels.length);
     await openLibrary("Fixed sets");
-    await lib().getByRole("option", { name: /^Airband \(common\)/ }).click();
-    await expect(lib()).toContainText("12 of 12 channels · NAM, Low power, RX only");
-    await expect(lib()).toContainText("Emergency 121.5");
-    await expect(lib()).toContainText("TC AIM RAC 5.1");
+    await lib().getByLabel("Fixed sets for").selectOption("CA");
+    await lib().getByRole("option", { name: /^Aviation common frequencies \(Canada\)/ }).click();
+    await expect(lib()).toContainText("18 of 18 channels · NAM, Low power, RX only");
+    await expect(lib()).toContainText("Enroute 126.700");
+    await expect(lib().getByRole("link", { name: "Suggest a correction" })).toHaveAttribute("href", /template=fixed-set\.yml&region=CA&set=ca-air-common/);
+    // The international sets come after the region's.
+    await expect(lib().getByRole("option", { name: /^Marine VHF/ }).first()).toBeVisible();
     await shot(page, info, "34a-library-airband");
-    await lib().getByRole("button", { name: "Add 12 channels" }).click();
+    await lib().getByRole("button", { name: "Add 18 channels" }).click();
     await expect(lib()).toHaveCount(0);
-    expect(await state(page, (f) => f.channels.table.channels.length)).toBe(before + 12);
+    expect(await state(page, (f) => f.channels.table.channels.length)).toBe(before + 18);
     // Into a new zone named after the set.
-    expect(await state(page, (f) => f.channels.table.zones.at(-1).name)).toBe("Airband (common)");
+    expect(await state(page, (f) => f.channels.table.zones.at(-1).name)).toBe("Air CA common");
     const added = await state(page, (f) => f.channels.table.channels.filter((c: any) => c.zone === f.channels.table.zones.length - 1));
-    expect(added.length).toBe(12);
+    expect(added.length).toBe(18);
     for (const c of added) {
       expect(c.mode).toBe("NAM");
       expect(c.rx_only).toBe(true);
     }
-    expect(added.find((c: any) => c.name === "Emergency 121.5").rx).toBe("121.50000");
-    expect(added.find((c: any) => c.name === "En route 126.7").rx).toBe("126.70000");
+    expect(added.find((c: any) => c.name === "Enroute 126.700").rx).toBe("126.70000");
   });
 
   test("licensed sites: Canada and the US near the place, modes, digital hidden, positions kept", async ({}, info) => {

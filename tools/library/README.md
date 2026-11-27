@@ -11,7 +11,7 @@ The tests never use the network: `tests/e2e/fixtures/sitedata/` holds a few tiny
 
 | File | Source | Size | Refresh |
 | --- | --- | --- | --- |
-| `fixed-channels.json` | Hand-made in NeonPlug, from `fixed-channels-source.md`; Airband from the sources below | 32 KB | Edit by hand |
+| `fixed-channels.json` | Hand-made in NeonPlug, from `fixed-channels-source.md`; Airband from the sources below. Now only the fallback when data.ferritefw.dev can't be reached (the sets by region live in the data repository's `fixed/`) | 32 KB | Edit by hand |
 
 ## Formats
 

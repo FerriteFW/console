@@ -66,7 +66,7 @@
   </div>
 {/if}
 {#if commonSet}
-  <label class="common"><input type="checkbox" bind:checked={nearby.common} /> Also the {commonSet.frequencies.length} common airband frequencies (emergency 121.5, air-to-air, multicom, en route: the Airband set)</label>
+  <label class="common"><input type="checkbox" bind:checked={nearby.common} /> Also the {commonSet.frequencies.length} common airband frequencies (the {commonSet.displayName ?? commonSet.name} set)</label>
 {/if}
 
 <style>

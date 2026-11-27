@@ -349,11 +349,21 @@ export class SiteData {
    * each time (the offline copy: the desktop app and a browser without the network use it), else the last one kept.
    * `kept`: it came from the cache.
    */
-  async sats(): Promise<{ text: string; kept: boolean }> {
+  sats(): Promise<{ text: string; kept: boolean }> {
+    return this.file("satellites/sats.json");
+  }
+
+  /** A region's fixed sets (`fixed/<REGION>.json`, format `fixed-1`), kept for offline use as `sats` is. */
+  fixed(region: string): Promise<{ text: string; kept: boolean }> {
+    return this.file(`fixed/${region}.json`);
+  }
+
+  /** A one-file source's file: the server's, kept in the cache each time, else the last one kept. */
+  private async file(path: string): Promise<{ text: string; kept: boolean }> {
     const store = await this.store;
-    const key = this.url("satellites/sats.json");
+    const key = this.url(path);
     try {
-      const text = await (await this.get("satellites/sats.json")).text();
+      const text = await (await this.get(path)).text();
       await store?.put(key, new Response(text)).catch(() => {});
       return { text, kept: false };
     } catch (e) {

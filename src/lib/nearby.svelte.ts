@@ -11,6 +11,7 @@
 // callsign, TX on the repeater's input (its offset), its tones, NFM or FM (repeaterMode); all with their positions
 // (LINK-53) and the zone target (repeaters: one "Repeaters" zone).
 import { library, type FixedSet } from "./library.svelte";
+import { airbandSet } from "./fixedsets";
 import { channels } from "./channels.svelte";
 import { airportSites, repeaterSites, sites, Sites, type Near } from "./sites.svelte";
 import { CATEGORIES, CAT_BUSINESS, CAT_PUBLIC_SAFETY, MODE_DIGITAL, MODE_FM, MODE_NFM } from "./sitedata";
@@ -264,8 +265,8 @@ class Nearby {
     return near(p, library.radius, coords, REPEATER_CAP).map(({ i, km }) => ({ ...list[i], km }));
   });
 
-  /** The fixed set of airband frequencies not tied to one airport. */
-  commonSet = $derived<FixedSet | undefined>(library.fixed?.find((s) => s.name === "Airband"));
+  /** The fixed set of airband frequencies not tied to one airport (the region's). */
+  commonSet = $derived<FixedSet | undefined>(airbandSet(library.fixed));
 
   /** The picks Add takes: only those of the kinds (and sources) shown. */
   pickedSites = $derived(this.showLic ? this.siteShown.filter((e) => this.picks.has(e.key)) : []);
