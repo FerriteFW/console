@@ -46,6 +46,12 @@
             </ul>
           </div>
         {/if}
+        {#if w.radioOnly?.length}
+          <p class="note" data-k="radio-only">
+            Left as the radio has {w.radioOnly.length === 1 ? "it" : "them"}: {w.radioOnly.join(", ")}. These change only on the radio
+            (a radio just installed asks for its region in its first-run Setup); the rest of the file is written.
+          </p>
+        {/if}
         {#if w.plan.problems.length}
           <div class="problems">
             <b>The radio would refuse or keep {w.plan.problems.length === 1 ? "this" : "these"}:</b>

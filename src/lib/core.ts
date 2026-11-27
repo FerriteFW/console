@@ -503,6 +503,12 @@ export const settingsBackup = (record: Uint8Array, extras: Extras, saved: string
 export const settingsCodeplugPart = (record: Uint8Array, extras: Extras, saved: string, radio: Record<string, string>) =>
   wasm.settings_codeplug_part(record, js(extras), saved, js(radio));
 /** `record` with the PIN lock's fields from `from` (the radio's own record). */
+/** LINK-26: `record` with the settings only the radio changes (region, Extend TX, PIN, setup, ports) from `from`, the
+ *  radio's own record; `kept` names those that differed. A loaded file takes them from the radio. */
+export const settingsKeepRadioOnly = (record: Uint8Array, ex: Extras, from: Uint8Array): { record: Uint8Array; kept: string[] } => {
+  const r = JSON.parse(wasm.settings_keep_radio_only(record, js(ex), from)) as { record: number[]; kept: string[] };
+  return { record: new Uint8Array(r.record), kept: r.kept };
+};
 export const settingsKeepPin = (record: Uint8Array, from: Uint8Array): Uint8Array => wasm.settings_keep_pin(record, from);
 export const settingsRestore = (text: string): Restored => JSON.parse(wasm.settings_restore(text));
 /** The terminal-backed values from a `dump`'s text. */

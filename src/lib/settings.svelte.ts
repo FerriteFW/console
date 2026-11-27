@@ -14,6 +14,7 @@ import {
   settingsPlan,
   settingsRestore,
   settingsKeepPin,
+  settingsKeepRadioOnly,
   settingsSet,
   settingsView,
   type Extras,
@@ -42,13 +43,15 @@ export type SettingsWriteStep =
       overridden: SettingChange[];
       /** A loaded file (a backup, a codeplug), written whole. */
       whole: boolean;
+      /** LINK-26: the loaded file's settings that only the radio changes, left as the radio has them. */
+      radioOnly?: string[];
     }
   | { step: "writing"; plan: SettingsPlan }
   | { step: "done"; plan: SettingsPlan; verified: boolean; error: string; kept: Kept };
 
 /** LINK-21.1: the review step of a write from the merge (shared with APRS settings). */
-export function reviewStep(plan: SettingsPlan, fresh: Uint8Array, kept: Kept, m: Merged, whole: boolean): SettingsWriteStep {
-  return { step: "review", plan, fresh, kept, want: m.record, wantEx: m.extras, radio: m.radio, overridden: m.overridden, whole };
+export function reviewStep(plan: SettingsPlan, fresh: Uint8Array, kept: Kept, m: Merged, whole: boolean, radioOnly: string[] = []): SettingsWriteStep {
+  return { step: "review", plan, fresh, kept, want: m.record, wantEx: m.extras, radio: m.radio, overridden: m.overridden, whole, radioOnly };
 }
 
 export const same = (a: Uint8Array | null, b: Uint8Array | null) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
@@ -98,6 +101,8 @@ class RadioSettings {
   /** The record came from a codeplug, which never carries the PIN lock: the radio's own is kept (taken from the
    *  record read before the write). */
   keepPin = false;
+  /** LINK-21.4: the loaded file's settings that only the radio changes, left as the radio has them when it opened. */
+  radioOnly: string[] = [];
   /** `base` is a read from the radio (not a file loaded before any read): the write merges the edits onto the radio's
    *  record as it is then (LINK-21.1). */
   baseFromRadio = false;
@@ -141,6 +146,7 @@ class RadioSettings {
     this.base = r;
     this.baseFromRadio = fromRadio;
     this.whole = false;
+    this.radioOnly = [];
     this.baseExtras = extras;
     this.show(r, extras);
     this.baseValues = this.values(this.view!);
@@ -178,6 +184,7 @@ class RadioSettings {
     if (!this.base) return;
     this.show(this.base, this.baseExtras);
     this.whole = false;
+    this.radioOnly = [];
     this.refused = {};
     this.source = "Edits undone: as read";
   }
@@ -199,10 +206,15 @@ class RadioSettings {
       // A codeplug has no PIN lock: the radio's own (as read) stays, and the write takes it from its fresh read.
       if (codeplug && this.base) rec = settingsKeepPin(rec, this.base);
       const extras = { ...this.extras, ...r.extras };
+      // LINK-26: what only the radio changes (region, Extend TX, PIN, setup, ports) stays the radio's, as its menu
+      // here can't change it either; the write takes it again from its fresh read.
+      let kept: string[] = [];
+      if (this.base) ({ record: rec, kept } = settingsKeepRadioOnly(rec, extras, this.base));
+      this.radioOnly = kept;
       if (!this.base) this.took(rec, extras, "", false);
       else this.show(rec, extras);
       this.whole = true;
-      this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})`;
+      this.source = `Loaded ${name} (saved ${r.saved}${r.radio.callsign ? `, ${r.radio.callsign}` : ""})${kept.length ? `; as the radio has ${kept.length === 1 ? "it" : "them"} (changed only on the radio): ${kept.join(", ")}` : ""}`;
       this.keepPin = codeplug;
       return true;
     } catch (e) {
@@ -220,12 +232,18 @@ class RadioSettings {
     try {
       const { record: fresh, extras, kept } = await this.backupRadio();
       if (this.keepPin) this.show(settingsKeepPin(this.record, fresh), this.extras);
-      const m: Merged =
+      let m: Merged =
         this.base && this.baseFromRadio
           ? settingsMerge(this.base, this.baseExtras, this.record!, this.extras, fresh, extras, this.whole)
           : { record: this.record!, extras: this.extras, radio: [], overridden: [] };
+      let radioOnly: string[] = [];
+      if (this.whole) {
+        const k = settingsKeepRadioOnly(m.record, m.extras, fresh);
+        m = { ...m, record: k.record };
+        radioOnly = [...new Set([...this.radioOnly, ...k.kept])];
+      }
       const plan = settingsPlan(fresh, extras, m.record, m.extras);
-      this.write = reviewStep(plan, fresh, kept, m, this.whole);
+      this.write = reviewStep(plan, fresh, kept, m, this.whole, radioOnly);
     } catch (e) {
       this.write = null;
       this.error = backupFailed(e);
