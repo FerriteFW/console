@@ -1,16 +1,16 @@
 {
  "reader": {
-  "version": "ferrite-reader v0.9.7",
+  "version": "ferrite-reader v0.9.8",
   "file": "ferrite-reader.btf",
-  "sha256": "0f4b2d2cc71ed60e126a8b7ed686e469011fea9ade008250d725c87ee3eff711",
-  "bytes": 37888,
-  "minisig": "untrusted comment: signature from minisign secret key\nRUQbhRdY9EcsWzc2/J2oru+ehcNjNbMaVmtYsREF6c4bQ4ID/njsjH+8lvPDyPRa6Rwuz0NaeSZmhIEtPE9253VUK0/5MVVYcQw=\ntrusted comment: Ferrite v0.9.7 627f829\n3zXf8L6dc8Dr+Q69eQxm+eq2IR1IYO8cfLRXO3beiR5w6vW/qM6vTn22ucmuMgZN5AktFaiugcNczUPbsuJACw==\n"
+  "sha256": "40128754e0fedd96b49bb9e5bf22990cedf300e92a9f9a4aa4cc6d0b1ca40314",
+  "bytes": 38912,
+  "minisig": "untrusted comment: signature from minisign secret key\nRUQbhRdY9EcsW8j7oF3hSigUYJlvUZdFvg2hroVwDwv0TzvaVZ+lzFfnVDHm75kKENwPE0YXcLPXAjJ2gU4tYzcQ6nF54/EULwo=\ntrusted comment: Ferrite v0.9.8 54a1c62\nvq98I9ARByGO15Y9ulgvJbXh7uFWW7zyXeaAn7vaYwUsiGwR2xFq4M2SV6Ok7CNIqIRSzeJ9YD23eQy7OKfdAA==\n"
  },
  "restorer": {
-  "version": "ferrite-restorer v0.9.7",
+  "version": "ferrite-restorer v0.9.8",
   "file": "ferrite-restorer.btf",
-  "sha256": "76940325db6e833f5c9dbfae7edcae54bc33e92a67e9b318f6e58eef9b1986ec",
+  "sha256": "f7049e675aa44ae36141865e5d64243e3c76b69f74abb71d1d0d9e2f6c1c85e0",
   "bytes": 27648,
-  "minisig": "untrusted comment: signature from minisign secret key\nRUQbhRdY9EcsW0hHGQCtsY93+2X9DJsNgoIDhVU+e4XaowSAJCPSEU+nR/mvJ2haPtGj5pBSdiF8JnX/2xuwWbiBAUj05rgtQAY=\ntrusted comment: Ferrite v0.9.7 627f829\nS1//la4OuGczQQXAMOfmiq5yLXAVx1yI7XZZJ9ccSDxpAz3UwIRGqkURbgAk3p0EnsK5pmeQ5L7OZN6aYH7GDA==\n"
+  "minisig": "untrusted comment: signature from minisign secret key\nRUQbhRdY9EcsW9TctiswSgFrLnyk79In1PTlKSI72vuBGb+6Xnp8rXZQmexUsoR3JKz7Aa97LNVdpvc3pxYwKL8ZWgVwgl2heAQ=\ntrusted comment: Ferrite v0.9.8 54a1c62\nQ4nWiRz2ugfXRnSO/K849+XXCMn1nOWx7RsfCumgesJvJ716zGlzbnMxBLzhzqF0qeI4Op2BkLQsmNwWBDLeCA==\n"
  }
 }
