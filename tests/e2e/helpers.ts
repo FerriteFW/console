@@ -49,16 +49,20 @@ export async function shot(page: Page, info: TestInfo, name: string) {
   await info.attach(name, { path, contentType: "image/png" });
 }
 
-/** Console at `page` (live, channels), with the Bridge button pointed at the run's bridge. */
-export async function openConsole(page: Page, section = "live", bridge?: string) {
-  const url = bridge ?? process.env.FERRITE_E2E_BRIDGE;
-  if (!url) throw new Error("FERRITE_E2E_BRIDGE is not set (the bridge fixture starts the bridge)");
-  // Chrome's save dialog (console#106) closes by itself in headless Chromium (a cancel): Console's saves take the
-  // download instead, which the tests catch. A test's own stand-in for the dialog (install.spec) is left alone.
+/** Chrome's save dialog (console#106) closes by itself in headless Chromium (a cancel): Console's saves take the
+ *  download instead, which the tests catch. A test's own stand-in for the dialog (install.spec) is left alone. */
+export async function noSaveDialog(page: Page) {
   await page.addInitScript(() => {
     const p = (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
     if (typeof p === "function" && /\[native code\]/.test(String(p))) Object.defineProperty(window, "showSaveFilePicker", { value: undefined, configurable: true });
   });
+}
+
+/** Console at `page` (live, channels), with the Bridge button pointed at the run's bridge. */
+export async function openConsole(page: Page, section = "live", bridge?: string) {
+  const url = bridge ?? process.env.FERRITE_E2E_BRIDGE;
+  if (!url) throw new Error("FERRITE_E2E_BRIDGE is not set (the bridge fixture starts the bridge)");
+  await noSaveDialog(page);
   await page.goto(`/?bridge=${encodeURIComponent(url)}#/${section}`);
   await closeWelcome(page);
 }

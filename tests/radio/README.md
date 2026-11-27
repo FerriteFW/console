@@ -33,15 +33,18 @@ Console driven as a user drives it, against a real radio. A second program check
 | 30 channels | Read, + Add channel, rename, delete, each written | The record's name and RX after each write; gone after the delete |
 | 40 library, zones | FRS from the library into a new zone; then those 22 and the zone deleted | 22 more channels in one more zone, FRS 1 on 462.5625; then the numbers as they began |
 | 50 backup | Back up everything; open it again | The file holds every part and the radio's channel numbers; nothing to write |
-| 60 stock * | Back to stock: the radio's backup and stock's firmware | (The radio runs stock: no Bluetooth check) |
-| 70 install * | Install: back up the whole radio, save it, install Ferrite | Console connected to Ferrite as usual |
+| 60 stock * | Back to stock: the radio's backup and stock's firmware; a `.fbin`'s menu icons go back too | (The radio runs stock: no Bluetooth check) |
+| 62 nicFW *** | (flash.py, not Console: nicFW on, stock's icons kept, as a nicFW user has it) | |
+| 70 install * | Install: back up the whole radio, save it, install Ferrite; Try again with a power cycle when the bootloader doesn't answer | Console says it found the SSB patch (from stock) or none (from nicFW); then connected to Ferrite as usual |
+| 75 ssb * | Firmware page's SSB card; from nicFW, Add SSB… with stock's `.BTF` | "This radio has SSB" (after "SSB added and checked") |
 | 80 update ** | Firmware Update with a local image | The radio answers with that build; it lost nothing |
-| 85 restore * | The stage-50 backup opened and written: settings, then channels | The radio answers over Bluetooth again; its channels are back |
-| 90 end | | Firmware, channel, zone and preset numbers, and settings as at the start |
+| 85 restore * | The stage-50 backup opened and written while the radio is still in its first-run Setup (the region left to the radio, LINK-21.4), then channels; then Setup finished in Live View with the backup's region | The radio answers over Bluetooth again; its channels are back |
+| 90 end | | Firmware, channel, zone and preset numbers, and settings as at the start (after a stock round, the PIN's bytes are the radio's own: LINK-26) |
 
 - Each stage that changes the radio puts it back, even when it fails. A failure stops the run.
 - `*`: `FERRITE_RADIO_FLASH=1 FERRITE_RADIO_STOCK=1` only.
 - `**`: `FERRITE_RADIO_FLASH=1` only.
+- `***`: also `FERRITE_RADIO_NICFW=1` (image: `FERRITE_RADIO_NICFW_BTF`, else `firmware/nicfw950_v6.00.15x.btf`). The backup in radios.toml must be a `.fbin`.
 - The flashing stages never run on the simulator.
 
 ## Without a radio
@@ -50,12 +53,13 @@ Console driven as a user drives it, against a real radio. A second program check
 
 ## A run with the flashing stages
 
-1. **Image:** in `../ferrite`, `tools/mkbtf.sh tx-bench` makes `target/ferrite-txbench.ffw`. `FERRITE_RADIO_IMAGE` names another.
+1. **Images:** in `../ferrite`, `tools/mkbtf.sh tx-bench` makes `target/ferrite-txbench.ffw` (`FERRITE_RADIO_IMAGE` names another) and `tools/mkbtf.sh reader` the backup reader Install needs (a development build bundles none; `FERRITE_RADIO_READER` names another).
 2. **Backup's radio ID:** in radios.toml, add `uid = "..."` to the radio's block. It's the ID About shows on the radio the backup came from, checked by hand.
    - Console asks for it when it can't tell a backup's radio (decision 263).
    - The stage types it only when the radio on the cable shows the same ID.
 3. **Stock firmware:** `FERRITE_RADIO_STOCK_BTF`, else `firmware/stock/RT_950Pro_V0.29_OEM.BTF`.
-4. **Run:** `FERRITE_RADIO_FLASH=1 FERRITE_RADIO_STOCK=1 npm run radio`. About 40 minutes, most of it the whole-radio backup and the flashes.
+4. **Run:** `FERRITE_RADIO_FLASH=1 FERRITE_RADIO_STOCK=1 npm run radio` (add `FERRITE_RADIO_NICFW=1` for the nicFW detour). About 45 minutes, most of it the whole-radio backup and the flashes.
+   - **Stay by the radio for Install from nicFW:** nicFW doesn't answer stock's updater nudge, so the run prints `>>> Power-cycle the radio into its bootloader now` (off, hold the two lower side keys, on). Once was enough on black.
 5. **Afterwards:**
    - Install leaves the installed image on the radio.
    - Its whole-radio backup (`.fbin`) and the stage-50 `.ferrite` stay in `test-results/radio-run/`.

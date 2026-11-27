@@ -147,6 +147,13 @@ export function byteDiff(a: string, b: string): string[] {
  *  a fresh Install), and never on the simulator. */
 export const flashing = () => process.env.FERRITE_RADIO_FLASH === "1" && process.env.FERRITE_RADIO !== "sim";
 export const stockRound = () => flashing() && process.env.FERRITE_RADIO_STOCK === "1";
+/** The stock round by way of nicFW (FERRITE_RADIO_NICFW=1): stock, then nicFW, then Install, as a user coming from
+ *  nicFW: the install finds no SSB patch and Firmware › Add SSB adds it (stages 62, 70, 75). */
+export const nicfwRound = () => stockRound() && process.env.FERRITE_RADIO_NICFW === "1";
+/** nicFW's image for stage 62: FERRITE_RADIO_NICFW_BTF, else the archived v6.00.15x. */
+export const nicfwBtf = () => process.env.FERRITE_RADIO_NICFW_BTF ?? join(root, "..", "..", "firmware", "nicfw950_v6.00.15x.btf");
+/** Stage 62 put nicFW on the radio (stage 70 then expects no SSB patch found; stage 75 adds it). */
+export const nicfwMark = () => join(runDir, "on-nicfw");
 
 /** The image Update installs: FERRITE_RADIO_IMAGE, else ferrite's tx-bench build (`tools/mkbtf.sh tx-bench`). */
 export const updateImage = () => process.env.FERRITE_RADIO_IMAGE ?? join(ferriteDir, "target", "ferrite-txbench.ffw");
@@ -155,4 +162,6 @@ export const stockBtf = () => process.env.FERRITE_RADIO_STOCK_BTF ?? join(root, 
 /** The run's whole-radio .ferrite (stage 50), which stage 85 writes back after the stock round. */
 export const everythingFile = () => join(runDir, "everything.ferrite");
 /** Set by stage 60 once the radio is on stock: stages 70 and 85 run only then. */
+/** Stage 85 restored the run's backup after a stock round (stage 90 then allows the PIN's bytes). */
+export const restoredMark = () => join(runDir, "restored");
 export const stockMark = () => join(runDir, "on-stock");

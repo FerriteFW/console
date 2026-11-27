@@ -28,7 +28,8 @@ test("a key in Live View moves the radio", async ({ page, oracle }, info) => {
   await connect(page, 30_000);
   // From home: EXIT a few times (Live View's keys), then MENU opens quick settings on the radio itself.
   for (let i = 0; i < 4; i++) await page.keyboard.press("Escape");
-  await expect.poll(() => oracle.ui().then((u) => /^screen (\S+)/.exec(u)?.[1]), { timeout: 30_000 }).toBe("Home");
+  // The Bluetooth check may take a few scans to connect (oracle.py tries again): a generous wait.
+  await expect.poll(() => oracle.ui().then((u) => /^screen (\S+)/.exec(u)?.[1]), { timeout: 120_000 }).toBe("Home");
   const home = await screenId(page);
   expect(home).toBe("Home");
   await shot(page, info, "11-home");

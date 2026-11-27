@@ -25,6 +25,8 @@ test("back to stock: the radio's backup and stock's firmware, the radio's ID typ
   await page.getByLabel("Backup file").setInputFiles({ name: basename(radio.backup), mimeType: "application/octet-stream", buffer: readFileSync(radio.backup) });
   await page.getByLabel("Stock firmware for Back to stock").setInputFiles(stockBtf());
   await expect(back.locator('[data-k="restore-block"]')).toHaveCount(0);
+  // BACKUP-12.3: a .fbin keeps stock's menu icons, and they go back with it (a .bin has none: the tiles stay blank).
+  if (radio.backup.endsWith(".fbin")) await expect(back.locator('[data-k="restore-icons"]')).toContainText("Kept with this backup");
   await shot(page, info, "60-stock-ready");
 
   await back.getByRole("button", { name: "Back to stock" }).click();

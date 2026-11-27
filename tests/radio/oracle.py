@@ -19,6 +19,7 @@ never writes the radio and never keys it.
 import json
 import os
 import sys
+import time
 
 here = os.path.dirname(os.path.abspath(__file__))
 ferrite = os.environ.get("FERRITE_DIR") or os.path.join(here, "..", "..", "..", "ferrite")
@@ -38,10 +39,23 @@ def _patient(self, ty, payload=b"", timeout=None, retry_pending=30):
 fl.Link.ask = _patient
 
 
+def connect(spec, tries=4):
+    """The radio's Bluetooth, tried a few times: after a restart or a long cable session it can take longer than one
+    15 s scan to show up (black, Nov 26, 2026: "no Bluetooth device found" twice in a day, fine on the next try)."""
+    for i in range(tries):
+        try:
+            port = fl.Port(spec)
+            link = fl.Link(port)
+            return port, link, link.hello()
+        except OSError as e:
+            if i == tries - 1:
+                raise
+            print(f"oracle: {e}; trying again", file=sys.stderr, flush=True)
+            time.sleep(3)
+
+
 def main():
-    port = fl.Port(sys.argv[1])
-    link = fl.Link(port)
-    hello = link.hello()
+    port, link, hello = connect(sys.argv[1])
     fl.ble_fast(link)
     if not hello[2]:
         print(json.dumps({"error": "the radio's PIN lock is on"}), flush=True)
