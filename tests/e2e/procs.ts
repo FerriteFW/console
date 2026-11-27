@@ -68,6 +68,8 @@ export type Bridges = {
   fakeboot?: string;
   /** The simulator only: a second bridge to its Bluetooth side (BT513-paced), Bluetooth turned on first. */
   bluetooth?: () => Promise<string>;
+  /** The simulator only: its cable's and its Bluetooth side's TCP ports (the radio journey's oracle uses them). */
+  ports?: { term: number; bt: number };
 };
 
 /** Starts the bridge (and, without `serial`, a simulator behind it). Returns its ws:// URL and a stop function. */
@@ -96,7 +98,7 @@ export async function startBridge(serial?: string, simArgs: string[] = []): Prom
         if (on.status !== 0) throw new Error(`Bluetooth on: ${on.stdout}${on.stderr}`);
         return bridgeOn(["--tcp-bt", `127.0.0.1:${btPort}`], procs);
       })());
-    return { url, stop, fakeboot, bluetooth };
+    return { url, stop, fakeboot, bluetooth, ports: { term: simPort, bt: btPort } };
   } catch (e) {
     stop();
     throw e;

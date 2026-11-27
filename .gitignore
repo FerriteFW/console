@@ -15,3 +15,4 @@ public/firmware/
 __pycache__/
 /.env
 /personal.just
+playwright-report-radio/
