@@ -1422,6 +1422,36 @@ pub fn keep_pin(rec: &[u8], from: &[u8]) -> Vec<u8> {
     })
 }
 
+/// `rec` with the settings a link write leaves as the radio has them taken from `from` (the radio's own record), and
+/// the names of those that differed: the region, Extend TX, the PIN, setup, the cable port, the KISS port and the
+/// spare bytes (LINK-5, LINK-26: ferrite-app's `keep_protected`, which the plan's dry run applies). A file opened
+/// into the editor takes these from the radio, as its menu can't change them either: a backup restored onto a
+/// reinstalled radio writes everything else, and says what stays the radio's (the radio journey, Nov 26, 2026: a
+/// fresh install in its first-run Setup has no region, and the write was refused whole).
+pub fn keep_radio_only(rec: &[u8], ex: &Extras, from: &[u8]) -> (Vec<u8>, Vec<String>) {
+    let f = settings_of(from);
+    let s = settings_of(rec);
+    let kept = record_of(&Settings {
+        region: f.region,
+        extend_tx: f.extend_tx,
+        extend_warned: f.extend_warned,
+        pin_mode: f.pin_mode,
+        pin: f.pin,
+        pin_len: f.pin_len,
+        pin_misses: f.pin_misses,
+        pin_wait: f.pin_wait,
+        setup_done: f.setup_done,
+        cable_port: f.cable_port,
+        kiss_port: f.kiss_port,
+        spare_tokens: f.spare_tokens,
+        spare_temp: f.spare_temp,
+        spare_lock: f.spare_lock,
+        ..s
+    });
+    let names = if kept == rec { Vec::new() } else { diff(rec, ex, &kept, ex).into_iter().map(|c| format!("{} {}", c.path, c.name).trim().to_string()).collect() };
+    (kept, names)
+}
+
 /// The `.ferrite` codeplug's settings.json: the backup without the PIN lock (its record fields cleared, its menu
 /// entries left out: `docs/dev/codeplug-format.md`).
 pub fn codeplug_part(rec: &[u8], ex: &Extras, saved: &str, radio: BTreeMap<String, String>) -> String {
@@ -1480,6 +1510,26 @@ mod tests {
     fn merge(base: &Settings, edited: &Settings, fresh: &Settings) -> crate::merge::Merged {
         let e = ex0();
         super::merge(&record_of(base), &e, &record_of(edited), &e, &record_of(fresh), &e, false)
+    }
+
+    /// LINK-21.4, LINK-26 (the radio journey, Nov 26, 2026): a backup opened onto a reinstalled radio (no region yet, no PIN,
+    /// in its first-run Setup) takes the radio-only settings from the radio, so the dry run through ferrite's own
+    /// link session finds nothing it would keep: the rest is written. The names say what stays the radio's.
+    #[test]
+    fn a_loaded_file_keeps_the_radio_only_settings() {
+        let d = Settings::DEFAULT;
+        let radio = Settings { region: 0, setup_done: false, ..d };
+        let file = Settings { region: 2, setup_done: true, pin_len: 4, extend_tx: true, theme: d.theme ^ 1, ..d };
+        let (e, base) = (ex0(), record_of(&radio));
+        let before = plan(&base, &record_of(&file));
+        assert!(!before.problems.is_empty(), "the file as it is: the radio would keep its region");
+        let (kept, names) = keep_radio_only(&record_of(&file), &e, &base);
+        let p = plan(&base, &kept);
+        assert!(p.problems.is_empty(), "{:?}", p.problems);
+        assert_eq!(settings_of(&kept).theme, file.theme, "the rest is the file's");
+        assert!(names.iter().any(|n| n.ends_with("Region")), "{names:?}");
+        assert!(names.iter().any(|n| n.ends_with("Extend TX")), "{names:?}");
+        assert_eq!(keep_radio_only(&base, &e, &base), (base.clone(), Vec::new()), "nothing to keep: nothing named");
     }
 
     /// LINK-21.1 (console#80): the home channel and the FM radio's frequency (no menu item) changed on the radio

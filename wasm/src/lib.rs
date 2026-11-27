@@ -707,6 +707,14 @@ pub fn settings_codeplug_part(record: &[u8], ex: &str, saved: &str, radio: &str)
     Ok(settings::codeplug_part(record, &extras(ex)?, saved, r))
 }
 
+/// `record` with the settings only the radio changes taken from `from` (the radio's own record: LINK-26), as
+/// `{record, kept}`: `kept` names those that differed.
+#[wasm_bindgen]
+pub fn settings_keep_radio_only(record: &[u8], ex: &str, from: &[u8]) -> Result<String, JsError> {
+    let (rec, kept) = settings::keep_radio_only(record, &extras(ex)?, from);
+    Ok(json(&serde_json::json!({ "record": rec, "kept": kept })))
+}
+
 /// `record` with the PIN lock's fields from `from` (the radio's own record).
 #[wasm_bindgen]
 pub fn settings_keep_pin(record: &[u8], from: &[u8]) -> Vec<u8> {

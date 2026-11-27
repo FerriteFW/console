@@ -49,7 +49,7 @@ test("Save as… a .ferrite, discard, Open… it: the table back, unwritten", as
   await d.saveAs(path);
   const bytes = readFileSync(path);
   expect([...bytes.subarray(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
-  await expect(page.locator(".toast")).toContainText(`as ${d.suggestedFilename()}`);
+  await expect(page.locator(".toast:not([data-sat-toast])")).toContainText(`as ${d.suggestedFilename()}`); // not the satellite list's toast
 
   await file(/^Discard unwritten changes/)();
   await expect.poll(() => state(page, (f) => f.channels.pending)).toBe(0);
@@ -58,7 +58,7 @@ test("Save as… a .ferrite, discard, Open… it: the table back, unwritten", as
   await page.locator('input[type=file][accept^=".json"]').setInputFiles({ name: d.suggestedFilename(), mimeType: "application/zip", buffer: bytes });
   // The range presets ride along (their own part): loaded in place of the radio's, so nothing changes.
   const presets = await state(page, (f) => f.channels.presets.length as number);
-  await expect(page.locator(".toast")).toContainText(
+  await expect(page.locator(".toast:not([data-sat-toast])")).toContainText(
     `Loaded channels (${read.channels.length}) and zones (${read.zones.length}), range presets (${presets}) from ${d.suggestedFilename()}`,
   );
   expect(await table()).toEqual(edited);
@@ -72,7 +72,7 @@ test("an older channels -backup.json still opens", async () => {
   const text = readFileSync(new URL("../../core/tests/fixtures/codeplug/channels.json", import.meta.url), "utf8");
   const name = "ferrite-VA7IF-20261030-141200-backup.json";
   await page.locator('input[type=file][accept^=".json"]').setInputFiles({ name, mimeType: "application/json", buffer: Buffer.from(text) });
-  await expect(page.locator(".toast")).toContainText(`Loaded channels (3) and zones (2) from ${name}`);
+  await expect(page.locator(".toast:not([data-sat-toast])")).toContainText(`Loaded channels (3) and zones (2) from ${name}`);
   const t = await table();
   expect(t.channels.map((c: any) => c.name)).toEqual(["Calling 2 m", "North hill", "Calling 70 cm"]);
   expect(t.zones.map((z: any) => z.name)).toEqual(["Local", "Repeaters"]);

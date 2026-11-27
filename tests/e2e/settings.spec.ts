@@ -182,3 +182,43 @@ test("a setting the settings record doesn't carry (Battery Save) with one it doe
   await page.getByRole("region", { name: "Display, sound, power" }).scrollIntoViewIfNeeded();
   await shot(page, info, "26-settings-term-restored");
 });
+
+test("LINK-21.4: a file whose region isn't the radio's: the rest is written, the region left as the radio has it", async ({}, info) => {
+  // The radio journey (Nov 26, 2026): a backup opened onto a radio just reinstalled (no region yet) was refused
+  // whole, as the radio keeps its region (LINK-26). Here the file's region differs the other way; the same rule.
+  await readRadio();
+  const v = await values();
+  const region = v["0 9 4"];
+  const beepTo = v["0 7 5 1"] === "On" ? "Off" : "On";
+  await beep().selectOption(beepTo);
+  const dl = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save as…" }).click();
+  const { readZip } = await import("../../src/lib/zip");
+  const { readFileSync, writeFileSync } = await import("node:fs");
+  const z = await readZip(readFileSync(await (await dl).path()));
+  const file = JSON.parse(new TextDecoder().decode(z.get("settings.json")!));
+  // The settings record's region byte (ferrite-app persist.rs's order: 0 not chosen, else 1 + REGION_LIST's index).
+  const REGION_AT = 71;
+  const rec: string = file.record;
+  const codes = ["Not set", "United States", "Canada", "United Kingdom", "Europe", "Australia", "New Zealand", "Japan", "Other"];
+  expect(codes[parseInt(rec.slice(REGION_AT * 2, REGION_AT * 2 + 2), 16)], "the record's region byte is where this test looks").toBe(region);
+  const other = region === "United States" ? 2 : 1;
+  file.record = rec.slice(0, REGION_AT * 2) + other.toString(16).padStart(2, "0") + rec.slice(REGION_AT * 2 + 2);
+  const path = info.outputPath("other-region-settings.json");
+  writeFileSync(path, JSON.stringify(file));
+  await page.getByRole("button", { name: "Undo edits" }).click();
+  await page.locator('input[type=file][accept^=".json"]').setInputFiles(path);
+  await expect(page.getByText(/^Loaded other-region-settings\.json/)).toContainText("0 9 4 Region");
+  await startWrite();
+  await expect(dialog().locator('[data-k="radio-only"]')).toContainText("0 9 4 Region");
+  await expect(dialog()).not.toContainText("would refuse or keep");
+  await shot(page, info, "27-settings-radio-only");
+  await commitWrite(1);
+  await readRadio();
+  const after = await values();
+  expect([after["0 9 4"], after["0 7 5 1"]]).toEqual([region, beepTo]);
+  // Put Key beep back.
+  await beep().selectOption(v["0 7 5 1"]);
+  await startWrite();
+  await commitWrite(1);
+});
