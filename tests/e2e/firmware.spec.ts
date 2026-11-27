@@ -56,18 +56,21 @@ function part(magic: string, body: Buffer, build: string): Buffer {
   return Buffer.concat([h, body]);
 }
 
-/** An unsigned `.ffw` (a local build's), packed by ferrite's own tools/ffw.py: the image and two small parts. */
-function testFfw(btf: Buffer): Buffer {
+/** An unsigned `.ffw` (a local build's), packed by ferrite's own tools/ffw.py: the image and two small parts, or
+ * the image alone (`parts` false). */
+function testFfw(btf: Buffer, parts = true): Buffer {
   const d = mkdtempSync(join(tmpdir(), "ferrite-ffw-"));
   const build = "e2e0001";
   writeFileSync(join(d, "x.btf"), btf);
-  writeFileSync(join(d, "text-en.bin"), part("FTXT", Buffer.from("\x01\x00\x00\x00\x08\x00\x00\x02hi", "latin1"), build));
-  writeFileSync(join(d, "logo.bin"), part("FLGO", Buffer.alloc(300, 0x5a), build));
-  writeFileSync(join(d, "parts.json"), JSON.stringify([
-    { file: "text-en.bin", magic: "FTXT", addr: 0x090000, max: 0x10000 },
-    { file: "logo.bin", magic: "FLGO", addr: 0x240000, max: 0x8000 },
-  ]));
-  const r = spawnSync("python3", [`${ferrite}/tools/ffw.py`, "pack", join(d, "x.ffw"), "--btf", join(d, "x.btf"), "--parts", d, "--kind", "tx", "--build", build, "--version", "9.8.7"], { encoding: "utf8" });
+  if (parts) {
+    writeFileSync(join(d, "text-en.bin"), part("FTXT", Buffer.from("\x01\x00\x00\x00\x08\x00\x00\x02hi", "latin1"), build));
+    writeFileSync(join(d, "logo.bin"), part("FLGO", Buffer.alloc(300, 0x5a), build));
+    writeFileSync(join(d, "parts.json"), JSON.stringify([
+      { file: "text-en.bin", magic: "FTXT", addr: 0x090000, max: 0x10000 },
+      { file: "logo.bin", magic: "FLGO", addr: 0x240000, max: 0x8000 },
+    ]));
+  }
+  const r = spawnSync("python3", [`${ferrite}/tools/ffw.py`, "pack", join(d, "x.ffw"), "--btf", join(d, "x.btf"), ...(parts ? ["--parts", d] : []), "--kind", "tx", "--build", build, "--version", "9.8.7"], { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`ffw.py: ${r.stderr}`);
   const b = readFileSync(join(d, "x.ffw"));
   rmSync(d, { recursive: true, force: true });
@@ -77,6 +80,8 @@ function testFfw(btf: Buffer): Buffer {
 async function pickFile(page: Page, name: string, buffer: Buffer) {
   await page.getByLabel("Firmware file").setInputFiles({ name, mimeType: "application/octet-stream", buffer });
 }
+/** UPD-28: Update takes a .ffw by hand; the flash tests' images go in one with no parts (the image alone). */
+const pickImage = (page: Page, name: string, btf: Buffer) => pickFile(page, name.replace(/\.btf$/i, ".ffw"), testFfw(btf, false));
 
 const fact = (page: Page, k: string) => page.locator(`[data-k="${k}"]`);
 /** The page's button: "Install again…" when the radio already has that version (the e2e build bundles one). */
@@ -114,7 +119,7 @@ test("firmware: a whole update through the fake bootloader, then connected again
   await openConsole(page, "firmware");
   await allowUnsigned(page); // local, unsigned images (UPD-27)
   await connect(page);
-  await pickFile(page, "ferrite-test.btf", btf);
+  await pickImage(page, "ferrite-test.btf", btf);
   await expect(fact(page, "version")).toHaveText("v9.8.7");
   await expect(fact(page, "blocks")).toHaveText("24");
   // No .minisig: someone's own build, allowed.
@@ -207,40 +212,43 @@ test("firmware: the bundled release, checked by its SHA-256 (Ferrite to the next
   await expect(wizard(page).getByRole("button", { name: "Update", exact: true })).toBeEnabled();
   await wizard(page).getByRole("button", { name: "Cancel" }).click();
   served = testBtf(25); // the file on the server isn't the one the manifest names
-  await page.getByText("Advanced: install a file (.ffw or .btf)").click();
+  await page.getByText("Advanced: install an update file (.ffw)").click();
   await page.getByRole("button", { name: "Back to the latest release" }).click();
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("doesn't match its checksum");
 });
 
-test("firmware: files the checks refuse can't be installed", async ({ page }, info) => {
+test("firmware: files the checks refuse can't be installed; a bare .btf isn't taken at all (UPD-28)", async ({ page }, info) => {
   await openConsole(page, "firmware");
+  await allowUnsigned(page); // the images go in unsigned .ffws: their own checks refuse them (UPD-27 aside)
   await connect(page);
   const refused = page.getByRole("alert", { name: "File refused" });
 
-  await pickFile(page, "stock.btf", testBtf(8, { ferrite: false }));
+  await pickImage(page, "stock.btf", testBtf(8, { ferrite: false }));
   await expect(refused).toContainText("not a Ferrite image");
   await expect(updateButton(page)).toBeDisabled();
 
-  await pickFile(page, "broken.btf", testBtf(8, { tag: false }));
+  await pickImage(page, "broken.btf", testBtf(8, { tag: false }));
   await expect(refused).toContainText("Firmware Error!");
   await shot(page, info, "63-firmware-refused");
 
-  await pickFile(page, "tiny.btf", Buffer.from("not a firmware file"));
+  await pickImage(page, "tiny.btf", Buffer.from("not a firmware file"));
   await expect(refused).toContainText("too short");
 
-  // A .minisig that doesn't verify with Ferrite's key (the core's throwaway test key): refused like a failed check.
-  const minisig = readFileSync(join(import.meta.dirname, "../../core/tests/fixtures/signed-test.btf.minisig"));
-  await page.getByLabel("Firmware file").setInputFiles([
-    { name: "ferrite-test.btf", mimeType: "application/octet-stream", buffer: testBtf(8) },
-    { name: "ferrite-test.btf.minisig", mimeType: "text/plain", buffer: minisig },
-  ]);
-  await expect(refused).toContainText("Bad signature: the signature is from another key, not Ferrite's");
-  await expect(fact(page, "signature")).toHaveText("Doesn't verify");
-  await expect(updateButton(page)).toBeDisabled();
+  // UPD-28: a bare .btf by hand is refused before any check (people used it to go back to stock or to an old
+  // release, and for SSB): the message names where each goes. Even a good Ferrite image.
+  const err = page.getByRole("alert", { name: "Update error" });
+  await pickFile(page, "ferrite-test.btf", testBtf(8));
+  await expect(err).toContainText("Update installs only a Ferrite update file (.ffw)");
+  await expect(err).toContainText("Back to stock");
+  await expect(err).toContainText("Add SSB");
+  await expect(fact(page, "version")).toHaveCount(0); // never checked, never taken: Update offers only the bundled release
+  await pickFile(page, "RT_950Pro_V0.30.BTF", testBtf(8, { ferrite: false }));
+  await expect(err).toContainText("RT_950Pro_V0.30.BTF is a bare firmware image");
+  await expect(fact(page, "version")).toHaveCount(0);
 
-  // Not a .btf at all: refused before the checks; Update would offer only the bundled release, never this file.
+  // Not a firmware file at all: refused before the checks.
   await pickFile(page, "ferrite.bin", testBtf(8));
-  await expect(page.getByRole("alert", { name: "Update error" })).toContainText("not a .ffw or .btf file");
+  await expect(err).toContainText("not a Ferrite update file (.ffw)");
 });
 
 test("firmware: a refused block leaves the radio in the bootloader; Resume finishes without REBOOT", async ({ page }, info) => {
@@ -249,7 +257,7 @@ test("firmware: a refused block leaves the radio in the bootloader; Resume finis
   await openConsole(page, "firmware");
   await allowUnsigned(page); // local, unsigned images (UPD-27)
   await connect(page);
-  await pickFile(page, "ferrite-test.btf", btf);
+  await pickImage(page, "ferrite-test.btf", btf);
   await update(page);
 
   const err = page.getByRole("alert", { name: "Update error" });
@@ -274,7 +282,7 @@ test("firmware: after giving up, the cable opened as it is finds the radio waiti
   await openConsole(page, "firmware");
   await allowUnsigned(page); // local, unsigned images (UPD-27)
   await connect(page);
-  await pickFile(page, "ferrite-test.btf", btf);
+  await pickImage(page, "ferrite-test.btf", btf);
   await update(page);
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("Block 3 of 12", { timeout: 30_000 });
   await page.getByRole("button", { name: "Give up and disconnect" }).click();
@@ -299,7 +307,7 @@ test("firmware: REBOOT refused busy (transmitting) says so and keeps the connect
   await openConsole(page, "firmware");
   await allowUnsigned(page); // local, unsigned images (UPD-27)
   await connect(page);
-  await pickFile(page, "ferrite-test.btf", testBtf(8));
+  await pickImage(page, "ferrite-test.btf", testBtf(8));
   await update(page);
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("transmitting");
   await expect(page.getByRole("status")).toContainText("Connected: Bridge", { timeout: 20_000 });
@@ -313,7 +321,7 @@ test("firmware: a .ffw: unsigned only with the developer option; the image, then
   const btf = testBtf(16);
   await openConsole(page, "firmware");
   await connect(page);
-  await page.getByText("Advanced: install a file (.ffw or .btf)").click();
+  await page.getByText("Advanced: install an update file (.ffw)").click();
   await pickFile(page, "ferrite-test.ffw", testFfw(btf));
   // A local build's file: refused until the developer option is on, then checked again.
   await expect(page.getByRole("alert", { name: "Update error" })).toContainText("unsigned");
@@ -344,7 +352,7 @@ test("firmware: SPI parts cut part way leave the radio half moved (255); install
   const btf = testBtf(16);
   await openConsole(page, "firmware");
   await connect(page);
-  await page.getByText("Advanced: install a file (.ffw or .btf)").click();
+  await page.getByText("Advanced: install an update file (.ffw)").click();
   await page.getByLabel("Allow unsigned files").check();
   await pickFile(page, "ferrite-test.ffw", testFfw(btf));
   // The cable drops everything Console sends for 20 s once the parts are being written.
@@ -375,7 +383,7 @@ test("firmware: one frame lost in the SPI parts: a resync and the parts go on (n
   const btf = testBtf(16);
   await openConsole(page, "firmware");
   await connect(page);
-  await page.getByText("Advanced: install a file (.ffw or .btf)").click();
+  await page.getByText("Advanced: install an update file (.ffw)").click();
   await page.getByLabel("Allow unsigned files").check();
   await pickFile(page, "ferrite-test.ffw", testFfw(btf));
   await page.evaluate(() => {
@@ -418,7 +426,7 @@ test("firmware: an update video that can't load shows nothing, and the update go
   await openConsole(page, "firmware");
   await allowUnsigned(page); // a local, unsigned test image (UPD-27)
   await connect(page);
-  await pickFile(page, "ferrite-test.btf", testBtf(24));
+  await pickImage(page, "ferrite-test.btf", testBtf(24));
   await update(page);
   await expect(page.getByRole("status")).toContainText("Firmware Update holds");
   await expect(page.locator('[data-k="update-video"]')).toHaveCount(0, { timeout: 10_000 });
@@ -435,25 +443,11 @@ test("firmware: the update video's Hide hides it for this update", async ({ page
   await openConsole(page, "firmware");
   await allowUnsigned(page); // a local, unsigned test image (UPD-27)
   await connect(page);
-  await pickFile(page, "ferrite-test.btf", testBtf(24));
+  await pickImage(page, "ferrite-test.btf", testBtf(24));
   await update(page);
   const video = page.locator('[data-k="update-video"]');
   await expect(video).toBeVisible();
   await video.getByRole("button", { name: "Hide" }).click();
   await expect(video).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Update done" })).toBeVisible({ timeout: 45_000 });
-});
-
-test("firmware: an unsigned .btf is refused until Allow unsigned files is ticked (UPD-27)", async ({ page }) => {
-  setMode({});
-  await openConsole(page, "firmware");
-  await connect(page);
-  await pickFile(page, "ferrite-test.btf", testBtf(24));
-  await expect(fact(page, "signature")).toHaveText("Not signed: not a Ferrite release");
-  await expect(updateButton(page)).toBeDisabled();
-  await expect(page.locator(".banner")).toContainText("only a release signed with Ferrite's key installs");
-  await allowUnsigned(page);
-  const pc = page.locator('[data-k="power-cycled"]'); // the simulator says v0.9.4: the power-cycle box too
-  if (await pc.count()) await pc.check();
-  await expect(updateButton(page)).toBeEnabled();
 });

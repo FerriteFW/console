@@ -124,16 +124,16 @@
   {/if}
 
   <details class="card" aria-label="Advanced" open={chosen || undefined}>
-    <summary>Advanced: install a file (.ffw or .btf)</summary>
+    <summary>Advanced: install an update file (.ffw)</summary>
     <div class="row">
       <button class="btn" disabled={firmware.running} onclick={() => fileInput.click()}>Choose a file…</button>
-      <input bind:this={fileInput} type="file" accept=".ffw,.FFW,.btf,.BTF,.minisig" multiple hidden aria-label="Firmware file" onchange={pick} />
+      <input bind:this={fileInput} type="file" accept=".ffw,.FFW" hidden aria-label="Firmware file" onchange={pick} />
       {#if firmware.fileName}<span class="fname">{firmware.fileName}</span>{/if}
       {#if firmware.bundled}
         <button class="btn quiet" disabled={firmware.running} onclick={() => firmware.useBundled()}>Back to the latest release</button>
       {/if}
     </div>
-    <p class="sub hint">A .ffw (a release: the firmware and its SPI parts, signed inside) installs whole. A bare .btf: pick its .minisig with it. Update then installs this file.</p>
+    <p class="sub hint">A Ferrite update file (.ffw: the firmware and its SPI parts, signed inside), such as an earlier release's. Update then installs it. Not a .btf: the stock firmware goes back with <a href="#/restore">Back to stock</a>, and SSB with Add SSB above.</p>
     <label class="opt"><input type="checkbox" checked={firmware.devUnsigned} disabled={firmware.running} onchange={(e) => firmware.setDevUnsigned((e.currentTarget as HTMLInputElement).checked)} aria-label="Allow unsigned files" /> Allow unsigned files (developer: your own builds of Ferrite)</label>
     {#if check}
       <dl class="facts" aria-label="File checks">
