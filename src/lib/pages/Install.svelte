@@ -52,7 +52,7 @@
         <label class="btn">Use a file…<input type="file" accept=".ffw,.FFW,.btf,.BTF,.minisig" multiple hidden aria-label="Ferrite file" onchange={(e) => picked("ferrite", e)} /></label>
         <label class="sub opt"><input type="checkbox" checked={devOpts.allowUnsigned} onchange={(e) => { devOpts.allowUnsigned = (e.currentTarget as HTMLInputElement).checked; I.recheckFerrite(); }} aria-label="Allow unsigned files" /> Allow unsigned files (developer: your own builds of Ferrite)</label>
         {#if I.ferrite && I.ferriteCheck}
-          <p class="sub" data-k="release">Ferrite {I.ferriteCheck.version ?? "(no version)"} ({I.ferriteSource === "bundled" ? "included" : I.ferrite.name}){#if I.ferriteSignature && I.ferriteSignature.kind !== "bad"}. {signatureText(I.ferriteSignature)}{/if}{#if I.ferriteFfw?.parts.length}. SPI parts: {I.ferriteFfw.parts.map((p) => p.file.replace(/^spi\//, "")).join(", ")}{/if}</p>
+          <p class="sub" data-k="release">Ferrite {I.ferriteCheck.version ?? "(no version)"} ({I.ferriteSource === "bundled" ? (I.ferriteFromFeed ? "from ferritefw.dev" : "included") : I.ferrite.name}){#if I.ferriteSignature && I.ferriteSignature.kind !== "bad"}. {signatureText(I.ferriteSignature)}{/if}{#if I.ferriteFfw?.parts.length}. SPI parts: {I.ferriteFfw.parts.map((p) => p.file.replace(/^spi\//, "")).join(", ")}{/if}</p>
         {:else if I.releaseError}
           <p class="warn">{I.releaseError}</p>
         {/if}

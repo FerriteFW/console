@@ -65,6 +65,7 @@ import { cablePrefs } from "./cablePrefs.svelte";
 import { radio } from "./radio.svelte";
 import { sleep, type Transport } from "./transport/types";
 import { appFetch } from "./appfetch";
+import { newerFirmware } from "./updates.svelte";
 import { fdumpReadyRe, FDUMP_RESULT_RE, MDUMP_MARKER_RE, NAK_QUIET_MS, PROMPT_RE, quiet, resultReason, SYNC_WINDOW_MS } from "./readerLines";
 
 /** The reader's fdump rates, fastest first (fdump_proto.py's RATES: the radio's 8 MHz UART makes these exact). */
@@ -420,6 +421,8 @@ class Install {
   ferrite = $state<Picked | null>(null);
   ferriteCheck = $state<FirmwareCheck | null>(null);
   ferriteSource = $state<"bundled" | "file" | "">("");
+  /** INST-15: the release came from ferritefw.dev's feed (the website build carries none of its own). */
+  ferriteFromFeed = $state(false);
   /** The images' minisig signatures (signature.ts): a bad one is also a problem in the image's check. */
   ferriteSignature = $state<Signed | null>(null);
   /** A .ffw's contents (ferrite decision 335): its SPI parts go in once Ferrite runs. Null for a bare .btf. */
@@ -510,6 +513,8 @@ class Install {
         this.release = m.ferrite;
         this.setFerrite({ name: m.ferrite.file, bytes: b }, "bundled", m.ferrite.minisig ?? null);
       }
+    } else {
+      await this.ferriteFromFeedLoad();
     }
     if (m.reader) {
       const b = await this.fetchChecked(m.reader);
@@ -529,9 +534,32 @@ class Install {
   }
 
   /** UPD-15: a bundled file is used only when its SHA-256 is the manifest's. */
-  private async fetchChecked(r: Release): Promise<Uint8Array | null> {
+  /** INST-15: the website build carries no Ferrite release (only the reader and restorer), so Install takes the
+   *  latest from ferritefw.dev's feed, as Update does (UPD-25): its .ffw downloaded, used only when its SHA-256 is
+   *  the feed's, then checked whole (its signature inside, UPD-27). Offline, or a release needing a newer Console:
+   *  said, and a file can still be picked under Advanced. */
+  private async ferriteFromFeedLoad() {
+    const n = await newerFirmware("").catch(() => null);
+    if (!n) {
+      this.releaseError = "Console couldn't get the Ferrite release from ferritefw.dev. Check the connection and reload, or use a file (Advanced).";
+      return;
+    }
+    if (!("usable" in n)) {
+      this.releaseError = `The latest Ferrite needs Console ${n.needsConsole} or newer. Reload this page, or use a file (Advanced).`;
+      return;
+    }
+    const r: Release = { version: n.usable.version, file: n.usable.file, sha256: n.usable.sha256 };
+    const b = await this.fetchChecked(r, n.usable.url);
+    if (b) {
+      this.release = r;
+      this.setFerrite({ name: r.file, bytes: b }, "bundled", null);
+      this.ferriteFromFeed = true;
+    }
+  }
+
+  private async fetchChecked(r: Release, url?: string): Promise<Uint8Array | null> {
     try {
-      const res = await appFetch(`firmware/${r.file}`, { cache: "no-cache" });
+      const res = url ? await fetch(url, { cache: "no-cache" }) : await appFetch(`firmware/${r.file}`, { cache: "no-cache" });
       if (!res.ok) throw new Error(`${r.file}: ${res.status}`);
       const b = new Uint8Array(await res.arrayBuffer());
       if (sha256Hex(b) !== r.sha256.toLowerCase()) {
@@ -540,7 +568,7 @@ class Install {
       }
       return b;
     } catch (e) {
-      this.releaseError = `The bundled ${r.file} didn't load (${(e as Error).message}). Use a file (Advanced).`;
+      this.releaseError = `${url ? "The release" : "The bundled"} ${r.file} didn't load (${(e as Error).message}). Use a file (Advanced).`;
       return null;
     }
   }
@@ -549,6 +577,7 @@ class Install {
    *  whole by the core first (its signature, every hash, each part's target); its image then as a .btf. */
   setFerrite(p: Picked, source: "bundled" | "file", minisig: string | null) {
     this.ferriteOrig = { p, source, minisig };
+    if (source === "file") this.ferriteFromFeed = false; // a re-check of the same release keeps where it came from
     this.ffw?.free();
     this.ffw = null;
     this.ferriteFfw = null;

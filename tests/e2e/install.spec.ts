@@ -2,10 +2,13 @@
 // and its dump (the Rust reader's fdumpz with coded chunks, BACKUP-9.6; hwtest's fdump), and Ferrite's STOCK_RESTORE; the simulator answers HELLO. The backup, saving it, the SSB patch
 // from a synthetic stock file, the install; back to stock; the refusals. Never on a radio: Alex runs the radio checks
 // by hand (docs/TESTING.md).
-import { createZip, readZip } from "../../src/lib/zip";
+import { crc32, createZip, readZip } from "../../src/lib/zip";
 import { type Page, type Route } from "@playwright/test";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { allowUnsigned, expect, onRadio, shot, test } from "./helpers";
 
@@ -225,6 +228,60 @@ test("install: back up, save, install; no SSB file asked for", async ({ page }, 
   expect(rs[1].reader).toBe(false);
   expect(rs[1].errors).toEqual([]);
   expect(rs[1].blocks).toBeLessThan(ferriteBtf.length / 1024 + 9); // no patch bundled (none from the radio)
+});
+
+/** An unsigned .ffw for the feed (firmware.spec's: ferrite's tools/ffw.py packs the image and a text part). */
+function feedFfw(btf: Buffer): Buffer {
+  const ferrite = fileURLToPath(new URL("../../../ferrite", import.meta.url));
+  const d = mkdtempSync(join(tmpdir(), "ferrite-feed-"));
+  const body = Buffer.from("\x01\x00\x00\x00\x08\x00\x00\x02hi", "latin1");
+  const h = Buffer.alloc(32);
+  h.write("FTXT", 0, "latin1");
+  h.writeUInt16LE(1, 4);
+  h.write("e2e0002", 8, "latin1");
+  h.writeUInt32LE(body.length, 24);
+  h.writeUInt32LE(crc32(body) >>> 0, 28);
+  writeFileSync(join(d, "x.btf"), btf);
+  writeFileSync(join(d, "text-en.bin"), Buffer.concat([h, body]));
+  writeFileSync(join(d, "parts.json"), JSON.stringify([{ file: "text-en.bin", magic: "FTXT", addr: 0x090000, max: 0x10000 }]));
+  const r = spawnSync("python3", [`${ferrite}/tools/ffw.py`, "pack", join(d, "x.ffw"), "--btf", join(d, "x.btf"), "--parts", d, "--kind", "tx", "--build", "e2e0002", "--version", "9.8.7"], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`ffw.py: ${r.stderr}`);
+  const b = readFileSync(join(d, "x.ffw"));
+  rmSync(d, { recursive: true, force: true });
+  return b;
+}
+
+/** INST-15 (ferrite#293): the website build carries no Ferrite release, so Install takes ferritefw.dev's feed's, as
+ *  Update does: downloaded, its checksum checked, said to be from ferritefw.dev; offline, it says so. */
+test("install: the website's release comes from the feed (ferrite#293)", async ({ page }) => {
+  const ffw = feedFfw(ferriteBtf);
+  await page.route("**/firmware/**", (route: Route) => {
+    const name = route.request().url().split("/firmware/")[1].split("?")[0];
+    if (name === "manifest.json") return route.fulfill({ json: { reader: { version: "reader", file: "reader-test.btf", sha256: sha(readerBtf) } } });
+    return name === "reader-test.btf" ? route.fulfill({ body: readerBtf, contentType: "application/octet-stream" }) : route.fulfill({ status: 404 });
+  });
+  await page.route("https://ferritefw.dev/releases/latest.json*", (route: Route) =>
+    route.fulfill({
+      json: {
+        format: "ferrite-feed-1",
+        ferrite: { version: "v9.8.7", protocol: 1, file: "ferrite-9.8.7.ffw", url: "https://ferritefw.dev/releases/ferrite-9.8.7.ffw", sha256: sha(ffw) },
+        console: { version: "0.0.1" },
+      },
+    }),
+  );
+  await page.route("https://ferritefw.dev/releases/ferrite-9.8.7.ffw*", (route: Route) => route.fulfill({ body: ffw, contentType: "application/octet-stream" }));
+  await open(page);
+  await allowUnsigned(page); // the test .ffw is a local build's
+  await expect(page.locator('[data-k="release"]')).toContainText("Ferrite v9.8.7");
+  await expect(page.locator('[data-k="release"]')).toContainText("from ferritefw.dev");
+  await expect(page.getByText("No Ferrite image")).toHaveCount(0);
+});
+
+test("install: no bundled release and the feed offline: said, a file still works (ferrite#293)", async ({ page }) => {
+  await page.route("**/firmware/manifest.json*", (route: Route) => route.fulfill({ json: { reader: { version: "reader", file: "reader-test.btf", sha256: sha(readerBtf) } } }));
+  await page.route("https://ferritefw.dev/releases/**", (route: Route) => route.abort());
+  await open(page);
+  await expect(page.getByText("couldn't get the Ferrite release from ferritefw.dev").first()).toBeAttached();
 });
 
 test("install: a refused reader says why on Back up before it is pressed (console#102)", async ({ page }) => {

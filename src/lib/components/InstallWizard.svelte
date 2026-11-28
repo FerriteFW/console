@@ -185,7 +185,7 @@
       <h3>Ready to install</h3>
       <p class="good" data-k="saved">Backup saved: {I.savedWhere}</p>
       {#if I.ferrite && I.ferriteCheck}
-        <p><span data-k="release">Ferrite {I.ferriteCheck.version ?? "(no version)"}</span>{#if I.ferriteSource === "bundled"}<span class="sub">, included with Console, checksum checked</span>{:else}<span class="sub">, from {I.ferrite.name}</span>{/if}</p>
+        <p><span data-k="release">Ferrite {I.ferriteCheck.version ?? "(no version)"}</span>{#if I.ferriteSource === "bundled"}<span class="sub">, {I.ferriteFromFeed ? "downloaded from ferritefw.dev" : "included with Console"}, checksum checked</span>{:else}<span class="sub">, from {I.ferrite.name}</span>{/if}</p>
         <!-- A bad signature is also in the image's problems (the install block says it). -->
         {#if I.ferriteSignature && I.ferriteSignature.kind !== "bad"}
           <p class="sub" data-k="signature">{signatureText(I.ferriteSignature)}</p>
