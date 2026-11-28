@@ -8,7 +8,8 @@
   import { bridgeEnabled } from "../transport/bridge";
   import UpdateWizard from "../components/UpdateWizard.svelte";
   import ReleaseNotes from "../components/ReleaseNotes.svelte";
-  import { CONSOLE_DOWNLOADS } from "../updates.svelte";
+  import { appUpdate, CONSOLE_DOWNLOADS } from "../updates.svelte";
+  import { isTauri } from "../transport/native";
   import { olderThan } from "../version";
   import { ssb } from "../ssb.svelte";
   import { untrack } from "svelte";
@@ -50,6 +51,11 @@
   const down = $derived(firmware.downgrade);
 
   void firmware.loadBundled();
+  // UPD-30 (Alex, Nov 27, 2026): firmware updates only from the latest Console, so a radio never runs a Ferrite newer
+  // than the Console that talks to it. A newer Console out (the desktop updater's or the feed's word): Update waits.
+  // Offline or the feed unread: nothing known, nothing held. A failed update's recovery is never held.
+  void appUpdate.check();
+  const consoleFirst = $derived(appUpdate.version);
 
   const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`;
 
@@ -89,8 +95,22 @@
         <label><input type="checkbox" bind:checked={powerCycled} data-k="power-cycled" /> I turned the radio off for 10 seconds and back on</label>
       </div>
     {/if}
+    {#if consoleFirst}
+      <div class="power" role="alert" data-k="console-first">
+        <strong>Update Console first.</strong>
+        <p>Console {consoleFirst} is out. Ferrite updates only from the latest Console, so the radio and Console always speak the same version.{isTauri() ? "" : " On the web, reload this page."}</p>
+        {#if appUpdate.installable}
+          <button class="btn primary" disabled={appUpdate.busy} onclick={() => appUpdate.install()}>{appUpdate.busy ? "Updating Console…" : `Install Console ${consoleFirst} and restart`}</button>
+          {#if appUpdate.error}<p class="sub">{appUpdate.error}</p>{/if}
+        {:else if isTauri()}
+          <a class="btn primary" href={CONSOLE_DOWNLOADS} target="_blank" rel="noopener">Download Console {consoleFirst}</a>
+        {:else}
+          <button class="btn primary" onclick={() => location.reload()}>Reload</button>
+        {/if}
+      </div>
+    {/if}
     <div class="row">
-      <button class="btn primary" disabled={!latest || (!!check && !ok) || (!!down && "refuse" in down) || (needsPowerCycle && !powerCycled)} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
+      <button class="btn primary" disabled={!!consoleFirst || !latest || (!!check && !ok) || (!!down && "refuse" in down) || (needsPowerCycle && !powerCycled)} onclick={() => (wizard = true)}>{current ? "Install again…" : "Update…"}</button>
       {#if connected && current}<span class="sub">Up to date.</span>{/if}
     </div>
     {#if down}
