@@ -104,6 +104,7 @@
         <li>Ferrite runs on the Radtel RT-950 Pro, and radios built on the same hardware.</li>
         <li>Plug in the programming cable and turn the radio on. It can still run its stock firmware: that's what Install is for.</li>
         <li>Console first backs up the radio's whole flash. Nothing is written until you have saved that file.</li>
+        <li data-k="install-charge"><strong>Charge the radio to over 50% first.</strong> Console can't read the battery of a radio on its stock firmware, and an install that stops part way can leave it without working firmware.</li>
       </ul>
       {#if I.releaseError}<p class="warn">{I.releaseError}</p>{/if}
       {@render err("connect")}

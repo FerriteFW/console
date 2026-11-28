@@ -14,6 +14,7 @@
   import { Eta, etaText } from "../eta";
   import { radio } from "../radio.svelte";
   import { signatureText } from "../signature";
+  import { batteryAllows, batteryCheck } from "../batteryGuard";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -22,6 +23,22 @@
   const onCable = $derived((radio.phase === "connected" || radio.phase === "outdated") && radio.kind === "cable");
   const step = $derived(firmware.stage === "done" ? 3 : firmware.running || firmware.stage === "failed" ? 2 : 1);
   const busy = $derived(firmware.running || radio.phase === "updating");
+
+  // UPD-29 (decision 477): the battery, read when the wizard opens and again on asking; below 50% a warning to
+  // accept, below 30% refused.
+  let pct = $state<number | null>(null);
+  let reading = $state(false);
+  let goOn = $state(false);
+  async function readBattery() {
+    reading = true;
+    pct = await radio.battery();
+    reading = false;
+  }
+  $effect(() => {
+    if (onCable && step === 1) void readBattery();
+  });
+  const battery = $derived(batteryCheck(pct, "updating"));
+  const charged = $derived(batteryAllows(battery, goOn));
 
   // Open with nothing chosen: the bundled release.
   $effect(() => {
@@ -89,9 +106,18 @@
       {#if !onCable}
         <p class="warn">{radio.phase === "connected" || radio.phase === "outdated" ? "Updates need the cable: disconnect, then connect with the cable." : "Connect the radio with the cable first."}</p>
       {/if}
+      {#if onCable && !reading && battery.level !== "ok"}
+        <div class={battery.level === "refuse" ? "err" : "warn"} role="alert" data-k="battery">
+          <p>{battery.text}</p>
+          {#if battery.level === "warn"}
+            <label><input type="checkbox" bind:checked={goOn} data-k="battery-go-on" /> Update at {battery.pct}% anyway</label>
+          {/if}
+          {#if battery.level !== "unknown"}<button class="btn quiet" onclick={() => void readBattery()}>Check again</button>{/if}
+        </div>
+      {/if}
       <div class="row">
         <button class="btn" onclick={close}>Cancel</button>
-        <button class="btn primary" disabled={!ok || !onCable} onclick={() => firmware.start()}>Update</button>
+        <button class="btn primary" disabled={!ok || !onCable || reading || !charged} onclick={() => firmware.start()}>Update</button>
       </div>
     {:else if step === 2}
       <p class="msg" aria-live="polite">{firmware.message || "Starting…"}</p>

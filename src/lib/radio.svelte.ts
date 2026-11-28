@@ -498,6 +498,20 @@ class Radio {
     this.now = stateParse(rec);
   }
 
+  /** UPD-29: the battery in percent by one `STATE` read (the live state's when something already wants it); null
+   *  when it can't be read (not connected, a radio on another link protocol, no answer). */
+  async battery(): Promise<number | null> {
+    const link = this.link;
+    if (!link || this.phase !== "connected") return null;
+    if (this.now) return this.now.battery_pct;
+    try {
+      const rec = await link.ok(P.msg.STATE, new Uint8Array(), 3000);
+      return stateParse(rec)?.battery_pct ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** LINK-67: the whole state by `STATE`. */
   private async readState() {
     const link = this.link;
