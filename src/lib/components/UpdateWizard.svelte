@@ -15,6 +15,7 @@
   import { radio } from "../radio.svelte";
   import { signatureText } from "../signature";
   import { batteryAllows, batteryCheck } from "../batteryGuard";
+  import { appUpdate } from "../updates.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -117,7 +118,7 @@
       {/if}
       <div class="row">
         <button class="btn" onclick={close}>Cancel</button>
-        <button class="btn primary" disabled={!ok || !onCable || reading || !charged} onclick={() => firmware.start()}>Update</button>
+        <button class="btn primary" disabled={!ok || !onCable || reading || !charged || !!appUpdate.version} onclick={() => firmware.start()}>Update</button>
       </div>
     {:else if step === 2}
       <p class="msg" aria-live="polite">{firmware.message || "Starting…"}</p>

@@ -457,3 +457,30 @@ test("firmware: an unsigned .btf is refused until Allow unsigned files is ticked
   if (await pc.count()) await pc.check();
   await expect(updateButton(page)).toBeEnabled();
 });
+
+test("firmware: UPD-30: a newer Console out holds Update until Console is updated; the latest Console updates", async ({ page }) => {
+  setMode({});
+  let consoleLatest = "99.0.0";
+  await page.route("https://ferritefw.dev/releases/latest.json*", (route) =>
+    route.fulfill({
+      json: {
+        format: "ferrite-feed-1",
+        ferrite: { version: "v0.0.1", protocol: 1, file: "x.ffw", url: "https://ferritefw.dev/releases/x.ffw", sha256: "0".repeat(64) },
+        console: { version: consoleLatest },
+      },
+    }),
+  );
+  await openConsole(page, "firmware");
+  await connect(page);
+  const held = page.locator('[data-k="console-first"]');
+  await expect(held).toContainText("Update Console first");
+  await expect(held).toContainText("Console 99.0.0 is out");
+  await expect(page.getByRole("button", { name: /^(Update|Install again)…$/ })).toBeDisabled();
+  await disconnect(page);
+  consoleLatest = "0.0.1"; // this Console is the latest: nothing held
+  await page.reload();
+  await closeWelcome(page);
+  await connect(page);
+  await expect(page.getByRole("heading", { name: "Update Ferrite" })).toBeVisible();
+  await expect(held).toHaveCount(0);
+});
