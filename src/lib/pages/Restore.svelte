@@ -109,7 +109,11 @@
         <label class="check">Type this radio's ID: <input class="mono" type="text" autocomplete="off" spellcheck="false" aria-label="This radio's ID" bind:value={I.restoreTyped} /></label>
       </div>
     {/if}
+    {#if I.restoreBattery !== null && I.restoreStep !== "running" && I.restoreStep !== "done"}
+      <label class="check" data-k="restore-battery"><input type="checkbox" bind:checked={I.restoreBatteryGoOn} /> Go on anyway at {I.restoreBattery}%</label>
+    {/if}
     {#if I.restoreStep !== "done" && I.restoreStep !== "running"}
+      <p class="sub" data-k="restore-charge">Charge the radio to over 50% first: below 30% Console won't start.</p>
       <div class="row">
         <button class="btn primary" disabled={!!I.restoreBlock || I.running} onclick={() => I.restore()}>Back to stock</button>
       </div>

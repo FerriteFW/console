@@ -44,6 +44,7 @@ import {
   restoreStart,
   sha256Hex,
   ssbDescribe,
+  stateParse,
   ssbFromRadio,
   ssbOnRadio,
   statusText,
@@ -60,6 +61,7 @@ import { signatureOf, signatureProblem, splitPicked, type Signed } from "./signa
 import { writeParts } from "./parts";
 import { devOpts } from "./devopts.svelte";
 import { Link, TimeoutError } from "./link";
+import { batteryAllows, batteryCheck } from "./batteryGuard";
 import { installIdProblem, otherRadio, readerProblem as readerProblemOf, restoreProgress, stockOnlyAllowed, uidKey } from "./installGuard";
 import { cablePrefs } from "./cablePrefs.svelte";
 import { radio } from "./radio.svelte";
@@ -460,6 +462,9 @@ class Install {
   /** Console doesn't know the backup's radio: the owner types this radio's ID (this one) to go on. */
   restoreConfirmUid = $state<string | null>(null);
   restoreTyped = $state("");
+  /** BACKUP-7.5: the battery a Back to stock last stopped on (30% to 49%), and the owner's go-ahead at that level. */
+  restoreBattery = $state<number | null>(null);
+  restoreBatteryGoOn = $state(false);
   restoreStep = $state<Step>("idle");
   restoreSummary = $state<RestoreSummary | null>(null);
   /** A failure after the restore wrote: Back to stock must run again (or, BACKUP-8.1, stock alone may finish it). */
@@ -1506,6 +1511,15 @@ class Install {
         const pre = restoreIdCheck(here, this.restoreBackupUid, this.restoreTyped);
         this.restoreConfirmUid = pre.confirm_uid;
         if (pre.problems.length) throw new Error(`${pre.problems.join(" ")} Nothing was written.`);
+      }
+      // BACKUP-7.5 (decision 477): the battery, before anything stops. Unread (an older Ferrite): the page's advice.
+      const pct = await link.ok(P.msg.STATE, new Uint8Array(), 3000).then((r) => stateParse(r)?.battery_pct ?? null, () => null);
+      const charge = batteryCheck(pct, "going back to stock");
+      if (!batteryAllows(charge, this.restoreBatteryGoOn && pct === this.restoreBattery)) {
+        this.restoreBattery = charge.level === "warn" ? charge.pct : null;
+        this.restoreBatteryGoOn = false;
+        const text = "text" in charge ? charge.text : "";
+        throw new Error(`${text}${charge.level === "warn" ? " Or tick “Go on anyway” and start again." : ""} Nothing was written.`);
       }
       started = await link.ask(STOCK_RESTORE, new Uint8Array([OP_START]), 10_000);
       }
